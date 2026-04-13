@@ -68,7 +68,7 @@ nuclei -update-templates
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/swarm.git
+git clone https://github.com/trickMeister1337/swarm.git
 cd swarm
 chmod +x swarm.sh test_swarm.sh
 ```
