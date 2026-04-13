@@ -1,0 +1,32 @@
+# Scan output directories
+scan_*/
+
+# Raw scan data
+*.json
+*.xml
+*.txt
+!test_swarm.sh
+
+# ZAP backup files
+*.swarm_backup
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temporary files
+test_tmp_*/
