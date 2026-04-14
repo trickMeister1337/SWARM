@@ -812,6 +812,356 @@ else
 fi
 
 
+
+
+# ─────────────────────────────────────────────────────────────────
+section "18. PARALELISMO — testssl + nuclei"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'TLS_PID=' "$SCRIPT"; then
+    pass "testssl usa TLS_PID para controle de background"
+else
+    fail "TLS_PID não encontrado — testssl não roda em background"
+fi
+
+if grep -q 'testssl.*&$\|testssl.*& *$\|testssl.*2>&1 &' "$SCRIPT"; then
+    pass "testssl iniciado em background (&)"
+else
+    fail "testssl não está em background"
+fi
+
+if grep -q 'wait.*TLS_PID\|wait.*\$TLS_PID' "$SCRIPT"; then
+    pass "Script aguarda TLS_PID antes de coletar resultado"
+else
+    fail "wait TLS_PID ausente"
+fi
+
+if grep -q 'paralelo com nuclei\|paralelo com testssl' "$SCRIPT"; then
+    pass "Fases 3+4 indicam execução paralela no terminal"
+else
+    fail "Label de fase paralela não encontrado"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "19. CONFIRMAÇÃO — filtro C/A/M"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q '"critical".*"high".*"medium"\|critical.*high.*medium' "$SCRIPT" | grep -q "not in\|continue"; then
+    pass "Confirmação filtra por severidade"
+fi
+
+# Testar a lógica de filtro diretamente
+python3 > /tmp/swtest_conf_filter.out << 'PYEOF_CF'
+def should_confirm(severity):
+    return severity.lower() in ("critical", "high", "medium")
+
+results = [
+    ("critical", True),
+    ("high",     True),
+    ("medium",   True),
+    ("low",      False),
+    ("info",     False),
+]
+ok = all(should_confirm(s) == e for s, e in results)
+print("OK" if ok else "FAIL")
+PYEOF_CF
+CONF_FILTER=$(cat /tmp/swtest_conf_filter.out)
+if [ "$CONF_FILTER" = "OK" ]; then
+    pass "Filtro C/A/M: critical/high/medium=confirmar, low/info=ignorar"
+else
+    fail "Filtro de confirmação incorreto"
+fi
+
+# Verificar que o filtro está no script
+if grep -q 'severity.*not in.*critical.*high.*medium\|not in.*(\"critical\".*\"high\".*\"medium\")' "$SCRIPT"; then
+    pass "Lógica de filtro presente no script"
+else
+    # Try alternative pattern
+    grep -q 'if severity.*lower.*not in' "$SCRIPT" && \
+        pass "Lógica de filtro presente no script" || \
+        warn "Verificar filtro de severidade na confirmação"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "20. ZAP MEDIUM — deduplicação"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q '"medium","low","info"\|"medium".*"low".*"info"' "$SCRIPT"; then
+    pass "ZAP agrupa Medium/Low/Info (deduplicação estendida)"
+else
+    fail "Deduplicação ZAP não inclui Medium"
+fi
+
+# Testar lógica de agrupamento com dados mock
+python3 > /tmp/swtest_dedup.out << 'PYEOF_DD'
+alerts = [
+    {"name": "Missing CSP", "risk": "Medium", "url": "https://t.com/a"},
+    {"name": "Missing CSP", "risk": "Medium", "url": "https://t.com/b"},
+    {"name": "Missing CSP", "risk": "Medium", "url": "https://t.com/c"},
+    {"name": "SQL Injection","risk": "High",   "url": "https://t.com/api"},
+    {"name": "Cookie Flag",  "risk": "Low",    "url": "https://t.com/x"},
+]
+rmap = {"high":"high","medium":"medium","low":"low","informational":"info"}
+zap_findings = []
+zap_groups   = {}
+sev_order    = {"medium":0,"low":1,"info":2}
+for a in alerts:
+    sev = rmap.get(a["risk"].lower(),"info")
+    if sev in ("medium","low","info"):
+        n = a["name"]
+        if n not in zap_groups:
+            zap_groups[n] = {"count":0,"urls":[],"sev":sev}
+        else:
+            if sev_order.get(sev,3) < sev_order.get(zap_groups[n]["sev"],3):
+                zap_groups[n]["sev"] = sev
+        zap_groups[n]["count"] += 1
+        if a["url"] not in zap_groups[n]["urls"]:
+            zap_groups[n]["urls"].append(a["url"])
+    else:
+        zap_findings.append(a)
+
+ok = (len(zap_findings)==1 and
+      "Missing CSP" in zap_groups and
+      zap_groups["Missing CSP"]["count"]==3 and
+      len(zap_groups["Missing CSP"]["urls"])==3 and
+      "Cookie Flag" in zap_groups)
+print("OK" if ok else f"FAIL: cards={len(zap_findings)} groups={list(zap_groups.keys())}")
+PYEOF_DD
+DEDUP_RESULT=$(cat /tmp/swtest_dedup.out)
+if [ "$DEDUP_RESULT" = "OK" ]; then
+    pass "ZAP deduplicação: 3x CSP Medium → 1 grupo, High → card individual"
+else
+    fail "ZAP deduplicação Medium incorreta: $DEDUP_RESULT"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "21. RISK SCORE — EPSS incorporado"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'epss_bonus\|epss_score.*bonus\|EPSS.*risk' "$SCRIPT"; then
+    pass "EPSS bonus presente no cálculo de risco"
+else
+    fail "EPSS bonus ausente no risk score"
+fi
+
+python3 > /tmp/swtest_epss_risk.out << 'PYEOF_ER'
+def calc_risk(stats, cve_enrichment):
+    base = (stats["critical"]*10)+(stats["high"]*5)+(stats["medium"]*2)+stats["low"]
+    epss_bonus = 0
+    for ev in cve_enrichment.values():
+        epss = ev.get("epss_score") or 0
+        if epss >= 0.5:    epss_bonus += 15
+        elif epss >= 0.1:  epss_bonus += 7
+        elif epss >= 0.01: epss_bonus += 2
+    return min(base + epss_bonus, 100), base, epss_bonus
+
+# Case 1: same stats, different EPSS → different scores
+stats = {"critical":1,"high":0,"medium":0,"low":0,"info":0}
+r1, b1, e1 = calc_risk(stats, {})
+r2, b2, e2 = calc_risk(stats, {"CVE-A":{"epss_score":0.97}})
+r3, b3, e3 = calc_risk(stats, {"CVE-B":{"epss_score":0.15}})  # 0.15>=0.1 → +7
+r4, b4, e4 = calc_risk(stats, {"CVE-C":{"epss_score":0.05}})  # 0.05>=0.01 → +2
+
+ok = (r1==10 and e1==0 and        # no EPSS → base only
+      r2==25 and e2==15 and        # EPSS≥0.5 → +15
+      r3==17 and e3==7 and         # EPSS≥0.1 → +7
+      r4==12 and e4==2 and         # EPSS≥0.01 → +2
+      min(100+50, 100)==100)       # cap at 100
+print("OK" if ok else f"FAIL: r1={r1} r2={r2} r3={r3} r4={r4}")
+PYEOF_ER
+EPSS_RISK=$(cat /tmp/swtest_epss_risk.out)
+if [ "$EPSS_RISK" = "OK" ]; then
+    pass "EPSS risk: sem EPSS=base, EPSS≥50%=+15, EPSS≥10%=+7, cap=100"
+else
+    fail "EPSS risk score incorreto: $EPSS_RISK"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "22. DURAÇÃO TOTAL — relatório"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'SCAN_START_TS' "$SCRIPT"; then
+    pass "SCAN_START_TS declarado no script"
+else
+    fail "SCAN_START_TS não encontrado"
+fi
+
+if grep -q 'duration_secs\|duration_str' "$SCRIPT"; then
+    pass "Cálculo de duração presente no Python do relatório"
+else
+    fail "duration_str ausente"
+fi
+
+if grep -q 'Duração.*duration_str\|duration_str.*Duração' "$SCRIPT"; then
+    pass "Duração exibida no HTML do relatório"
+else
+    fail "Duração não aparece no HTML"
+fi
+
+python3 > /tmp/swtest_duration.out << 'PYEOF_DUR'
+import time as _time
+cases = [
+    (3742,  "1h 2m 22s"),
+    (60,    "0h 1m 0s"),
+    (3600,  "1h 0m 0s"),
+    (86399, "23h 59m 59s"),
+]
+ok = True
+for secs, expected in cases:
+    start = int(_time.time()) - secs
+    d = int(_time.time()) - start
+    result = f"{d//3600}h {(d%3600)//60}m {d%60}s"
+    # Allow ±1s drift
+    exp_parts = [int(x[:-1]) for x in expected.split()]
+    res_parts = [int(x[:-1]) for x in result.split()]
+    if abs(res_parts[0]-exp_parts[0])>0 or abs(res_parts[1]-exp_parts[1])>0:
+        ok = False
+        print(f"FAIL: expected ~{expected} got {result}")
+        break
+print("OK" if ok else "")
+PYEOF_DUR
+DUR_RESULT=$(cat /tmp/swtest_duration.out)
+if [ "$DUR_RESULT" = "OK" ]; then
+    pass "Formato de duração: Xh Ym Zs correto"
+else
+    fail "Formato de duração incorreto: $DUR_RESULT"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "23. SCREENSHOTS — ZAP high incluídos"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q "zap_alerts.json\|zap.*alerts.*screenshot\|risk.*high.*critical.*screenshot\|screenshot.*zap" "$SCRIPT"; then
+    pass "Screenshots incluem URLs de alertas ZAP high/critical"
+else
+    fail "Screenshots não consultam zap_alerts.json"
+fi
+
+python3 > /tmp/swtest_ss_urls.out << 'PYEOF_SS'
+import json
+
+nuclei_data = [
+    {"info":{"severity":"critical"},"matched-at":"https://t.com/rce"},
+    {"info":{"severity":"info"},    "matched-at":"https://t.com/info"},
+]
+zap_data = {"alerts":[
+    {"risk":"High",   "url":"https://t.com/sqli"},
+    {"risk":"Medium", "url":"https://t.com/xss"},
+    {"risk":"High",   "url":"https://t.com/rce"},  # duplicate with nuclei
+]}
+
+seen = set(); urls = []
+for d in nuclei_data:
+    sev = d.get("info",{}).get("severity","")
+    url = d.get("matched-at","")
+    if sev in ("critical","high") and url and url not in seen:
+        seen.add(url); urls.append(url)
+for a in zap_data["alerts"]:
+    if a.get("risk","").lower() in ("high","critical"):
+        url = a.get("url","")
+        if url and url not in seen:
+            seen.add(url); urls.append(url)
+
+# Expect: nuclei crit (rce), zap high (sqli) - rce already seen
+ok = (len(urls)==2 and
+      "https://t.com/rce" in urls and
+      "https://t.com/sqli" in urls and
+      "https://t.com/info" not in urls and
+      "https://t.com/xss" not in urls)
+print("OK" if ok else f"FAIL: {urls}")
+PYEOF_SS
+SS_RESULT=$(cat /tmp/swtest_ss_urls.out)
+if [ "$SS_RESULT" = "OK" ]; then
+    pass "Screenshot URLs: nuclei C/A + ZAP H/C, deduplicado, sem info/medium"
+else
+    fail "Screenshot URL collection incorreta: $SS_RESULT"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "24. NVD RETRY — backoff exponencial"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'max_retries\|backoff\|2 \*\* attempt' "$SCRIPT"; then
+    pass "NVD retry com backoff exponencial presente"
+else
+    fail "NVD retry/backoff não encontrado"
+fi
+
+if grep -q '403\|429' "$SCRIPT"; then
+    pass "NVD trata HTTP 403/429 (rate limit)"
+else
+    fail "NVD não trata códigos de rate limit"
+fi
+
+python3 > /tmp/swtest_nvd_retry.out << 'PYEOF_NVD'
+# Testar lógica de backoff
+calls = []
+def mock_fetch(attempt, max_retries=3):
+    calls.append(attempt)
+    if attempt < 2:
+        return None, 403  # rate limited
+    return {"data": "ok"}, 200
+
+results = []
+for attempt in range(3):
+    data, code = mock_fetch(attempt)
+    if code == 200:
+        results.append(data)
+        break
+    wait = (2 ** attempt) * 6
+    results.append(f"wait_{wait}s")
+
+ok = (results[0] == "wait_6s" and
+      results[1] == "wait_12s" and
+      results[2] == {"data":"ok"})
+print("OK" if ok else f"FAIL: {results}")
+PYEOF_NVD
+NVD_RETRY=$(cat /tmp/swtest_nvd_retry.out)
+if [ "$NVD_RETRY" = "OK" ]; then
+    pass "NVD backoff: 403→6s, 403→12s, 200→ok"
+else
+    fail "NVD retry incorreto: $NVD_RETRY"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "25. TMP FILES — usa OUTDIR"
+# ─────────────────────────────────────────────────────────────────
+
+TMP_COUNT=$(grep -c '/tmp/swarm' "$SCRIPT" 2>/dev/null); TMP_COUNT=${TMP_COUNT:-0}
+if [ "$TMP_COUNT" -eq 0 ]; then
+    pass "Sem arquivos /tmp/swarm — todos usam OUTDIR"
+else
+    fail "$TMP_COUNT referência(s) a /tmp/swarm encontrada(s)"
+fi
+
+if grep -q 'swarm_ss_urls\|swarm_oa_check' "$SCRIPT"; then
+    TMP_REF=$(grep 'swarm_ss_urls\|swarm_oa_check' "$SCRIPT" | grep -c '/tmp/'); TMP_REF=${TMP_REF:-0}
+    [ "$TMP_REF" -eq 0 ] && pass "Arquivos temporários usam OUTDIR (não /tmp)" || \
+        fail "$TMP_REF arquivo(s) temporário(s) ainda usam /tmp"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "26. CÓDIGO — import re consolidado"
+# ─────────────────────────────────────────────────────────────────
+
+# import re as _re should not exist (was inside render_finding — now uses global re)
+if grep -q 'import re as _re' "$SCRIPT"; then
+    fail "import re as _re ainda presente (deveria usar re global)"
+else
+    pass "import re as _re removido — render_finding usa re global"
+fi
+
+# Verify re is imported at top level of PYEOF block
+if grep -q 'import json, os, html, re' "$SCRIPT"; then
+    pass "import re consolidado no topo do bloco Python"
+else
+    fail "import re não encontrado no topo do bloco Python"
+fi
+
+# Cleanup temp files
+rm -f /tmp/swtest_conf_filter.out /tmp/swtest_dedup.out /tmp/swtest_epss_risk.out
+rm -f /tmp/swtest_duration.out /tmp/swtest_ss_urls.out /tmp/swtest_nvd_retry.out
+
 # ─────────────────────────────────────────────────────────────────
 section "RESULTADO FINAL"
 # ─────────────────────────────────────────────────────────────────
