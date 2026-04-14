@@ -662,15 +662,14 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                 ev = (a.get("evidence","") or "")[:2000]
                 if a.get("param"): ev = f"Parâmetro: {a['param']}\n{ev}"
                 if a.get("attack"): ev = f"Ataque: {a['attack'][:200]}\n{ev}"
+                # Extrair CVE do campo reference; fallback para CWE
+                _refs = a.get("reference","") or ""
+                _cves = re.findall(r"CVE-\d{4}-\d{4,7}", _refs, re.IGNORECASE)
+                _cve_str = ", ".join(sorted(set(c.upper() for c in _cves))) if _cves \
+                    else f"CWE-{a.get('cweid','N/A')}"
                 f_entry = {"source":"OWASP ZAP","name":a.get("name","Alerta"),
                     "severity":sev,"description":(a.get("description","N/A") or "N/A")[:500],
-                    # Tentar extrair CVE do campo reference; fallback para CWE
-                    _refs = a.get("reference","") or ""
-                    _cves = re.findall(r"CVE-\d{4}-\d{4,7}", _refs, re.IGNORECASE)
-                    _cve_str = ", ".join(sorted(set(c.upper() for c in _cves))) if _cves \
-                        else f"CWE-{a.get('cweid','N/A')}"
                     "cve": f"{_cve_str} | Conf: {a.get('confidence','?')}",
-
                     "url":a.get("url",TARGET),
                     "remediation":a.get("solution","Revisar.") or "Revisar.",
                     "evidence":ev,
