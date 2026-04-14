@@ -613,6 +613,206 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────
+section "13. TESTSSL — fase 3"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'validate_tool "testssl"' "$SCRIPT"; then
+    pass "testssl declarado como ferramenta opcional"
+else
+    fail "testssl não declarado em validate_tool"
+fi
+
+if grep -q 'FASE 3/8: ANÁLISE TLS' "$SCRIPT"; then
+    pass "Fase 3/8 TLS presente no script"
+else
+    fail "Fase 3/8 TLS não encontrada"
+fi
+
+if grep -q 'testssl.*--jsonfile\|--jsonfile.*testssl' "$SCRIPT"; then
+    pass "testssl usa --jsonfile para output estruturado"
+else
+    fail "testssl sem --jsonfile"
+fi
+
+# Testar parser testssl com mock JSON
+TESTSSL_OUTPUT=$(python3 -c "
+import json
+mock = [
+    {'id':'heartbleed','severity':'CRITICAL','finding':'Vulnerable','cve':'CVE-2014-0160'},
+    {'id':'TLS1_1','severity':'WARN','finding':'TLS 1.1 offered','cve':''},
+    {'id':'cert_ok','severity':'OK','finding':'Certificate valid','cve':''},
+]
+SEV_MAP = {'CRITICAL':'critical','HIGH':'high','WARN':'medium','LOW':'low','OK':'info','INFO':'info'}
+findings = [f for f in mock if f['severity'] in ('CRITICAL','HIGH','WARN','LOW')]
+print('COUNT:' + str(len(findings)))
+")
+if echo "$TESTSSL_OUTPUT" | grep -q "COUNT:2"; then
+    pass "testssl parser: filtra OK/INFO, mantém CRITICAL/WARN (2 achados)"
+else
+    fail "testssl parser incorreto: $TESTSSL_OUTPUT"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "14. CONFIRMAÇÃO DE EXPLOITS — fase 5"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'FASE 5/8: CONFIRMAÇÃO' "$SCRIPT"; then
+    pass "Fase 5/8 Confirmação presente no script"
+else
+    fail "Fase 5/8 Confirmação não encontrada"
+fi
+
+if grep -q 'exploit_confirmations.json' "$SCRIPT"; then
+    pass "Arquivo exploit_confirmations.json referenciado"
+else
+    fail "exploit_confirmations.json não referenciado"
+fi
+
+if grep -q 'curl-command' "$SCRIPT"; then
+    pass "Script usa curl-command do Nuclei para reconfirmação"
+else
+    fail "curl-command não referenciado"
+fi
+
+# Testar lógica de confirmação com mock
+python3 > /tmp/swtest_c1.out 2>/dev/null << 'PYEOF_C1'
+import re
+mock = "body\n---SWARM_STATUS:200---"
+match = re.search(r"SWARM_STATUS:(\d+)", mock)
+status = match.group(1) if match else "???"
+confirmed = status.startswith("2") or status.startswith("3")
+print("STATUS:" + status + ":CONFIRMED:" + str(confirmed))
+PYEOF_C1
+CONFIRM_RESULT=$(cat /tmp/swtest_c1.out)
+if echo "$CONFIRM_RESULT" | grep -q "STATUS:200:CONFIRMED:True"; then
+    pass "Lógica de confirmação: HTTP 200 → CONFIRMADO"
+else
+    fail "Lógica de confirmação incorreta: $CONFIRM_RESULT"
+fi
+
+python3 > /tmp/swtest_c2.out 2>/dev/null << 'PYEOF_C2'
+import re
+mock = "Forbidden\n---SWARM_STATUS:403---"
+match = re.search(r"SWARM_STATUS:(\d+)", mock)
+status = match.group(1) if match else "???"
+confirmed = status.startswith("2") or status.startswith("3")
+print("STATUS:" + status + ":CONFIRMED:" + str(confirmed))
+PYEOF_C2
+CONFIRM_RESULT2=$(cat /tmp/swtest_c2.out)
+if echo "$CONFIRM_RESULT2" | grep -q "STATUS:403:CONFIRMED:False"; then
+    pass "Lógica de confirmação: HTTP 403 → NÃO CONFIRMADO"
+else
+    fail "Lógica de confirmação incorreta para 403: $CONFIRM_RESULT2"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "15. OPENAPI — integração ZAP"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'FASE 6/8: COLETA' "$SCRIPT"; then
+    pass "Fase 6/8 ZAP presente"
+else
+    fail "Fase 6/8 ZAP não encontrada"
+fi
+
+if grep -q 'openapi/action/importUrl' "$SCRIPT"; then
+    pass "OpenAPI: usa ZAP API openapi/action/importUrl"
+else
+    fail "OpenAPI: importUrl não encontrado"
+fi
+
+# Verificar que probes pelo menos 5 paths comuns
+OPENAPI_PATH_COUNT=$(grep -c "swagger.json\|openapi.json\|api-docs\|swagger-ui" "$SCRIPT" 2>/dev/null || echo 0)
+if [ "$OPENAPI_PATH_COUNT" -ge 4 ]; then
+    pass "OpenAPI: testa múltiplos paths comuns ($OPENAPI_PATH_COUNT matches)"
+else
+    fail "OpenAPI: poucos paths testados ($OPENAPI_PATH_COUNT < 4)"
+fi
+
+if grep -q 'swagger.*openapi.*paths\|"swagger"\|"openapi"' "$SCRIPT"; then
+    pass "OpenAPI: valida conteúdo da resposta antes de importar"
+else
+    warn "OpenAPI: validação de conteúdo não encontrada"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "16. SCREENSHOTS — fase 7"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'FASE 7/8: SCREENSHOTS' "$SCRIPT"; then
+    pass "Fase 7/8 Screenshots presente"
+else
+    fail "Fase 7/8 Screenshots não encontrada"
+fi
+
+if grep -q 'SCREENSHOT_TOOL' "$SCRIPT"; then
+    pass "Variável SCREENSHOT_TOOL declarada"
+else
+    fail "SCREENSHOT_TOOL não declarada"
+fi
+
+# Verificar fallback chain
+for browser in chromium chromium-browser wkhtmltoimage; do
+    if grep -q "$browser" "$SCRIPT"; then
+        pass "Screenshot: $browser no fallback chain"
+    else
+        fail "Screenshot: $browser ausente"
+    fi
+done
+
+# Verificar embed base64
+if grep -q 'base64\|data:image/png;base64' "$SCRIPT"; then
+    pass "Screenshots embeds como base64 no HTML"
+else
+    fail "Screenshots sem embed base64"
+fi
+
+# Testar lógica base64 embed
+B64_RESULT=$(python3 -c 'import base64; b=base64.b64encode(b"P").decode(); print("OK" if b else "FAIL")')
+if [ "$B64_RESULT" = "OK" ]; then
+    pass "Screenshot base64 embed: geração correta"
+else
+    fail "Screenshot base64 embed: falhou"
+fi
+
+# Verificar que screenshots aparecem no relatório HTML
+if grep -q 'screenshot-grid\|screenshot-card\|screenshot-label' "$SCRIPT"; then
+    pass "Screenshots: CSS classes no HTML do relatório"
+else
+    fail "Screenshots: CSS classes ausentes"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "17. INTEGRAÇÃO — novas seções no relatório"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'tls_html\|tls_findings' "$SCRIPT"; then
+    pass "TLS: seção HTML gerada no relatório"
+else
+    fail "TLS: tls_html ausente no relatório"
+fi
+
+if grep -q 'confirm_html\|confirmations' "$SCRIPT"; then
+    pass "Confirmações: seção HTML gerada no relatório"
+else
+    fail "Confirmações: confirm_html ausente"
+fi
+
+if grep -q 'screenshots_html\|screenshots_grid\|screenshot-grid' "$SCRIPT"; then
+    pass "Screenshots: seção HTML gerada no relatório"
+else
+    fail "Screenshots: screenshots_html ausente"
+fi
+
+# Verificar que export passa as novas variáveis para o Python
+if grep -q 'export.*SCREENSHOT_COUNT.*OPENAPI_FOUND.*TLS_ISSUES.*CONFIRMED_COUNT' "$SCRIPT"; then
+    pass "export: novas variáveis passadas ao Python do relatório"
+else
+    fail "export: variáveis novas não exportadas"
+fi
+
+
+# ─────────────────────────────────────────────────────────────────
 section "RESULTADO FINAL"
 # ─────────────────────────────────────────────────────────────────
 

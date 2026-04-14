@@ -14,7 +14,7 @@
 SWARM is a modular bash script that chains industry-standard security tools into a single automated assessment pipeline. It discovers subdomains, maps the attack surface, scans for vulnerabilities with Nuclei templates, and runs a full OWASP ZAP active scan — then consolidates everything into a clean, self-contained HTML report with full evidence.
 
 ```
-subfinder → httpx + nmap → nuclei → owasp zap → HTML report
+subfinder → httpx + nmap → testssl → nuclei → exploit confirm → owasp zap (+ openapi) → screenshots → HTML report
 ```
 
 ---
@@ -24,12 +24,16 @@ subfinder → httpx + nmap → nuclei → owasp zap → HTML report
 - **Subdomain enumeration** via subfinder with automatic fallback
 - **HTTP surface mapping** — status codes, titles, technology fingerprinting
 - **Port scanning** — common web ports (80, 443, 8080, 8443, 8000, 8888, 3000, 9090)
+- **TLS/SSL analysis** via testssl — cipher suites, protocol versions, certificate issues, CVEs
 - **Vulnerability scanning** via Nuclei (CVE, misconfig, default-login, exposure templates)
+- **Active exploit confirmation** — re-executes each Nuclei curl payload, captures live HTTP response
+- **OpenAPI/Swagger auto-import** — detects spec endpoints and imports into ZAP before scanning
 - **Dynamic analysis** via OWASP ZAP — Spider + Active Scan, runs to 100% completion with no timeout
-- **Full evidence capture** — Nuclei request, response, curl command; ZAP attack/parameter/evidence
+- **Full evidence capture** — request, response, curl command, attack payload, TLS findings
+- **Evidence screenshots** — chromium headless captures target + vulnerable URLs, embedded as base64
 - **Smart deduplication** — Low/Info ZAP alerts grouped by type to reduce noise
 - **Self-contained HTML report** — no external dependencies to open
-- **62-test test harness** included
+- **87-test test harness** included
 
 ---
 
@@ -49,14 +53,16 @@ subfinder → httpx + nmap → nuclei → owasp zap → HTML report
 | `httpx` | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` | HTTP surface mapping |
 | `nmap` | `sudo apt install nmap` | Port + service detection |
 | `nuclei` | `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest` | Template-based vuln scan |
+| `testssl` | `sudo apt install testssl.sh` | TLS/SSL cipher and certificate analysis |
 | `zaproxy` | `sudo apt install zaproxy` | Active web application scan |
+| `chromium` | `sudo apt install chromium` | Evidence screenshots (headless) |
 | `jq` | `sudo apt install jq` | JSON processing |
 
 > **Go tools path:** SWARM automatically adds `~/go/bin` to PATH at startup, so `bash swarm.sh` works without sourcing `.bashrc`.
 
 ### Install all at once (Kali Linux)
 ```bash
-sudo apt update && sudo apt install -y nmap jq zaproxy
+sudo apt update && sudo apt install -y nmap jq zaproxy testssl.sh chromium
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
@@ -68,7 +74,7 @@ nuclei -update-templates
 ## Installation
 
 ```bash
-git clone https://github.com/trickMeister1337/swarm.git
+git clone https://github.com/YOUR_USERNAME/swarm.git
 cd swarm
 chmod +x swarm.sh test_swarm.sh
 ```
@@ -135,13 +141,16 @@ The HTML report is fully self-contained (no external requests). It includes:
 1. **Executive Summary** — severity counters + 0–100 risk score bar
 2. **Attack Surface** — subdomains, active hosts, open ports/services
 3. **Critical / High / Medium findings** — full cards with:
-   - CVE/CWE reference + confidence
+   - CVE reference (extracted from ZAP references) or CWE fallback
    - Vulnerable URL and parameter
    - Attack payload used
    - Full evidence (request, response, curl command)
    - Remediation guidance
-4. **Low / Informational findings** — deduplicated summary table grouped by alert type
-5. **Appendix** — links to raw output files
+4. **TLS/SSL findings** — table from testssl (CRITICAL/HIGH/WARN/LOW severities)
+5. **Exploit confirmations** — live re-execution results for each Nuclei finding
+6. **Evidence screenshots** — base64-embedded captures of target and vulnerable URLs
+7. **Low / Informational findings** — deduplicated summary table grouped by alert type
+8. **Appendix** — links to raw output files
 
 ---
 
@@ -173,7 +182,7 @@ Contributions are welcome. Please:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Run the test harness and ensure all 62 tests pass (`bash test_swarm.sh`)
+3. Run the test harness and ensure all 87 tests pass (`bash test_swarm.sh`)
 4. Submit a pull request with a clear description of the change
 
 ---

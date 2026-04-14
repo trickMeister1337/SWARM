@@ -128,6 +128,18 @@ validate_tool "httpx"     "optional"
 validate_tool "nmap"      "optional"
 validate_tool "nuclei"    "optional"
 validate_tool "zaproxy"   "optional"
+validate_tool "testssl"   "optional"
+
+# Screenshot: detectar melhor ferramenta disponível
+SCREENSHOT_TOOL=""
+for _st in chromium chromium-browser google-chrome wkhtmltoimage; do
+    if command -v "$_st" &>/dev/null; then
+        SCREENSHOT_TOOL="$_st"
+        echo -e "${GREEN}[✓] Screenshot: $_st${NC}"
+        break
+    fi
+done
+[ -z "$SCREENSHOT_TOOL" ] && echo -e "${YELLOW}[○] Nenhuma ferramenta de screenshot disponível${NC}"
 
 _missing_go=()
 for _t in subfinder httpx nuclei; do
@@ -141,7 +153,7 @@ echo ""
 
 # ====================== FASE 1: DESCOBERTA ======================
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 1/5: DESCOBERTA DE SUBDOMÍNIOS${NC}"
+echo -e "${CYAN}  FASE 1/8: DESCOBERTA DE SUBDOMÍNIOS${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 command -v subfinder &>/dev/null && \
@@ -156,7 +168,7 @@ echo -e "${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 2/5: MAPEAMENTO DE SUPERFÍCIE${NC}"
+echo -e "${CYAN}  FASE 2/8: MAPEAMENTO DE SUPERFÍCIE${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ACTIVE_COUNT=0
@@ -184,9 +196,37 @@ else
     echo -e "${YELLOW}[○] nmap não disponível — pulando scan de portas${NC}"
 fi
 
+# ====================== FASE 4: TESTSSL ======================
+echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  FASE 3/8: ANÁLISE TLS (testssl)${NC}"
+echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+TLS_ISSUES=0
+if command -v testssl &>/dev/null; then
+    echo -e "${BLUE}[*] Executando análise TLS...${NC}"
+    testssl --color 0 --warnings off --quiet             --jsonfile "$OUTDIR/raw/testssl.json"             "$DOMAIN" > "$OUTDIR/raw/testssl.log" 2>&1
+    if [ -f "$OUTDIR/raw/testssl.json" ] && [ -s "$OUTDIR/raw/testssl.json" ]; then
+        TLS_ISSUES=$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('$OUTDIR/raw/testssl.json'))
+    # Contar achados com severidade WARN, HIGH, CRITICAL
+    findings = data if isinstance(data, list) else data.get('scanResult',[{}])[0].get('findings',[])
+    issues = [f for f in findings if f.get('severity','') in ('WARN','HIGH','CRITICAL','LOW')]
+    print(len(issues))
+except: print(0)" 2>/dev/null)
+        echo -e "${GREEN}[✓] testssl concluído — $TLS_ISSUES problema(s) TLS detectado(s)${NC}"
+    else
+        echo -e "${YELLOW}[!] testssl sem output JSON — ver testssl.log${NC}"
+    fi
+else
+    echo -e "${YELLOW}[○] testssl não disponível — pulando análise TLS${NC}"
+    echo -e "${YELLOW}    Instale: sudo apt install testssl.sh${NC}"
+fi
+
 # ====================== FASE 3: NUCLEI ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 3/5: SCAN DE VULNERABILIDADES (NUCLEI)${NC}"
+echo -e "${CYAN}  FASE 4/8: SCAN DE VULNERABILIDADES (NUCLEI)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 NUCLEI_COUNT=0
@@ -216,9 +256,106 @@ else
     echo -e "${YELLOW}[○] nuclei não disponível — pulando scan de templates${NC}"
 fi
 
-# ====================== FASE 4: ZAP ======================
+# ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 4/5: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
+echo -e "${CYAN}  FASE 5/8: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
+echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+CONFIRMED_COUNT=0
+if [ -s "$OUTDIR/raw/nuclei.json" ]; then
+    echo -e "${BLUE}[*] Re-executando curl de cada achado para confirmar...${NC}"
+    python3 - "$OUTDIR" << 'PYCONFIRM'
+import json, subprocess, re, sys, os
+from datetime import datetime, timezone
+
+outdir = sys.argv[1]
+nuclei_file = os.path.join(outdir, "raw", "nuclei.json")
+confirm_file = os.path.join(outdir, "raw", "exploit_confirmations.json")
+
+confirmations = []
+with open(nuclei_file, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+            curl_cmd = data.get("curl-command", "")
+            if not curl_cmd:
+                continue
+
+            template_id = data.get("template-id", "unknown")
+            url = data.get("matched-at", "")
+            severity = data.get("info", {}).get("severity", "info")
+
+            # Re-executar com captura de status e resposta
+            safe_cmd = re.sub(
+                r"^curl\s+",
+                "curl -s --max-time 15 -w '\n---SWARM_STATUS:%{http_code}---' ",
+                curl_cmd
+            )
+            print(f"  [>] Confirmando {template_id} em {url[:60]}...")
+            try:
+                result = subprocess.run(
+                    safe_cmd, shell=True,
+                    capture_output=True, text=True, timeout=20
+                )
+                output = result.stdout
+                status_match = re.search(r'---SWARM_STATUS:(\d+)---', output)
+                status = status_match.group(1) if status_match else "???"
+                body = output.split('---SWARM_STATUS:')[0].strip()[:800]
+
+                # Confirmado = resposta 2xx ou 3xx (acesso bem-sucedido)
+                confirmed = status.startswith('2') or status.startswith('3')
+
+                entry = {
+                    "template_id": template_id,
+                    "url": url,
+                    "severity": severity,
+                    "confirmed": confirmed,
+                    "http_status": status,
+                    "response_snippet": body,
+                    "curl_command": curl_cmd,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                confirmations.append(entry)
+                state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
+                print(f"  [{'✓' if confirmed else '!'}] {state} (HTTP {status})")
+
+            except subprocess.TimeoutExpired:
+                confirmations.append({
+                    "template_id": template_id, "url": url,
+                    "severity": severity, "confirmed": False,
+                    "http_status": "TIMEOUT", "response_snippet": "",
+                    "curl_command": curl_cmd,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                print(f"  [!] TIMEOUT")
+
+        except Exception as e:
+            print(f"  [!] Erro ao processar linha: {e}")
+
+with open(confirm_file, "w", encoding="utf-8") as f:
+    json.dump(confirmations, f, ensure_ascii=False, indent=2)
+
+confirmed_n = sum(1 for c in confirmations if c["confirmed"])
+print(f"\n  Resultado: {confirmed_n}/{len(confirmations)} achados confirmados ativamente")
+PYCONFIRM
+
+    CONFIRMED_COUNT=$(python3 -c "
+import json
+try:
+    data = json.load(open('$OUTDIR/raw/exploit_confirmations.json'))
+    print(sum(1 for c in data if c['confirmed']))
+except: print(0)" 2>/dev/null)
+    echo -e "${GREEN}[✓] $CONFIRMED_COUNT exploit(s) confirmado(s) ativamente${NC}"
+else
+    echo -e "${YELLOW}[○] Nenhum achado Nuclei para confirmar${NC}"
+fi
+
+# ====================== FASE 6: ZAP ======================
+echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  FASE 6/8: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ALERT_COUNT=0
@@ -312,6 +449,36 @@ PYFIX
         ENCODED_URL=$(python3 -c \
             "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$TARGET")
 
+        # ── OpenAPI/Swagger: detectar spec e importar no ZAP ────────────
+        echo -e "${BLUE}[*] Verificando OpenAPI/Swagger...${NC}"
+        OPENAPI_FOUND=0
+        OPENAPI_PATHS=("/swagger.json" "/swagger/v1/swagger.json" "/openapi.json"
+                       "/api/swagger.json" "/api/openapi.json" "/api-docs"
+                       "/v1/swagger.json" "/v2/swagger.json" "/v3/swagger.json"
+                       "/swagger-ui/swagger.json" "/docs/swagger.json")
+        for _oapath in "${OPENAPI_PATHS[@]}"; do
+            _oa_url="${TARGET%/}${_oapath}"
+            _oa_resp=$(curl -s --max-time 8 -w "%{http_code}" -o /tmp/swarm_oa_check.tmp "$_oa_url" 2>/dev/null)
+            if echo "$_oa_resp" | grep -q "^2"; then
+                if grep -qE '"swagger"|"openapi"|"paths"' /tmp/swarm_oa_check.tmp 2>/dev/null; then
+                    echo -e "${GREEN}[✓] OpenAPI spec encontrado: $_oapath${NC}"
+                    cp /tmp/swarm_oa_check.tmp "$OUTDIR/raw/openapi_spec.json"
+                    # Importar spec no ZAP via API
+                    _oa_encoded=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$_oa_url")
+                    _oa_result=$(zap_api_call "openapi/action/importUrl" "url=${_oa_encoded}&targetUrl=${ENCODED_URL}")
+                    if echo "$_oa_result" | grep -q "OK\|Result"; then
+                        echo -e "${GREEN}[✓] OpenAPI importado no ZAP — endpoints adicionados ao scan${NC}"
+                        OPENAPI_FOUND=1
+                    else
+                        echo -e "${YELLOW}[!] Import ZAP: $_oa_result${NC}"
+                    fi
+                    break
+                fi
+            fi
+        done
+        rm -f /tmp/swarm_oa_check.tmp
+        [ "$OPENAPI_FOUND" -eq 0 ] && echo -e "${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
+
         echo -e "${BLUE}[*] Iniciando Spider...${NC}"
         SPIDER_ID=$(zap_api_call "spider/action/scan" "url=${ENCODED_URL}" \
                     | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
@@ -342,23 +509,104 @@ else
     echo -e "${YELLOW}[○] ZAP não instalado — pulando fase 4${NC}"
 fi
 
-# ====================== FASE 5: RELATÓRIO ======================
+# ====================== FASE 7: SCREENSHOTS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 5/5: GERAÇÃO DE RELATÓRIO${NC}"
+echo -e "${CYAN}  FASE 7/8: SCREENSHOTS DE EVIDÊNCIA${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT
+mkdir -p "$OUTDIR/raw/screenshots"
+SCREENSHOT_COUNT=0
+
+if [ -n "$SCREENSHOT_TOOL" ]; then
+    echo -e "${BLUE}[*] Capturando screenshots com $SCREENSHOT_TOOL...${NC}"
+
+    # Função de screenshot
+    take_screenshot() {
+        local url=$1 outfile=$2
+        case "$SCREENSHOT_TOOL" in
+            chromium|chromium-browser|google-chrome)
+                "$SCREENSHOT_TOOL" --headless --no-sandbox --disable-gpu \
+                    --disable-dev-shm-usage \
+                    --window-size=1280,800 \
+                    --screenshot="$outfile" \
+                    --timeout=15000 "$url" > /dev/null 2>&1
+                ;;
+            wkhtmltoimage)
+                wkhtmltoimage --quiet --width 1280 --height 800 \
+                    --load-error-handling ignore \
+                    --javascript-delay 2000 \
+                    "$url" "$outfile" > /dev/null 2>&1
+                ;;
+        esac
+        [ -f "$outfile" ] && [ "$(stat -c%s "$outfile" 2>/dev/null || echo 0)" -gt 1000 ]
+    }
+
+    # Capturar alvo principal
+    _ss_file="$OUTDIR/raw/screenshots/main.png"
+    if take_screenshot "$TARGET" "$_ss_file"; then
+        echo -e "${GREEN}[✓] Screenshot: $TARGET${NC}"
+        SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
+    fi
+
+    # Capturar URLs únicas dos achados críticos/altos do Nuclei
+    if [ -s "$OUTDIR/raw/nuclei.json" ]; then
+        python3 -c "
+import json, sys
+seen = set()
+urls = []
+for line in open('$OUTDIR/raw/nuclei.json'):
+    try:
+        d = json.loads(line.strip())
+        sev = d.get('info',{}).get('severity','')
+        url = d.get('matched-at','')
+        if sev in ('critical','high') and url not in seen:
+            seen.add(url); urls.append(url)
+    except: pass
+print('\n'.join(urls[:5]))" > /tmp/swarm_ss_urls.txt 2>/dev/null
+
+        _idx=1
+        while IFS= read -r _ss_url; do
+            [ -z "$_ss_url" ] && continue
+            _ss_out="$OUTDIR/raw/screenshots/finding_${_idx}.png"
+            echo -ne "\r${BLUE}[*] Screenshot finding $_idx: ${_ss_url:0:60}...${NC}"
+            if take_screenshot "$_ss_url" "$_ss_out"; then
+                SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
+            fi
+            _idx=$((_idx + 1))
+        done < /tmp/swarm_ss_urls.txt
+        echo ""
+        rm -f /tmp/swarm_ss_urls.txt
+    fi
+
+    echo -e "${GREEN}[✓] $SCREENSHOT_COUNT screenshot(s) capturado(s)${NC}"
+else
+    echo -e "${YELLOW}[○] Sem ferramenta de screenshot — pulando fase 7${NC}"
+    echo -e "${YELLOW}    Instale: sudo apt install chromium${NC}"
+fi
+
+export SCREENSHOT_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT
+
+# ====================== FASE 5: RELATÓRIO ======================
+echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  FASE 8/8: GERAÇÃO DE RELATÓRIO${NC}"
+echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT SCREENSHOT_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT
 
 python3 << 'PYEOF'
 import json, os, html, re
 from datetime import datetime
 
-OUTDIR       = os.environ.get('OUTDIR','scan_output')
-TARGET       = os.environ.get('TARGET','https://example.com')
-DOMAIN       = os.environ.get('DOMAIN','example.com')
-OPEN_PORTS   = os.environ.get('OPEN_PORTS','N/A')
-ACTIVE_COUNT = os.environ.get('ACTIVE_COUNT','0')
-SUB_COUNT    = os.environ.get('SUB_COUNT','0')
+OUTDIR          = os.environ.get('OUTDIR','scan_output')
+TARGET          = os.environ.get('TARGET','https://example.com')
+DOMAIN          = os.environ.get('DOMAIN','example.com')
+OPEN_PORTS      = os.environ.get('OPEN_PORTS','N/A')
+ACTIVE_COUNT    = os.environ.get('ACTIVE_COUNT','0')
+SUB_COUNT       = os.environ.get('SUB_COUNT','0')
+SCREENSHOT_COUNT = int(os.environ.get('SCREENSHOT_COUNT','0'))
+OPENAPI_FOUND   = os.environ.get('OPENAPI_FOUND','0') == '1'
+TLS_ISSUES      = int(os.environ.get('TLS_ISSUES','0'))
+CONFIRMED_COUNT = int(os.environ.get('CONFIRMED_COUNT','0'))
 errors = []
 
 # Nuclei
@@ -458,6 +706,51 @@ if os.path.exists(nf):
     try: nmap_lines = [l.strip() for l in open(nf) if "open" in l and "/tcp" in l]
     except Exception as e: errors.append(f"nmap: {e}")
 
+# ── testssl ───────────────────────────────────────────────────
+tls_findings = []
+tf = os.path.join(OUTDIR,"raw","testssl.json")
+if os.path.exists(tf) and os.path.getsize(tf) > 0:
+    try:
+        tdata = json.load(open(tf,"r",encoding="utf-8"))
+        findings_raw = tdata if isinstance(tdata,list) else \
+            tdata.get("scanResult",[{}])[0].get("findings",[])
+        SEV_MAP = {"CRITICAL":"critical","HIGH":"high","WARN":"medium","LOW":"low","OK":"info","INFO":"info"}
+        for item in findings_raw:
+            sev_raw = item.get("severity","INFO")
+            sev = SEV_MAP.get(sev_raw.upper(),"info")
+            if sev_raw.upper() in ("CRITICAL","HIGH","WARN","LOW"):
+                tls_findings.append({
+                    "id":   item.get("id",""),
+                    "sev":  sev,
+                    "sev_raw": sev_raw,
+                    "finding": item.get("finding",""),
+                    "cve":  item.get("cve",""),
+                })
+    except Exception as e: errors.append(f"testssl: {e}")
+
+# ── exploit confirmations ─────────────────────────────────────
+confirmations = []
+cf = os.path.join(OUTDIR,"raw","exploit_confirmations.json")
+if os.path.exists(cf) and os.path.getsize(cf) > 0:
+    try: confirmations = json.load(open(cf,"r",encoding="utf-8"))
+    except Exception as e: errors.append(f"confirmations: {e}")
+
+# ── screenshots ───────────────────────────────────────────────
+import base64
+screenshots = []  # list of (label, base64_data)
+ss_dir = os.path.join(OUTDIR,"raw","screenshots")
+if os.path.exists(ss_dir):
+    for fname in sorted(os.listdir(ss_dir)):
+        if fname.endswith(".png"):
+            fpath = os.path.join(ss_dir, fname)
+            try:
+                with open(fpath,"rb") as imgf:
+                    b64 = base64.b64encode(imgf.read()).decode()
+                label = "Alvo Principal" if fname=="main.png" else \
+                    f"Achado #{fname.replace('finding_','').replace('.png','')}"
+                screenshots.append((label, b64))
+            except Exception as e: errors.append(f"screenshot {fname}: {e}")
+
 # Stats — all_f contém Crítico/Alto/Médio completos + representante de cada grupo Low/Info
 all_f = sorted(findings + zap_findings, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
 stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
@@ -529,6 +822,61 @@ errsec = "" if not errors else \
     '<h2>⚠ Avisos</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
     "".join(f"<li><code>{html.escape(e)}</code></li>" for e in errors) + "</ul></div>"
 
+# ── Gerar HTML: TLS ─────────────────────────────────────────
+SEV_TLS_CLASS = {"critical":"tls-critical","high":"tls-high","medium":"tls-warn","low":"tls-warn","info":"tls-ok"}
+if tls_findings:
+    tls_rows = "".join(
+        f'<tr><td style="font-family:monospace;font-size:12px">{html.escape(f["id"])}</td>'
+        f'<td class="{SEV_TLS_CLASS.get(f["sev"],"tls-ok")}">{html.escape(f["sev_raw"])}</td>'
+        f'<td>{html.escape(f["finding"])}</td>'
+        f'<td>{html.escape(f["cve"] or "—")}</td></tr>'
+        for f in tls_findings
+    )
+    tls_html = f'''<h2>TLS / SSL — {len(tls_findings)} problema(s) detectado(s)</h2>
+    <table>
+      <tr style="background:#f5f5f5"><th>ID</th><th>Severidade</th><th>Achado</th><th>CVE</th></tr>
+      {tls_rows}
+    </table>'''
+else:
+    tls_html = ""
+
+# ── Gerar HTML: Confirmações de Exploit ──────────────────────
+if confirmations:
+    conf_rows = "".join(
+        f'<tr>'
+        f'<td style="font-family:monospace;font-size:12px">{html.escape(c["template_id"])}</td>'
+        f'<td><code>{html.escape(c["url"])}</code></td>'
+        f'<td style="text-align:center"><span class="{"confirm-yes" if c["confirmed"] else "confirm-no"}">'
+        f'{"✓ CONFIRMADO" if c["confirmed"] else "— NÃO CONF."}</span></td>'
+        f'<td style="text-align:center"><code>{html.escape(c["http_status"])}</code></td>'
+        f'<td><div class="evidence-box" style="max-height:80px;overflow:hidden">{html.escape(c["response_snippet"][:200]) if c["response_snippet"] else "—"}</div></td>'
+        f'</tr>'
+        for c in confirmations
+    )
+    n_conf = sum(1 for c in confirmations if c["confirmed"])
+    confirm_html = f'''<h2>Confirmação Ativa de Exploits — {n_conf}/{len(confirmations)} confirmados</h2>
+    <p style="color:#666;font-size:13px">Cada achado Nuclei foi re-executado com o curl original para verificar se a vulnerabilidade permanece ativa.</p>
+    <table>
+      <tr style="background:#f5f5f5"><th>Template</th><th>URL</th><th>Status</th><th>HTTP</th><th>Resposta (amostra)</th></tr>
+      {conf_rows}
+    </table>'''
+else:
+    confirm_html = ""
+
+# ── Gerar HTML: Screenshots ──────────────────────────────────
+if screenshots:
+    ss_cards = "".join(
+        f'<div class="screenshot-card">'
+        f'<div class="screenshot-label">{html.escape(label)}</div>'
+        f'<img src="data:image/png;base64,{b64}" alt="{html.escape(label)}" loading="lazy">'
+        f'</div>'
+        for label, b64 in screenshots
+    )
+    screenshots_html = f'''<h2>Screenshots de Evidência ({len(screenshots)} captura(s))</h2>
+    <div class="screenshot-grid">{ss_cards}</div>'''
+else:
+    screenshots_html = ""
+
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
 <title>SWARM — {html.escape(DOMAIN)}</title><style>
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
@@ -553,6 +901,14 @@ th{{background:#f5f5f5;font-weight:600}}h2{{color:#1a3a4f;border-bottom:2px soli
 .risk-bar{{background:{scol};height:12px;border-radius:4px;width:{risk}%}}
 code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
     .evidence-box{{background:#2d3436;color:#dfe6e9;padding:10px 14px;font-family:monospace;font-size:12px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all}}
+    .tls-ok{{color:#27ae60;font-weight:bold}}.tls-warn{{color:#d4833a;font-weight:bold}}
+    .tls-high{{color:#b34e4e;font-weight:bold}}.tls-critical{{color:#7a2e2e;font-weight:bold}}
+    .confirm-yes{{background:#27ae60;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
+    .confirm-no{{background:#95a5a6;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
+    .screenshot-grid{{display:flex;flex-wrap:wrap;gap:16px;margin:16px 0}}
+    .screenshot-card{{border:1px solid #ddd;border-radius:8px;overflow:hidden;max-width:100%}}
+    .screenshot-card img{{width:100%;display:block}}
+    .screenshot-label{{padding:8px 12px;background:#f5f5f5;font-size:13px;font-weight:600;color:#1a3a4f}}
 </style></head><body><div class="container">
 <div class="header"><h1>SWARM — Relatório de Segurança</h1>
 <p>Alvo: <strong>{html.escape(TARGET)}</strong> | Domínio: {html.escape(DOMAIN)}</p>
@@ -569,7 +925,8 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <p><strong>Pontuação de Risco (0–100):</strong> {risk}</p>
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
 <p><strong>Total:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
-<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP</p></div>
+<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}{"+ Screenshots" if screenshots else ""}</p>
+<p><strong>Exploits confirmados:</strong> {CONFIRMED_COUNT} ativamente verificados</p></div>
 <h2>2. Superfície de Ataque</h2>
 <table>
 <tr><th style="width:220px">Subdomínios descobertos</th><td>{SUB_COUNT}</td></tr>
@@ -578,6 +935,15 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <h3>Subdomínios Ativos (httpx)</h3><table><tr><th>Resultado</th></tr>{trows(httpx_lines,"httpx não executado ou sem resultados")}</table>
 <h3>Portas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado")}</table>
 <h2>3. Vulnerabilidades Encontradas</h2>{vhtml}
+
+<!-- TLS Section -->
+{tls_html}
+
+<!-- Exploit Confirmations -->
+{confirm_html}
+
+<!-- Screenshots -->
+{screenshots_html}
 {errsec}
 {low_table_html}
 <h2>5. Anexos</h2><div class="info-box"><ul>
@@ -586,7 +952,12 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <li><code>raw/nmap.txt</code> — Scan de portas</li>
 <li><code>raw/nuclei.json</code> — Resultados Nuclei</li>
 <li><code>raw/zap_alerts.json</code> — Alertas ZAP</li>
-<li><code>raw/zap_evidencias.xml</code> — Relatório ZAP XML</li></ul>
+<li><code>raw/zap_evidencias.xml</code> — Relatório ZAP XML</li>
+{"<li><code>raw/testssl.json</code> — Análise TLS</li>" if os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}
+{"<li><code>raw/exploit_confirmations.json</code> — Confirmações de exploit</li>" if confirmations else ""}
+{"<li><code>raw/openapi_spec.json</code> — OpenAPI spec importada</li>" if OPENAPI_FOUND else ""}
+{"<li><code>raw/screenshots/</code> — Screenshots de evidência</li>" if screenshots else ""}
+</ul>
 <p>Recomenda-se validação manual de todos os achados.</p></div></div>
 <div class="footer"><p><strong>CONFIDENCIAL — USO INTERNO AUTORIZADO</strong></p>
 <p>SWARM — Automated Security Scanner</p></div></div></body></html>"""
