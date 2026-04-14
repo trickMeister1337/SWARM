@@ -1,4 +1,4 @@
-# 🕷️ SWARM
+# 🕷️ SWARM - Security Workflow and Risk Management
 
 > Automated web security scanner — subfinder + httpx + nmap + Nuclei + OWASP ZAP, unified into a single HTML report.
 
