@@ -812,20 +812,14 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                     "param":(a.get("param","") or ""),
                     "attack":(a.get("attack","") or "")[:500],
                     "other":(a.get("other","") or "")[:500]}
-                # Medium/Low/Info: agrupar por nome para deduplicar alertas repetidos
-                # Critical/High: sempre card individual (cada instância importa)
-                if sev in ("medium","low","info"):
+                # Apenas Low/Info: agrupar por nome (deduplicar)
+                # Critical/High/Medium: sempre card individual com evidência completa
+                if sev in ("low","info"):
                     name = a.get("name","Alerta")
                     if name not in zap_low_groups:
                         zap_low_groups[name] = {"count":0,"urls":[],"finding":f_entry,
                             "cve": _cve_str, "conf":a.get("confidence","?"),
                             "sev": sev}
-                    else:
-                        # Manter o finding de maior severidade como representante
-                        sev_order = {"medium":0,"low":1,"info":2}
-                        if sev_order.get(sev,3) < sev_order.get(zap_low_groups[name]["sev"],3):
-                            zap_low_groups[name]["finding"] = f_entry
-                            zap_low_groups[name]["sev"] = sev
                     zap_low_groups[name]["count"] += 1
                     url = a.get("url","")
                     if url and url not in zap_low_groups[name]["urls"]:
@@ -905,9 +899,9 @@ all_f = sorted(findings + zap_findings, key=lambda x: {"critical":0,"high":1,"me
 stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
 for f in all_f:
     if f["severity"] in stats: stats[f["severity"]] += 1
-# Contabilizar os agrupados de Medium/Low/Info
+# Contabilizar os agrupados de Low/Info
 for grp in zap_low_groups.values():
-    sev = grp.get("sev", grp["finding"]["severity"])
+    sev = grp["finding"]["severity"]
     if sev in stats: stats[sev] += grp["count"]
 total = sum(stats.values())
 # Risk score base: contagem ponderada por severidade

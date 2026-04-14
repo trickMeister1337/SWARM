@@ -886,10 +886,16 @@ fi
 section "20. ZAP MEDIUM — deduplicação"
 # ─────────────────────────────────────────────────────────────────
 
-if grep -q '"medium","low","info"\|"medium".*"low".*"info"' "$SCRIPT"; then
-    pass "ZAP agrupa Medium/Low/Info (deduplicação estendida)"
+if grep -q '"low","info"' "$SCRIPT"; then
+    pass "ZAP agrupa apenas Low/Info — Medium recebe card individual"
 else
-    fail "Deduplicação ZAP não inclui Medium"
+    fail "Lógica de agrupamento ZAP não encontrada"
+fi
+
+if grep -q '# Apenas Low/Info' "$SCRIPT"; then
+    pass "Comentário correto: Medium/High/Critical sempre card individual"
+else
+    warn "Comentário de agrupamento não encontrado"
 fi
 
 # Testar lógica de agrupamento com dados mock
@@ -920,18 +926,34 @@ for a in alerts:
     else:
         zap_findings.append(a)
 
-ok = (len(zap_findings)==1 and
-      "Missing CSP" in zap_groups and
-      zap_groups["Missing CSP"]["count"]==3 and
-      len(zap_groups["Missing CSP"]["urls"])==3 and
-      "Cookie Flag" in zap_groups)
-print("OK" if ok else f"FAIL: cards={len(zap_findings)} groups={list(zap_groups.keys())}")
+# Medium should be individual cards, only Low/Info grouped
+rmap2 = {'high':'high','medium':'medium','low':'low','informational':'info'}
+zap_findings2 = []
+zap_groups2 = {}
+for a in alerts:
+    sev = rmap2.get(a['risk'].lower(),'info')
+    if sev in ('low','info'):
+        n = a['name']
+        if n not in zap_groups2:
+            zap_groups2[n] = {'count':0,'urls':[]}
+        zap_groups2[n]['count'] += 1
+        if a['url'] not in zap_groups2[n]['urls']:
+            zap_groups2[n]['urls'].append(a['url'])
+    else:
+        zap_findings2.append(a)
+
+# Expect: High=1 card, Medium=3 cards, Low=1 group (Cookie)
+ok = (len(zap_findings2)==4 and            # 1 High + 3 Medium = 4 cards
+      "Missing CSP" not in zap_groups2 and # Medium NOT grouped
+      "Cookie Flag" in zap_groups2 and     # Low IS grouped
+      zap_groups2["Cookie Flag"]["count"]==1)
+print("OK" if ok else f"FAIL: cards={len(zap_findings2)} groups={list(zap_groups2.keys())}")
 PYEOF_DD
 DEDUP_RESULT=$(cat /tmp/swtest_dedup.out)
 if [ "$DEDUP_RESULT" = "OK" ]; then
-    pass "ZAP deduplicação: 3x CSP Medium → 1 grupo, High → card individual"
+    pass "ZAP deduplicação: 3x CSP Medium → 3 cards individuais, Low/Info → agrupados"
 else
-    fail "ZAP deduplicação Medium incorreta: $DEDUP_RESULT"
+    fail "ZAP deduplicação incorreta: $DEDUP_RESULT"
 fi
 
 # ─────────────────────────────────────────────────────────────────
