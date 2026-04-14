@@ -1,4 +1,4 @@
-# 🕷️ SWARM - Security Workflow and Risk Management
+# 🕷️ SWARM
 
 > Automated web security scanner — subfinder + httpx + nmap + testssl + Nuclei + OWASP ZAP, unified into a single self-contained HTML report.
 
@@ -14,7 +14,9 @@
 SWARM is a modular bash script that chains industry-standard security tools into a single automated assessment pipeline. It discovers subdomains, maps the attack surface, analyzes TLS, scans for vulnerabilities with Nuclei templates, actively confirms exploits, and runs a full OWASP ZAP active scan — then consolidates everything into a clean, self-contained HTML report with full evidence and screenshots.
 
 ```
-subfinder → httpx + nmap → testssl → nuclei → exploit confirm → owasp zap (+ openapi) → screenshots → HTML report
+subfinder → httpx + nmap → testssl ┐
+                                    ├─ paralelo ─ nuclei → exploit confirm (C/A/M only)
+owasp zap (+ openapi) → screenshots → HTML report
 ```
 
 ---
@@ -26,14 +28,18 @@ subfinder → httpx + nmap → testssl → nuclei → exploit confirm → owasp 
 - **Port scanning** — common web ports (80, 443, 8080, 8443, 8000, 8888, 3000, 9090)
 - **TLS/SSL analysis** via testssl — cipher suites, protocol versions, certificate issues, CVEs
 - **Vulnerability scanning** via Nuclei (CVE, misconfig, default-login, exposure templates)
-- **Active exploit confirmation** — re-executes each Nuclei curl payload, captures live HTTP response
+- **Active exploit confirmation** — re-executes Nuclei curl for Critical/High/Medium findings only
 - **OpenAPI/Swagger auto-import** — detects spec endpoints and imports into ZAP before scanning
 - **Dynamic analysis** via OWASP ZAP — Spider + Active Scan, runs to 100% completion with no timeout
 - **Full evidence capture** — request, response, curl command, attack payload, TLS findings
-- **Evidence screenshots** — chromium headless captures target + vulnerable URLs, embedded as base64
-- **Smart deduplication** — Low/Info ZAP alerts grouped by type to reduce noise
+- **Evidence screenshots** — captures target + vulnerable URLs from both Nuclei and ZAP, embedded as base64
+- **Smart deduplication** — Medium/Low/Info ZAP alerts grouped by type; Critical/High always individual cards
+- **EPSS-weighted risk score** — probability of exploitation (FIRST.org) incorporated into 0–100 risk score
+- **Scan duration** — total elapsed time shown in report header and executive summary
+- **Parallel TLS + vuln scan** — testssl runs in background while Nuclei scans, saving 15–25 minutes
+- **NVD retry with backoff** — handles rate limiting gracefully with exponential backoff (6s, 12s, 24s)
 - **Self-contained HTML report** — no external dependencies to open
-- **87-test test harness** included
+- **110-test test harness** included
 
 ---
 
@@ -129,7 +135,7 @@ chromium --version 2>/dev/null || chromium-browser --version 2>/dev/null || echo
 ```bash
 bash test_swarm.sh
 ```
-All 87 tests must pass before running against a live target.
+All 110 tests must pass before running against a live target.
 
 ### Run a scan
 ```bash
@@ -189,10 +195,10 @@ The HTML report is fully self-contained (no external requests). Sections:
 1. **Executive Summary** — severity counters + 0–100 risk score bar
 2. **Attack Surface** — subdomains, active hosts, open ports/services
 3. **Critical / High / Medium findings** — full cards with CVE, URL, parameter, attack payload, full evidence
-4. **TLS/SSL findings** — table from testssl (CRITICAL / HIGH / WARN / LOW)
-5. **Exploit confirmations** — live re-execution results per Nuclei finding
-6. **Evidence screenshots** — base64-embedded captures of target and vulnerable URLs
-7. **Low / Informational findings** — deduplicated summary table grouped by alert type
+4. **TLS/SSL findings** — testssl results (CRITICAL / HIGH / WARN / LOW)
+5. **Exploit confirmations** — live re-execution for Critical/High/Medium Nuclei findings
+6. **Evidence screenshots** — base64-embedded captures from Nuclei + ZAP high/critical URLs
+7. **Medium/Low/Info findings** — deduplicated table grouped by alert type; preserves highest severity representative
 8. **Appendix** — links to all raw output files
 
 ---
@@ -243,7 +249,7 @@ SWARM manages the full ZAP lifecycle automatically:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Ensure all 87 tests pass: `bash test_swarm.sh`
+3. Ensure all 110 tests pass: `bash test_swarm.sh`
 4. Submit a pull request with a clear description
 
 ---
