@@ -5,10 +5,11 @@
 ![Python](https://img.shields.io/badge/Python-3.8+-3776AB?logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Kali%20%7C%20Ubuntu-557C94?logo=linux&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
----
 
 
+
 ---
+
 
 ## Architecture
 
