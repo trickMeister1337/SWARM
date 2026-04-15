@@ -604,10 +604,56 @@ PYFIX
                     | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
         wait_for_zap_progress "spider/view/status" "${SPIDER_ID:-0}" "$ZAP_SPIDER_TIMEOUT" "Spider"
 
+        # ── Verificar quantas URLs o Spider coletou ──────────────────────
+        SPIDER_URLS=$(zap_api_call "spider/view/results" "scanId=${SPIDER_ID:-0}" \
+                      | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('results',[])))" 2>/dev/null || echo 0)
+        echo -e "${BLUE}[*] Spider coletou ${SPIDER_URLS} URL(s) para o active scan${NC}"
+
+        if [ "${SPIDER_URLS:-0}" -eq 0 ]; then
+            echo -e "${YELLOW}[!] Spider não coletou URLs — adicionando target manualmente ao contexto ZAP${NC}"
+            zap_api_call "core/action/accessUrl" "url=${ENCODED_URL}" > /dev/null 2>&1
+            sleep 3
+        fi
+
+        # ── Iniciar Active Scan com validação ────────────────────────────
         echo -e "${BLUE}[*] Iniciando Active Scan...${NC}"
-        SCAN_ID=$(zap_api_call "ascan/action/scan" "url=${ENCODED_URL}&recurse=true" \
-                  | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
-        wait_for_zap_progress "ascan/view/status" "${SCAN_ID:-0}" "$ZAP_SCAN_TIMEOUT" "Active Scan"
+        SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${ENCODED_URL}&recurse=true" 2>/dev/null)
+        SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
+
+        if [ -z "$SCAN_ID" ] || [ "$SCAN_ID" = "0" ] || ! [[ "$SCAN_ID" =~ ^[0-9]+$ ]]; then
+            echo -e "${YELLOW}[!] Active scan não iniciou (SCAN_ID='${SCAN_ID}') — resposta: ${SCAN_RESPONSE:0:200}${NC}"
+            echo -e "${YELLOW}[!] Coletando alertas do spider e pulando active scan${NC}"
+        else
+            echo -e "${GREEN}[✓] Active Scan iniciado (ID: $SCAN_ID)${NC}"
+
+            # Aguardar até 90s para scan sair de 0% — detecta scan travado
+            _stuck_elapsed=0
+            _stuck_limit=90
+            _stuck=0
+            echo -ne "${YELLOW}[*] Verificando se active scan progrediu...${NC}"
+            while [ $_stuck_elapsed -lt $_stuck_limit ]; do
+                sleep 10; _stuck_elapsed=$((_stuck_elapsed + 10))
+                _progress=$(zap_api_call "ascan/view/status" "scanId=${SCAN_ID}" 2>/dev/null \
+                    | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',0))" 2>/dev/null || echo 0)
+                echo -ne "\r${YELLOW}[*] Active Scan: ${_progress}% (${_stuck_elapsed}s aguardando início)${NC}"
+                if [ "${_progress:-0}" -gt 0 ]; then
+                    _stuck=0; break
+                fi
+                _stuck=1
+            done
+            echo ""
+
+            if [ "$_stuck" -eq 1 ]; then
+                echo -e "${YELLOW}[!] Active scan travado em 0% por ${_stuck_limit}s — possíveis causas:${NC}"
+                echo -e "${YELLOW}    • Alvo bloqueou conexões do scanner${NC}"
+                echo -e "${YELLOW}    • ZAP sem URLs no contexto para escanear${NC}"
+                echo -e "${YELLOW}    • Alvo exige autenticação para todas as rotas${NC}"
+                echo -e "${YELLOW}[!] Abortando active scan e coletando alertas disponíveis${NC}"
+                zap_api_call "ascan/action/stop" "scanId=${SCAN_ID}" > /dev/null 2>&1
+            else
+                wait_for_zap_progress "ascan/view/status" "${SCAN_ID}" "$ZAP_SCAN_TIMEOUT" "Active Scan"
+            fi
+        fi
 
         echo -e "${BLUE}[*] Coletando alertas...${NC}"
         curl -s "http://${ZAP_HOST}:${ZAP_PORT}/JSON/core/view/alerts/" \
