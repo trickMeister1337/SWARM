@@ -1,299 +1,146 @@
-# 🕷️ SWARM
+🐝 SWARM - Consultant Edition
+Ferramenta automatizada de avaliação de segurança para aplicações web
 
-> Automated web security scanner — 9-phase pipeline from subdomain discovery to JS secrets analysis, delivering a single self-contained HTML report in Portuguese, designed for both security analysts and tech leads.
+https://img.shields.io/badge/license-MIT-blue.svg
+https://img.shields.io/badge/shell-bash-green.svg
+https://img.shields.io/badge/tools-nuclei%2520%257C%2520zap%2520%257C%2520nmap%2520%257C%2520testssl-blue
 
-![Bash](docs/badges/bash.svg)
-![Python](docs/badges/python.svg)
-![Platform](docs/badges/platform.svg)
-![Tests](docs/badges/tests.svg)
-![License](docs/badges/license.svg)
+SWARM é um orquestrador de segurança que integra ferramentas populares (Nuclei, OWASP ZAP, Nmap, testssl, httpx, subfinder) em um fluxo automatizado de reconhecimento, varredura de vulnerabilidades, coleta de evidências e geração de relatórios executivos. Projetado para consultores de segurança e equipes red team.
 
----
+✨ Funcionalidades
+Descoberta de subdomínios com subfinder
 
-## Architecture
+Mapeamento de superfície com httpx e nmap
 
-![SWARM Architecture](docs/architecture.svg)
+Análise TLS/SSL com testssl.sh (rodando em paralelo)
 
----
+Varredura de vulnerabilidades com nuclei (tags: cve, tech, exposure, misconfig)
 
-## What SWARM Does
+Confirmação ativa de exploits – reexecuta os achados do Nuclei com curl original
 
-SWARM chains 10+ industry-standard security tools into a single automated command. One execution covers subdomain discovery, surface mapping, TLS analysis, vulnerability scanning, exploit confirmation, dynamic application testing, JavaScript secret detection, evidence screenshots, and CVE enrichment — producing a single report in Portuguese optimized for tech leads.
+Enriquecimento CVE/EPSS – consulta NVD e FIRST.org para CVSS e probabilidade de exploração
 
-### Who It's For
+Scan ativo com OWASP ZAP – spider + active scan, com suporte a OpenAPI/Swagger
 
-| Role | What they get |
-|---|---|
-| **Security analyst** | Full evidence (raw HTTP request/response, curl commands), CVSS + EPSS scores, deduplication, TLS findings |
-| **Tech lead** | Plain-language impact statements, specific fix guidance per technology, prioritized 3-horizon action plan |
-| **Security manager** | 0–100 risk index (weighted by EPSS exploitation probability), scan duration, executive summary |
+Captura de screenshots (Chromium headless / wkhtmltoimage) do alvo e de URLs críticas
 
----
+Análise de JavaScript – extrai secrets, endpoints, frameworks vulneráveis e comentários sensíveis
 
-## What SWARM Covers
+Relatório HTML executivo com:
 
-### Reconnaissance
-- **Subdomain enumeration** — subfinder with automatic fallback to main domain
-- **HTTP surface mapping** — active hosts, status codes, page titles, technology fingerprinting (httpx)
-- **Port scanning** — web-relevant ports: 80, 443, 8000, 8080, 8443, 8888, 3000, 9090
+Índice de risco (0–100)
 
-### TLS / SSL
-- Protocol version support (SSLv3, TLS 1.0/1.1/1.2/1.3)
-- Cipher suite weaknesses
-- Certificate validity, chain issues, HSTS
-- Known CVEs (Heartbleed, POODLE, BEAST, ROBOT, etc.)
-- CRITICAL / HIGH / WARN / LOW severity classification
+Tabela de vulnerabilidades por severidade (Critical/High/Medium/Low/Info)
 
-### Vulnerability Scanning (Nuclei)
-- **CVE templates** — known vulnerabilities in specific software versions
-- **Default credentials** — admin panels, management interfaces (Node-RED, Grafana, Jupyter, etc.)
-- **Misconfiguration** — exposed configs, debug endpoints, stack traces
-- **Exposure** — open S3 buckets, Git repos, backup files, sensitive paths
-- **Active exploit confirmation** — re-runs curl from Nuclei's finding to verify it's still exploitable
+Planos de ação por prazo (imediato, sprint, backlog)
 
-### Dynamic Analysis (OWASP ZAP)
-- **Spider** — crawls all reachable pages
-- **OpenAPI/Swagger auto-import** — detects and imports API specs before scanning
-- **Active scan** — injection attacks, XSS, CSRF, authentication bypasses, IDOR patterns
-- **Smart deduplication** — one card per alert type with list of all affected URLs
-- **CWE-based severity reclassification** — overrides ZAP's severity with CVSS synthetic score from 37-entry CWE table
+Evidências completas (requisições/respostas)
 
-### CVE Intelligence
-- **NVD lookup** — CVSS v3 score and official description for each CVE
-- **EPSS score** — probability of exploitation in next 30 days (FIRST.org)
-- **Risk score weighting** — EPSS incorporated into 0–100 index (high EPSS = higher score)
-- **Retry with exponential backoff** — handles NVD rate limiting (6s → 12s → 24s)
+Capturas de tela e confirmações de exploits
 
-### JavaScript & Secret Detection
-- **JS file discovery** — crawls pages for `<script src>`, webpack chunks, dynamic imports
-- **20 secret patterns**: AWS keys, Google API keys, GitHub/GitLab tokens, OpenAI/Anthropic keys, JWT tokens, Stripe keys, Firebase configs, database connection strings, private keys, Slack tokens, hardcoded passwords, internal network URLs
-- **Framework detection** — React, Angular, Vue.js, jQuery, Next.js with version extraction
-- **Vulnerable version alerts** — flags known-vulnerable framework versions with CVE
-- **Endpoint extraction** — fetches URLs from `axios`, `fetch`, `http.get` calls
-- **Active endpoint probing** — tests extracted endpoints, identifies APIs accessible without auth
-- **Sensitive comment detection** — TODO/FIXME/password in source comments
+📦 Pré‑requisitos
+Ferramenta	Obrigatória	Instalação (Ubuntu/Debian)
+bash	✅	já instalado
+curl	✅	sudo apt install curl
+python3	✅	sudo apt install python3
+subfinder	❌	go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+httpx	❌	go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+nmap	❌	sudo apt install nmap
+nuclei	❌	go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+zaproxy	❌	sudo apt install zaproxy (ou baixe do site oficial)
+testssl.sh	❌	sudo apt install testssl.sh
+chromium / wkhtmltoimage	❌	sudo apt install chromium ou wkhtmltopdf
+Nota: As ferramentas Go (subfinder, httpx, nuclei) exigem go instalado e o diretório $HOME/go/bin no PATH. O script tenta adicionar automaticamente.
 
-### Report (in Portuguese 🇧🇷)
-- **All severity labels in PT-BR** — CRÍTICO / ALTO / MÉDIO / BAIXO / INFO
-- **Impact statement** per finding — plain-language description of what an attacker can do
-- **Fix guidance** — technology-specific remediation (not just ZAP boilerplate)
-- **Reclassification badge** — shows when CWE/CVE changed ZAP's original severity
-- **Action plan for tech leads** — 3 horizons: this week / next sprint / 30-day backlog
-- **Evidence screenshots** — base64-embedded, opens without external files
-- **Scan duration** shown in header and executive summary
-
----
-
-## What SWARM Does NOT Cover
-
-Being explicit about scope helps set correct expectations:
-
-| Gap | Why | Workaround |
-|---|---|---|
-| **Authenticated scanning** | ZAP runs without session tokens | Pass Bearer token via ZAP config manually |
-| **Backend dependency analysis (SCA)** | No access to `package.json`, `pom.xml` etc. | Use Snyk, Dependabot, or OWASP Dependency Check separately |
-| **Subdomain takeover** | Not in current scope | Add `nuclei -tags takeover` manually |
-| **Social engineering / phishing** | Out of scope by design | — |
-| **Network-layer attacks** | Web application focus only | Use separate network scanner |
-| **Internal services behind VPN** | Requires network access | Run from inside the network |
-
----
-
-## Installation
-
-### Kali Linux
-
-```bash
-# 1. System packages
-sudo apt update && sudo apt install -y \
-    curl python3 python3-pip jq nmap git \
-    zaproxy testssl chromium golang-go
-
-# 2. Python dependencies
-pip3 install requests pdfminer.six --break-system-packages
-
-# 3. Go tools
-go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-nuclei -update-templates
-
-# 4. PATH
-echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc && source ~/.bashrc
-```
-
-### Ubuntu / WSL
-
-```bash
-# 1. System packages
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y \
-    curl python3 python3-pip jq nmap git \
-    zaproxy testssl chromium-browser golang-go
-
-# 2. Python dependencies
-pip3 install requests pdfminer.six --break-system-packages
-
-# 3. Go tools
-go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-nuclei -update-templates
-
-# 4. PATH + WSL headless mode
-echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
-echo 'export DISPLAY=""' >> ~/.bashrc
-echo 'export JAVA_TOOL_OPTIONS="-Djava.awt.headless=true"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-> **WSL tip:** if `testssl` is not found, try `sudo apt install testssl.sh`.
-> For npm global packages without sudo: `mkdir ~/.npm-global && npm config set prefix '~/.npm-global' && echo 'export PATH=$PATH:~/.npm-global/bin' >> ~/.bashrc`
-
-### Clone
-
-```bash
-git clone https://github.com/trickMeister1337/swarm.git
+🚀 Instalação
+bash
+# Clone o repositório
+git clone https://github.com/seu-usuario/swarm.git
 cd swarm
-chmod +x swarm.sh test_swarm.sh
-```
 
-### Verify
+# Dê permissão de execução
+chmod +x swarm.sh
 
-```bash
-for tool in curl python3 jq nmap subfinder httpx nuclei testssl zaproxy; do
-    command -v $tool &>/dev/null && echo "[OK] $tool" || echo "[--] $tool not found"
-done
-chromium --version 2>/dev/null || chromium-browser --version 2>/dev/null
-```
+# (Opcional) Instale as dependências Go
+go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+🎯 Uso
+bash
+./swarm.sh <URL_ALVO>
+Exemplo:
 
----
+bash
+./swarm.sh https://example.com
+O script cria um diretório scan_example.com_YYYYMMDD_HHMMSS/ com todos os resultados.
 
-## Usage
+Variáveis de ambiente (customização)
+Variável	Padrão	Descrição
+ZAP_PORT	8080	Porta do daemon do ZAP
+NUCLEI_RATE_LIMIT	50	Requisições por segundo no Nuclei
+NUCLEI_CONCURRENCY	10	Concorrência do Nuclei
+ZAP_SPIDER_TIMEOUT	0	Timeout (s) para o spider (0 = sem timeout)
+ZAP_SCAN_TIMEOUT	0	Timeout (s) para o active scan (0 = sem timeout)
+Exemplo de execução com limite maior:
 
-```bash
-# Validate first (133 tests)
-bash test_swarm.sh
+bash
+NUCLEI_RATE_LIMIT=100 ./swarm.sh https://target.com
+📁 Estrutura de saída
+text
+scan_dominio_timestamp/
+├── relatorio_swarm.html          # Relatório HTML executivo
+├── raw/
+│   ├── subdomains.txt            # Subdomínios descobertos
+│   ├── httpx_results.txt         # Hosts ativos + tech detect
+│   ├── nmap.txt                  # Portas abertas e serviços
+│   ├── nuclei.json               # Achados brutos do Nuclei (JSONL)
+│   ├── zap_alerts.json           # Alertas do ZAP
+│   ├── zap_evidencias.xml        # Relatório XML do ZAP
+│   ├── testssl.json              # Resultados do testssl
+│   ├── cve_enrichment.json       # Dados NVD/EPSS para CVEs encontrados
+│   ├── exploit_confirmations.json # Confirmação ativa de exploits
+│   ├── openapi_spec.json         # Spec OpenAPI/Swagger (se encontrada)
+│   ├── js_analysis.json          # Secrets, endpoints, frameworks
+│   ├── js_files/                 # Arquivos JS baixados (hash.md5.js)
+│   └── screenshots/              # PNGs de evidência
+⚙️ Fluxo de trabalho (9 fases)
+Descoberta de subdomínios – subfinder
 
-# Run full scan
-bash swarm.sh https://target.com
-```
+Mapeamento de superfície – httpx + nmap
 
-### Output structure
+Análise TLS (testssl) – roda em paralelo com a fase 4
 
-```
-scan_target.com_20260415_091522/
-├── relatorio_swarm.html            ← open in any browser, works offline
-└── raw/
-    ├── subdomains.txt              ← subfinder
-    ├── httpx_results.txt           ← active hosts + technologies
-    ├── nmap.txt                    ← port scan
-    ├── testssl.json                ← TLS/SSL analysis
-    ├── nuclei.json                 ← Nuclei findings (JSONL)
-    ├── exploit_confirmations.json  ← active verification results
-    ├── cve_enrichment.json         ← CVSS + EPSS data from NVD/FIRST
-    ├── zap_alerts.json             ← OWASP ZAP alerts (JSON)
-    ├── zap_evidencias.xml          ← full ZAP report (XML)
-    ├── openapi_spec.json           ← imported API spec (if found)
-    ├── js_urls.txt                 ← discovered JS files
-    ├── js_analysis.json            ← secrets, endpoints, frameworks
-    ├── js_files/                   ← downloaded JS for forensic analysis
-    └── screenshots/
-        └── main.png                ← critical findings only
-```
+Varredura Nuclei – tags cve,tech,exposure,default-login,misconfig
 
----
+Confirmação ativa de exploits – reexecuta curl de cada achado Nuclei
 
-## Report Sections
+Enriquecimento CVE/EPSS – API NVD e FIRST.org
 
-The HTML report is fully self-contained. All content in Portuguese (BR), evidence fields preserved in original language.
+OWASP ZAP – spider, active scan, importação OpenAPI
 
-| # | Section | Content |
-|---|---|---|
-| 1 | Sumário Executivo | Risk index 0–100 (CVSS + EPSS weighted), severity counters, scan duration |
-| 2 | Superfície de Ataque | Subdomains, active hosts, open ports |
-| 3 | Vulnerabilidades Identificadas | Cards with CVE, CVSS, EPSS, impact statement, fix guidance, full evidence |
-| 4 | TLS / SSL | testssl findings with severity and CVE |
-| 5 | Confirmação Ativa de Exploits | Live curl re-execution results per Nuclei finding |
-| 6 | JS / Secrets | Detected secrets (masked), framework versions, exposed endpoints |
-| 7 | Screenshots | Base64-embedded screenshots of critical findings |
-| 8 | Achados Baixo / Info | Deduplicated table grouped by alert type |
-| 9 | Plano de Ação | 3-horizon action plan: this week / next sprint / 30-day backlog |
-| 10 | Arquivos de Evidência | Links to all raw output files |
+Screenshots – alvo principal + URLs críticas
 
----
+Análise JavaScript – extração de secrets, endpoints, frameworks
 
-## Configuration
+Geração do relatório HTML – incluindo plano de ação e evidências
 
-```bash
-# Top of swarm.sh
-ZAP_PORT=8080
-ZAP_HOST="127.0.0.1"
-ZAP_SPIDER_TIMEOUT=0       # 0 = no timeout
-ZAP_SCAN_TIMEOUT=0         # 0 = no timeout
-NUCLEI_RATE_LIMIT=50       # req/s — lower for sensitive targets
-NUCLEI_CONCURRENCY=10      # parallel templates
-```
+O ZAP é iniciado automaticamente em modo daemon e finalizado ao término do script (a menos que já estivesse em execução).
 
-| Environment | Rate limit |
-|---|---|
-| Production / sensitive | 20–30 |
-| Staging (default) | 50 |
-| Internal lab | 100–150 |
+🛡️ Aviso legal
+ATENÇÃO: Esta ferramenta deve ser utilizada APENAS em ambientes autorizados (aplicações de sua propriedade, com permissão por escrito do proprietário, ou em laboratórios de estudo). O uso não autorizado é ilegal e pode violar leis de proteção de dados, invasão de sistemas e direitos de propriedade intelectual. O autor não se responsabiliza por mau uso.
 
----
+🤝 Contribuição
+Pull requests são bem‑vindos! Para mudanças maiores, abra uma issue primeiro para discutir o que você gostaria de modificar.
 
-## Tool Reference
+Fork o projeto
 
-| Tool | Phase | Role | Required |
-|---|---|---|---|
-| `curl` | All | HTTP requests, ZAP API | ✅ Mandatory |
-| `python3` | All | Analysis + report | ✅ Mandatory |
-| `subfinder` | 1 | Subdomain discovery | Optional |
-| `httpx` | 2 | HTTP surface mapping | Optional |
-| `nmap` | 2 | Port + service detection | Optional |
-| `testssl` | 3 | TLS/SSL analysis | Optional |
-| `nuclei` | 4 | Template-based vuln scan | Optional |
-| `zaproxy` | 6 | Dynamic application scan | Optional |
-| `chromium` | 7 | Evidence screenshots | Optional |
-| `jq` | Misc | JSON processing | Optional |
+Crie sua branch (git checkout -b feature/nova-feature)
 
-> SWARM automatically adds `~/go/bin` to PATH — no need to source `.bashrc` before running.
+Commit suas mudanças (git commit -m 'Adiciona nova feature')
 
----
+Push para a branch (git push origin feature/nova-feature)
 
-## How ZAP Integration Works
+Abra um Pull Request
 
-SWARM manages the full ZAP lifecycle:
-
-- Checks for pre-existing instance — reuses if found, starts new if not
-- Kills stale instances, removes `~/.ZAP/zap.lock`
-- Patches `~/.ZAP/config.xml` to authorize API from `127.0.0.1`
-- Detects and imports OpenAPI/Swagger specs before spidering
-- Spider → Active Scan with polling every 10s until **100% complete**
-- Deduplicates alerts by name: one card per alert type with all affected URLs
-- Reclassifies severity using CWE→CVSS table (37 entries, based on NVD historical data)
-- Shuts down only if SWARM started it — preserves pre-existing sessions
-
----
-
-## Legal Disclaimer
-
-> **SWARM is intended for authorized security testing only.**
->
-> Use against systems you do not own or have explicit written permission to test is illegal and unethical. The authors assume no liability for misuse. Always obtain proper authorization before conducting security assessments.
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Ensure all 133 tests pass: `bash test_swarm.sh`
-4. Submit a pull request with a clear description
-
----
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
+📄 Licença
+Distribuído sob a licença MIT. Veja LICENSE para mais informações.
