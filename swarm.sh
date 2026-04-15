@@ -154,7 +154,7 @@ echo ""
 
 # ====================== FASE 1: DESCOBERTA ======================
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 1/8: DESCOBERTA DE SUBDOMÍNIOS${NC}"
+echo -e "${CYAN}  FASE 1/9: DESCOBERTA DE SUBDOMÍNIOS${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 command -v subfinder &>/dev/null && \
@@ -169,7 +169,7 @@ echo -e "${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 2/8: MAPEAMENTO DE SUPERFÍCIE${NC}"
+echo -e "${CYAN}  FASE 2/9: MAPEAMENTO DE SUPERFÍCIE${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ACTIVE_COUNT=0
@@ -199,7 +199,7 @@ fi
 
 # ====================== FASES 3+4: TESTSSL + NUCLEI (paralelo) ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 3/8: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
+echo -e "${CYAN}  FASE 3/9: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 TLS_ISSUES=0
@@ -218,7 +218,7 @@ fi
 
 # ====================== FASE 4: NUCLEI ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 4/8: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
+echo -e "${CYAN}  FASE 4/9: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 NUCLEI_COUNT=0
@@ -267,7 +267,7 @@ fi
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 5/8: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
+echo -e "${CYAN}  FASE 5/9: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 CONFIRMED_COUNT=0
@@ -475,7 +475,7 @@ fi
 
 # ====================== FASE 6: ZAP ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 6/8: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
+echo -e "${CYAN}  FASE 6/9: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ALERT_COUNT=0
@@ -631,7 +631,7 @@ fi
 
 # ====================== FASE 7: SCREENSHOTS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 7/8: SCREENSHOTS DE EVIDÊNCIA${NC}"
+echo -e "${CYAN}  FASE 7/9: SCREENSHOTS DE EVIDÊNCIA${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 mkdir -p "$OUTDIR/raw/screenshots"
@@ -721,12 +721,215 @@ fi
 
 export SCREENSHOT_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT
 
-# ====================== FASE 5: RELATÓRIO ======================
+# ====================== FASE 8: JS ANALYSIS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 8/8: GERAÇÃO DE RELATÓRIO${NC}"
+echo -e "${CYAN}  FASE 8/9: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT SCREENSHOT_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS
+JS_SECRETS=0
+JS_ENDPOINTS=0
+JS_FRAMEWORKS=0
+JS_FILES=0
+
+python3 - "$OUTDIR" "$TARGET" "$DOMAIN" << 'PYJS'
+import urllib.request, urllib.parse, re, os, sys, json, ssl, hashlib, time
+from pathlib import Path
+
+OUTDIR, TARGET, DOMAIN = sys.argv[1], sys.argv[2], sys.argv[3]
+os.makedirs(os.path.join(OUTDIR,"raw","js_files"), exist_ok=True)
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+HEADERS = {"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0"}
+
+def fetch(url, timeout=15):
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            return r.read().decode("utf-8", errors="replace"), r.status
+    except Exception as e:
+        return None, str(e)
+
+def normalize(url, base):
+    if not url or url.startswith(("data:","javascript:","mailto:","#")): return None
+    if url.startswith("//"): return base.split("://")[0] + ":" + url
+    if url.startswith("/"):
+        p = urllib.parse.urlparse(base)
+        return f"{p.scheme}://{p.netloc}{url}"
+    if not url.startswith("http"): return urllib.parse.urljoin(base, url)
+    return url
+
+# ── Fase 8a: Descoberta de arquivos JS ───────────────────────────
+pages = {TARGET}
+extra = ["/","/login","/app","/dashboard","/api/docs/","/swagger-ui/"]
+parsed = urllib.parse.urlparse(TARGET)
+for path in extra:
+    pages.add(f"{parsed.scheme}://{parsed.netloc}{path}")
+
+crawled, js_urls = set(), set()
+MAX_PAGES = 8
+count = 0
+
+while pages and count < MAX_PAGES:
+    url = pages.pop()
+    if url in crawled: continue
+    crawled.add(url); count += 1
+    content, status = fetch(url)
+    if not content: continue
+    # Extract <script src>
+    for m in re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', content, re.IGNORECASE):
+        u = normalize(m.group(1), url)
+        if u and DOMAIN in u: js_urls.add(u)
+    # Webpack chunks
+    for m in re.finditer(r'["\']([^"\']*\.(?:js|chunk\.js)(?:\?[^"\']*)?)["\']', content):
+        u = normalize(m.group(1), url)
+        if u and DOMAIN in u: js_urls.add(u)
+    # Links for next pages
+    for m in re.finditer(r'<a[^>]+href=["\']([^"\']+)["\']', content, re.IGNORECASE):
+        u = normalize(m.group(1), url)
+        if u and DOMAIN in u and not u.endswith((".js",".css",".png",".jpg",".ico")):
+            pu = urllib.parse.urlparse(u)
+            pages.add(f"{pu.scheme}://{pu.netloc}{pu.path}")
+
+js_list = sorted(js_urls)
+with open(os.path.join(OUTDIR,"raw","js_urls.txt"),"w") as f:
+    f.write("\n".join(js_list))
+print(f"  [✓] {len(js_list)} arquivo(s) JS descoberto(s)")
+
+# ── Fase 8b: Download e detecção de secrets ──────────────────────
+SECRET_PATTERNS = [
+    (r'(?i)(?:api[_\-\.]?key|apikey|access[_-]?key)\s*[:=]\s*["\']([A-Za-z0-9_\-]{20,})["\']', "API Key"),
+    (r'AKIA[0-9A-Z]{16}', "AWS Access Key"),
+    (r'(?i)aws[_\-]?secret[_\-]?(?:access[_\-]?)?key\s*[:=]\s*["\']([A-Za-z0-9/+]{40})["\']', "AWS Secret"),
+    (r'arn:aws:[a-zA-Z0-9\-]+:[a-z0-9\-]*:[0-9]{12}:[^\s"\']+', "AWS ARN"),
+    (r'AIza[0-9A-Za-z\-_]{33,}', "Google API Key"),
+    (r'ghp_[A-Za-z0-9]{36}', "GitHub Token"),
+    (r'glpat-[A-Za-z0-9_\-]{20}', "GitLab PAT"),
+    (r'sk-proj-[A-Za-z0-9_\-]{20,}', "OpenAI Key"),
+    (r'sk-ant-[A-Za-z0-9_\-]{20,}', "Anthropic Key"),
+    (r'sk-[A-Za-z0-9]{48}', "OpenAI Legacy"),
+    (r'eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}', "JWT Token"),
+    (r'sk_live_[A-Za-z0-9]{24,}', "Stripe Live Key"),
+    (r'["\']AIzaSy[A-Za-z0-9_\-]{33}["\']', "Firebase Key"),
+    (r'(?i)(?:mongodb|postgres|mysql|redis|amqp)://[^\s"\'<>]{10,}', "DB Connection String"),
+    (r'(?i)(?:password|passwd|pwd)\s*[:=]\s*["\']([^"\']{8,64})["\']', "Hardcoded Password"),
+    (r'(?i)(?:secret[_\-]?key|client[_-]?secret)\s*[:=]\s*["\']([A-Za-z0-9_\-]{16,})["\']', "Secret Key"),
+    (r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----', "Private Key"),
+    (r'xox[baprs]-[A-Za-z0-9\-]{10,}', "Slack Token"),
+    (r'https?://(?:localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})[^\s"\'<>]*', "URL Rede Interna"),
+    (r'https?://[a-zA-Z0-9\-\.]+\.(?:internal|local|corp|lan|intranet|dev|staging|hml)[^\s"\'<>]*', "Domínio Interno"),
+]
+ENDPOINT_PATTERNS = [
+    r'(?:fetch|axios|http\.(?:get|post|put|delete|patch))\s*\(["\']([^"\']+)["\']',
+    r'(?:url|endpoint|baseUrl|apiUrl|API_URL)\s*[:=]\s*["\']([^"\']{5,})["\']',
+    r'["\']/(api|v\d+|graphql|rest|admin|auth|user|users|token|tokens|upload|webhook)[^"\'<>\s]{0,100}["\']',
+]
+FRAMEWORK_PATTERNS = [
+    (r'[Rr]eact["\s\.]+[vV]?ersion["\s:]+["\']?(\d+\.\d+[\.\d]*)', "React"),
+    (r'[Aa]ngular["\s\.]+[vV]?ersion["\s:]+["\']?(\d+\.\d+[\.\d]*)', "Angular"),
+    (r'[Vv]ue(?:\.js)?["\s\.]+[vV]?ersion["\s:]+["\']?(\d+\.\d+[\.\d]*)', "Vue.js"),
+    (r'jquery["\s]+v?(\d+\.\d+[\.\d]*)', "jQuery"),
+    (r'axios["\s\/]+(\d+\.\d+[\.\d]*)', "Axios"),
+    (r'next(?:js)?["\s\.]+[vV]?ersion["\s:]+["\']?(\d+\.\d+[\.\d]*)', "Next.js"),
+]
+VULN_VERSIONS = {
+    "jQuery": [("< 3.5.0", lambda v: tuple(int(x) for x in v.split(".")[:3]) < (3,5,0), "XSS via HTML parsing", "CVE-2020-11022")],
+    "React":  [("< 16.13.0", lambda v: tuple(int(x) for x in v.split(".")[:2]) < (16,13), "SSR XSS", "CVE-2018-6341")],
+}
+FP_WORDS = {"example","placeholder","your-key","your_key","xxx","dummy","test","sample","foo","bar","changeme"}
+
+all_secrets, all_endpoints, all_frameworks, all_comments, js_stats = [], set(), [], [], []
+
+for js_url in js_list:
+    print(f"  [>] {js_url[:80]}")
+    content, status = fetch(js_url)
+    if not content: continue
+    fname = hashlib.md5(js_url.encode()).hexdigest()[:8] + ".js"
+    fpath = os.path.join(OUTDIR,"raw","js_files",fname)
+    with open(fpath,"w",encoding="utf-8") as f: f.write(content)
+    js_stats.append({"url":js_url,"size_kb":len(content)//1024,"file":fname})
+
+    for pattern, label in SECRET_PATTERNS:
+        for m in re.finditer(pattern, content, re.IGNORECASE|re.MULTILINE):
+            val = m.group(0)
+            if any(fp in val.lower() for fp in FP_WORDS): continue
+            line_start = content.rfind("\n", 0, m.start())+1
+            line_end = content.find("\n", m.end()); line_end = len(content) if line_end==-1 else line_end
+            ctx = content[line_start:line_end].strip()[:200]
+            all_secrets.append({"url":js_url,"file":fname,"type":label,"value":val[:120],"context":ctx})
+
+    for pat in ENDPOINT_PATTERNS:
+        for m in re.finditer(pat, content, re.IGNORECASE):
+            ep = (m.group(1) if m.lastindex else m.group(0)).strip("\"'")
+            if len(ep) > 3: all_endpoints.add(ep)
+
+    for pat, name in FRAMEWORK_PATTERNS:
+        m = re.search(pat, content, re.IGNORECASE)
+        if m:
+            ver = m.group(1) if m.lastindex else "?"
+            vulns = []
+            for vrange, checker, detail, cve in VULN_VERSIONS.get(name,[]):
+                try:
+                    if checker(ver): vulns.append({"range":vrange,"detail":detail,"cve":cve})
+                except: pass
+            all_frameworks.append({"framework":name,"version":ver,"url":js_url,"vulnerable":bool(vulns),"vulns":vulns})
+
+    for cp in [r'//.*(?:TODO|FIXME|password|secret|api.?key|credential|token)[^\n]*',
+               r'/\*[^*]*(?:password|secret|credential)[^*]*\*/']:
+        for m in re.finditer(cp, content, re.IGNORECASE):
+            all_comments.append({"url":js_url,"comment":m.group(0).strip()[:200]})
+
+    time.sleep(0.2)
+
+# ── Fase 8c: Verificação de endpoints ────────────────────────────
+parsed_t = urllib.parse.urlparse(TARGET)
+base = f"{parsed_t.scheme}://{parsed_t.netloc}"
+probed = []
+for ep in list(all_endpoints)[:30]:
+    url = (base + ep) if ep.startswith("/") else (base+"/"+ep if not ep.startswith("http") else ep)
+    try:
+        req = urllib.request.Request(url, headers=HEADERS, method="GET")
+        req.add_unredirected_header("Accept","application/json,text/html,*/*")
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+            st = r.status; ct = r.headers.get("Content-Type","")
+            body = r.read(512).decode("utf-8",errors="replace")
+    except urllib.error.HTTPError as e:
+        st = e.code; ct = ""; body = ""
+    except: st = 0; ct = ""; body = ""
+    probed.append({"endpoint":ep,"url":url,"status":st,"content_type":ct[:80],
+        "is_json":"json" in ct,"body_preview":body[:200] if st==200 else ""})
+    time.sleep(0.1)
+
+results = {"target":TARGET,"domain":DOMAIN,"js_files":js_stats,
+    "secrets":all_secrets,"endpoints":sorted(all_endpoints),
+    "frameworks":all_frameworks,"sensitive_comments":all_comments[:30],
+    "endpoint_probes":probed}
+with open(os.path.join(OUTDIR,"raw","js_analysis.json"),"w",encoding="utf-8") as f:
+    json.dump(results, f, ensure_ascii=False, indent=2)
+
+print(f"  [✓] {len(all_secrets)} secret(s) | {len(all_endpoints)} endpoint(s) | {len(all_frameworks)} framework(s)")
+print(f"  [✓] {len(probed)} endpoint(s) verificado(s)")
+PYJS
+
+# Coletar contadores para o relatório
+if [ -f "$OUTDIR/raw/js_analysis.json" ]; then
+    JS_SECRETS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('secrets',[])))" 2>/dev/null || echo 0)
+    JS_ENDPOINTS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('endpoints',[])))" 2>/dev/null || echo 0)
+    JS_FRAMEWORKS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('frameworks',[])))" 2>/dev/null || echo 0)
+    JS_FILES=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('js_files',[])))" 2>/dev/null || echo 0)
+    echo -e "${GREEN}[✓] JS: $JS_FILES arquivo(s) | $JS_SECRETS secret(s) | $JS_ENDPOINTS endpoint(s) | $JS_FRAMEWORKS framework(s)${NC}"
+fi
+
+export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
+
+
+# ====================== FASE 5: RELATÓRIO ======================
+echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  FASE 9/9: GERAÇÃO DE RELATÓRIO${NC}"
+echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT SCREENSHOT_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 python3 << 'PYEOF'
 import json, os, html, re, base64
@@ -787,6 +990,51 @@ def cwe_enrich(cweid_str):
     if not cweid_str: return None
     cwe_num = re.sub(r"[^0-9]", "", str(cweid_str))
     return CWE_CVSS_TABLE.get(cwe_num)
+
+# ── Mapa de impacto prático por CWE (linguagem para tech lead) ──
+IMPACT_MAP = {
+    "89":  "Um atacante pode ler, modificar ou apagar dados do banco de dados, incluindo dados de usuários e transações.",
+    "78":  "Um atacante pode executar comandos arbitrários no servidor, comprometendo toda a infraestrutura.",
+    "79":  "Scripts maliciosos podem ser executados no navegador de usuários, roubando sessões e credenciais.",
+    "352": "Um atacante pode forçar usuários autenticados a executar ações não autorizadas (ex: transferências, alteração de dados).",
+    "22":  "Um atacante pode acessar arquivos arbitrários do servidor, incluindo configurações e chaves privadas.",
+    "287": "Acesso não autorizado à aplicação, permitindo personificar qualquer usuário incluindo administradores.",
+    "306": "Endpoints críticos acessíveis sem autenticação, expondo dados e funcionalidades a qualquer pessoa.",
+    "284": "Usuários podem acessar recursos ou dados de outros usuários (IDOR, escalada de privilégios).",
+    "918": "O servidor pode ser usado como proxy para acessar serviços internos protegidos (AWS metadata, bancos de dados).",
+    "611": "Processamento de XML externo pode vazar arquivos do servidor ou causar denial of service.",
+    "502": "Deserialização de dados não confiáveis pode resultar em execução remota de código.",
+    "326": "Comunicações criptografadas podem ser interceptadas e decifradas por atacantes na rede.",
+    "327": "Algoritmos criptográficos fracos podem ser quebrados, expondo dados sensíveis.",
+    "295": "Comunicações TLS podem ser interceptadas por ataques man-in-the-middle.",
+    "1021":"Usuários podem ser induzidos a clicar em elementos invisíveis sobrepostos (clickjacking).",
+    "319": "Dados transmitidos em texto claro podem ser interceptados por qualquer observador na rede.",
+    "200": "Informações sobre tecnologias, versões ou estrutura interna expostas a atacantes.",
+    "693": "Ausência de cabeçalhos de segurança deixa o browser do usuário sem proteções básicas contra XSS e injeção.",
+    "1004":"Cookies de sessão acessíveis via JavaScript podem ser roubados por scripts maliciosos (XSS).",
+    "1395":"Biblioteca JavaScript com vulnerabilidade conhecida e exploit público disponível.",
+    "312": "Dados sensíveis armazenados sem criptografia podem ser acessados diretamente no banco de dados.",
+    "384": "Um atacante pode fixar o identificador de sessão de um usuário e assumir sua conta após login.",
+}
+
+# ── Mapa de remediação específica por CWE ────────────────────
+REMEDIATION_MAP = {
+    "89":  "Use prepared statements (parametrized queries) em todas as queries SQL. Nunca concatene dados do usuário diretamente.",
+    "79":  "Escape de output em contexto HTML/JS. Implemente Content-Security-Policy. Use bibliotecas como DOMPurify.",
+    "352": "Implemente tokens CSRF (ex: SameSite=Strict em cookies, token por formulário). Frameworks como Spring, Django e Rails têm suporte nativo.",
+    "22":  "Valide e normalize caminhos de arquivo. Use allowlist de diretórios permitidos. Evite concatenar input do usuário em caminhos.",
+    "287": "Implemente autenticação forte com MFA. Use sessões seguras com expiração adequada.",
+    "306": "Adicione autenticação a todos os endpoints. Use middleware de auth centralizado.",
+    "284": "Valide no servidor que o usuário tem permissão para acessar o recurso solicitado. Não confie apenas no ID da URL.",
+    "918": "Valide e filtre URLs de destino em qualquer funcionalidade de proxy/redirect. Use allowlist de hosts permitidos.",
+    "693": "Configure cabeçalhos: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security.",
+    "1004":"Adicione flag HttpOnly em todos os cookies de sessão. Use também Secure e SameSite=Strict.",
+    "1395":"Atualize a biblioteca para a versão mais recente. Verifique release notes para breaking changes.",
+    "326": "Use TLS 1.2+ com cipher suites modernas. Desabilite SSLv3, TLS 1.0, TLS 1.1 e RC4.",
+    "319": "Force HTTPS em toda a aplicação. Implemente HSTS. Redirecione HTTP para HTTPS.",
+    "352": "Tokens CSRF em formulários e headers X-CSRF-Token para APIs. Verifique Origin/Referer como camada adicional.",
+    "312": "Criptografe dados sensíveis em repouso. Use bcrypt/Argon2 para senhas. Nunca armazene em texto claro.",
+}
 
 def cvss_to_sev(score):
     """Converte score CVSS para severidade pelo padrão NVD."""
@@ -987,6 +1235,19 @@ if os.path.exists(cf) and os.path.getsize(cf) > 0:
     try: confirmations = json.load(open(cf,"r",encoding="utf-8"))
     except Exception as e: errors.append(f"confirmations: {e}")
 
+# ── JS Analysis ──────────────────────────────────────────────
+js_analysis = {}
+js_file = os.path.join(OUTDIR,"raw","js_analysis.json")
+if os.path.exists(js_file) and os.path.getsize(js_file) > 0:
+    try: js_analysis = json.load(open(js_file,"r",encoding="utf-8"))
+    except Exception as e: errors.append(f"js_analysis: {e}")
+js_secrets    = js_analysis.get("secrets",[])
+js_endpoints  = js_analysis.get("endpoints",[])
+js_frameworks = js_analysis.get("frameworks",[])
+js_files_list = js_analysis.get("js_files",[])
+js_probes     = js_analysis.get("endpoint_probes",[])
+js_comments   = js_analysis.get("sensitive_comments",[])
+
 # ── CVE enrichment (NVD + EPSS) ──────────────────────────────
 cve_enrichment = {}
 cve_db_file = os.path.join(OUTDIR,"raw","cve_enrichment.json")
@@ -1051,14 +1312,20 @@ for grp in zap_dedup.values():
 total = sum(stats.values())
 # Risk score base: contagem ponderada por severidade
 base_risk = (stats["critical"]*10) + (stats["high"]*5) + (stats["medium"]*2) + stats["low"]
-# Bônus EPSS: aumentar score se houver CVEs com alta probabilidade de exploração
+# Bônus EPSS
 epss_bonus = 0
 for ev in cve_enrichment.values():
     epss = ev.get("epss_score") or 0
     if epss >= 0.5:   epss_bonus += 15   # exploit muito provável
     elif epss >= 0.1: epss_bonus += 7    # exploit provável
     elif epss >= 0.01: epss_bonus += 2   # exploit possível
-risk = min(base_risk + epss_bonus, 100)
+# Bônus JS: secrets e frameworks vulneráveis agravam o risco
+HIGH_JS_TYPES = {"AWS Access Key","AWS Secret","Private Key","Stripe Live Key","GitHub Token","GitLab PAT","OpenAI Key","Anthropic Key","Hardcoded Password","DB Connection String"}
+js_high   = [s for s in js_secrets if s.get("type","") in HIGH_JS_TYPES]
+js_medium = [s for s in js_secrets if s.get("type","") not in HIGH_JS_TYPES]
+js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
+js_bonus = min(len(js_high)*15 + len(js_medium)*5 + len(js_vuln_fw)*8, 30)
+risk = min(base_risk + epss_bonus + js_bonus, 100)
 stxt,scol = ("CRÍTICO — Ação Imediata","#7a2e2e") if stats["critical"] else \
             ("ALTO — Atenção Urgente","#b34e4e") if stats["high"] else \
             ("MÉDIO — Correção Planejada","#d4833a") if stats["medium"] else \
@@ -1071,7 +1338,7 @@ duration_str = f"{duration_secs//3600}h {(duration_secs%3600)//60}m {duration_se
 def badge(sev):
     labels = {"critical":"CRÍTICO","high":"ALTO","medium":"MÉDIO","low":"BAIXO","info":"INFO"}
     c={"critical":"#7a2e2e","high":"#b34e4e","medium":"#d4833a","low":"#4a7c8c","info":"#6e8f72"}.get(sev,"#999")
-    return f'<span style="background:{c};color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{labels.get(sev,sev.upper())}</span>'
+    return f'<span style="background:{c};color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{labels.get(sev, labels.get(sev.lower(), sev.upper()))}</span>'
 
 def trows(items,empty="Sem resultados"):
     if not items: return f'<tr><td style="color:#999;font-style:italic">{empty}</td></tr>'
@@ -1094,7 +1361,9 @@ def render_finding(f):
             cvss_color = '#7a2e2e' if cvss and cvss>=9 else '#b34e4e' if cvss and cvss>=7 else '#d4833a' if cvss and cvss>=4 else '#27ae60'
             epss_color = '#7a2e2e' if epss and epss>=0.5 else '#d4833a' if epss and epss>=0.1 else '#27ae60'
             enrich_rows += f'<tr><th>{html.escape(cve_id)}</th><td>'
-            if cvss: enrich_rows += f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS {cvss} {html.escape(sev)}</span> '
+            _SEV_PT = {"CRITICAL":"CRÍTICO","HIGH":"ALTO","MEDIUM":"MÉDIO","LOW":"BAIXO"}
+            sev_pt = _SEV_PT.get(str(sev).upper(), sev)
+            if cvss: enrich_rows += f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS {cvss} {html.escape(sev_pt)}</span> '
             if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}° percentil)</span> '
             if desc_nvd: enrich_rows += f'<br><small style="color:#555">{html.escape(desc_nvd)}</small>'
             enrich_rows += '</td></tr>'
@@ -1105,7 +1374,8 @@ def render_finding(f):
             cwe_data = cwe_enrich(cwe_match.group(1))
             if cwe_data:
                 cvss = cwe_data["cvss"]
-                sev_label = cwe_data["sev"]
+                _SEV_PT = {"CRITICAL":"CRÍTICO","HIGH":"ALTO","MEDIUM":"MÉDIO","LOW":"BAIXO"}
+                sev_label = _SEV_PT.get(cwe_data["sev"], cwe_data["sev"])
                 cwe_name = cwe_data["name"]
                 cvss_color = '#7a2e2e' if cvss>=9 else '#b34e4e' if cvss>=7 else '#d4833a' if cvss>=4 else '#27ae60'
                 enrich_rows += (f'<tr><th>CWE-{cwe_match.group(1)}</th><td>'
@@ -1129,6 +1399,16 @@ def render_finding(f):
     {enrich_rows}
     <tr><th>URL</th><td><code>{html.escape(f.get('url',''))}</code></td></tr>
     <tr><th>Descrição</th><td>{html.escape(f.get('description',''))}</td></tr>"""
+    # Impacto prático — extrair CWE do campo cve para lookup no IMPACT_MAP
+    _cwe_for_impact = re.search(r'CWE-?(\d+)', f.get("cve",""), re.IGNORECASE)
+    _impact = IMPACT_MAP.get(_cwe_for_impact.group(1), "") if _cwe_for_impact else ""
+    _remediation_specific = REMEDIATION_MAP.get(_cwe_for_impact.group(1), "") if _cwe_for_impact else ""
+    if _impact:
+        rows += (f'\n    <tr><th style="background:#fff3cd;color:#856404">⚠ Impacto</th>'
+            f'<td style="background:#fff3cd;color:#856404;font-weight:500">{html.escape(_impact)}</td></tr>')
+    if _remediation_specific:
+        rows += (f'\n    <tr><th style="background:#d4edda;color:#155724">✓ Como Corrigir</th>'
+            f'<td style="background:#d4edda;color:#155724">{html.escape(_remediation_specific)}</td></tr>')
     if f.get('param'):
         rows += f"\n    <tr><th>Parâmetro</th><td><code>{html.escape(f['param'])}</code></td></tr>"
     if f.get('attack'):
@@ -1178,6 +1458,95 @@ if zap_low_groups:
 errsec = "" if not errors else \
     '<h2>⚠ Avisos de Processamento</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
     "".join(f"<li><code>{html.escape(e)}</code></li>" for e in errors) + "</ul></div>"
+
+# ── Gerar HTML: Análise JS ───────────────────────────────────
+js_html = ""
+if js_analysis:
+    HIGH_JS_TYPES = {"AWS Access Key","AWS Secret","Private Key","Stripe Live Key",
+        "GitHub Token","GitLab PAT","OpenAI Key","Anthropic Key","Hardcoded Password",
+        "DB Connection String","Firebase Key","Slack Token"}
+    def js_sev(t): return "high" if t in HIGH_JS_TYPES else "medium"
+    def js_sev_color(s): return {"high":"#b34e4e","medium":"#d4833a"}.get(s,"#4a7c8c")
+    def js_badge(t):
+        s=js_sev(t); c=js_sev_color(s)
+        lbl={"high":"ALTO","medium":"MÉDIO"}.get(s,"BAIXO")
+        return f'<span style="background:{c};color:white;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:bold">{lbl}</span>'
+
+    # Stat bar JS
+    js_accessible = [p for p in js_probes if p.get("status")==200]
+    js_exposed_api = [p for p in js_probes if p.get("status")==200 and p.get("is_json")]
+    js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
+    js_html = f'''<h2>JS / Frontend — Análise de Segurança</h2>
+    <div class="info-box">
+      <table>
+        <tr><th style="width:200px">Arquivos JS analisados</th><td>{len(js_files_list)}</td></tr>
+        <tr><th>Secrets / credenciais</th><td><span style="color:#b34e4e;font-weight:bold">{sum(1 for s in js_secrets if js_sev(s["type"])=="high")}</span> alto &nbsp;|&nbsp; <span style="color:#d4833a">{sum(1 for s in js_secrets if js_sev(s["type"])=="medium")}</span> médio</td></tr>
+        <tr><th>Endpoints descobertos</th><td>{len(js_endpoints)} &nbsp;|&nbsp; {len(js_accessible)} acessíveis sem autenticação</td></tr>
+        <tr><th>Frameworks detectados</th><td>{len(js_frameworks)} ({len(js_vuln_fw)} com CVE conhecida)</td></tr>
+        <tr><th>Comentários sensíveis</th><td>{len(js_comments)}</td></tr>
+      </table>
+    </div>'''
+
+    # Secrets
+    if js_secrets:
+        from collections import defaultdict
+        by_type = defaultdict(list)
+        for s in js_secrets: by_type[s["type"]].append(s)
+        js_html += "<h3>Secrets e Credenciais Detectadas</h3>"
+        for stype, items in sorted(by_type.items(), key=lambda x: 0 if js_sev(x[0])=="high" else 1):
+            c = js_sev_color(js_sev(stype))
+            js_html += (f'<div style="border-left:6px solid {c};padding:12px 16px;margin:10px 0;'
+                f'background:#fafafa;border-radius:4px;border:1px solid #ddd">'
+                f'<strong>{html.escape(stype)}</strong> {js_badge(stype)}'
+                f' <span style="color:#666;font-size:12px">({len(items)} ocorrência(s))</span>'
+                f'<table style="margin-top:8px">')
+            for item in items[:3]:
+                v = item["value"]; masked = v[:10]+"..."+v[-6:] if len(v)>20 else v
+                js_html += (f'<tr><td style="font-family:monospace;font-size:11px;background:#2d3436;'
+                    f'color:#dfe6e9;padding:4px 8px;border-radius:3px;white-space:nowrap">{html.escape(masked)}</td>'
+                    f'<td style="font-size:11px;color:#555;padding:4px 8px">{html.escape(item.get("context","")[:100])}</td></tr>')
+            if len(items)>3:
+                js_html += f'<tr><td colspan="2" style="color:#888;font-size:11px;padding:4px 8px;font-style:italic">... e mais {len(items)-3} ocorrência(s)</td></tr>'
+            js_html += "</table></div>"
+
+    # Frameworks
+    if js_frameworks:
+        seen_fw = {}
+        fw_rows = ""
+        for fw in js_frameworks:
+            k = (fw["framework"],fw["version"])
+            if k in seen_fw: continue
+            seen_fw[k]=True
+            vuln_html = ('<span style="color:#b34e4e;font-weight:bold">⚠ ' +
+                ', '.join(v["cve"] for v in fw.get("vulns",[])) + '</span>')\
+                if fw.get("vulnerable") else '<span style="color:#27ae60">✓ OK</span>'
+            fw_rows += (f'<tr><td><strong>{html.escape(fw["framework"])}</strong></td>'
+                f'<td><code>{html.escape(fw["version"])}</code></td>'
+                f'<td>{vuln_html}</td></tr>')
+        js_html += ('<h3>Frameworks Detectados</h3>'
+            '<table><tr style="background:#f5f5f5"><th>Framework</th><th>Versão</th><th>Status</th></tr>'
+            + fw_rows + '</table>')
+
+    # Endpoints acessíveis
+    if js_accessible:
+        ep_rows = "".join(
+            f'<tr><td><code style="font-size:11px">{html.escape(p["url"][:80])}</code></td>'
+            f'<td style="text-align:center"><span style="background:#27ae60;color:white;'
+            f'padding:1px 6px;border-radius:3px;font-size:11px">{p["status"]}</span></td>'
+            f'<td style="font-size:11px">{"JSON API" if p.get("is_json") else "HTML"}</td></tr>'
+            for p in js_accessible[:15])
+        js_html += ('<h3>Endpoints Acessíveis Sem Autenticação</h3>'
+            '<table><tr style="background:#f5f5f5"><th>URL</th><th>HTTP</th><th>Tipo</th></tr>'
+            + ep_rows + '</table>')
+
+    # Comentários sensíveis
+    if js_comments:
+        comm_rows = "".join(
+            f'<tr><td><code style="font-size:11px;background:#2d3436;color:#dfe6e9;'
+            f'padding:3px 6px;border-radius:3px;display:block">{html.escape(c["comment"][:150])}</code></td></tr>'
+            for c in js_comments[:10])
+        js_html += ('<h3>Comentários Sensíveis no Código</h3>'
+            '<table>' + comm_rows + '</table>')
 
 # ── Gerar HTML: TLS ─────────────────────────────────────────
 SEV_TLS_CLASS = {"critical":"tls-critical","high":"tls-high","medium":"tls-warn","low":"tls-warn","info":"tls-ok"}
@@ -1235,6 +1604,57 @@ if screenshots:
 else:
     screenshots_html = ""
 
+# ── Gerar HTML: Plano de Ação Priorizado ─────────────────────────
+SEV_ORDER = {"critical":0,"high":1,"medium":2,"low":3,"info":4}
+
+# Coletar todos os achados acionáveis por prazo
+imediato  = [f for f in all_f if f["severity"] in ("critical","high")]
+sprint    = [f for f in all_f if f["severity"] == "medium"]
+backlog   = [f for f in zap_low_groups.values() if f["sev"] in ("low","info")]
+
+def action_card(title, icon, color, bg, items, prazo, descricao):
+    if not items: return ""
+    rows = ""
+    seen_names = set()
+    for item in items[:10]:
+        name = item.get("name","") if isinstance(item,dict) and "name" in item else item.get("finding",{}).get("name","")
+        if name in seen_names: continue
+        seen_names.add(name)
+        count = item.get("affected_count",1) if isinstance(item,dict) and "affected_count" in item else item.get("count",1)
+        sev_f = item.get("severity","") if "severity" in item else item.get("sev","")
+        count_str = f" <span style='color:#666;font-size:11px'>({count} ocorrência(s))</span>" if count > 1 else ""
+        rows += f"<li style='margin:4px 0'><strong>{html.escape(name)}</strong>{count_str}</li>"
+    return f"""<div style="border-left:5px solid {color};padding:16px;margin:12px 0;background:{bg};border-radius:4px">
+  <h3 style="margin:0 0 6px;color:{color}">{icon} {html.escape(title)} <span style="font-size:12px;font-weight:normal;color:#666">— Prazo: {prazo}</span></h3>
+  <p style="margin:0 0 10px;font-size:13px;color:#555">{descricao}</p>
+  <ul style="margin:0;padding-left:20px;font-size:13px">{rows}</ul>
+</div>"""
+
+plan_parts = []
+plan_parts.append(action_card(
+    "Ação Imediata","🔴","#7a2e2e","#fff0f0",
+    imediato,"esta semana",
+    "Vulnerabilidades críticas e altas com potencial de comprometimento direto. Paralisar deploy se necessário."
+))
+plan_parts.append(action_card(
+    "Próximo Sprint","🟡","#d4833a","#fff8f0",
+    sprint,"próximas 2 semanas",
+    "Achados médios que reduzem superfície de ataque. Incluir nas próximas histórias do time."
+))
+plan_parts.append(action_card(
+    "Backlog de Segurança","🔵","#4a7c8c","#f0f8ff",
+    backlog,"próximos 30 dias",
+    "Melhorias de hardening e headers. Agendar como dívida técnica de segurança."
+))
+
+action_plan_html = ""
+if any(plan_parts):
+    action_plan_html = f"""<h2>Plano de Ação para o Time</h2>
+<div class="info-box">
+  <p>Priorização baseada em CVSS + EPSS. Achados com maior probabilidade de exploração ativa foram priorizados.</p>
+</div>
+{"".join(plan_parts)}"""
+
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
 <title>SWARM — {html.escape(DOMAIN)}</title><style>
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
@@ -1284,7 +1704,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
 <p><strong>Total de Achados:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
 <p><strong>Duração total do scan:</strong> {duration_str}</p>
-<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}{"+ Screenshots" if screenshots else ""}</p>
+<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}{"+ Screenshots" if screenshots else ""}</p>
 <p><strong>Exploits verificados ativamente:</strong> {CONFIRMED_COUNT} re-executados com resposta capturada</p></div>
 <h2>2. Superfície de Ataque</h2>
 <table>
@@ -1303,8 +1723,14 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 
 <!-- Screenshots -->
 {screenshots_html}
+
+<!-- JS Analysis -->
+{js_html}
 {errsec}
 {low_table_html}
+
+<!-- Plano de Ação -->
+{action_plan_html}
 <h2>5. Arquivos de Evidência</h2><div class="info-box"><ul>
 <li><code>raw/subdomains.txt</code> — Subdomínios descobertos</li>
 <li><code>raw/httpx_results.txt</code> — Hosts HTTP ativos e tecnologias</li>
@@ -1317,6 +1743,8 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
 {"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}
 {"<li><code>raw/screenshots/</code> — Capturas de tela das evidências</li>" if screenshots else ""}
+{"<li><code>raw/js_analysis.json</code> — Análise JS/Secrets completa</li>" if js_analysis else ""}
+{"<li><code>raw/js_files/</code> — Arquivos JS para análise forense</li>" if js_files_list else ""}
 </ul>
 <p><strong>Nota:</strong> Todos os achados devem ser validados manualmente antes de reportar ao cliente ou equipe de desenvolvimento.</p></div></div>
 <div class="footer"><p><strong>CONFIDENCIAL — USO INTERNO</strong></p>
