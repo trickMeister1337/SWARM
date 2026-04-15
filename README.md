@@ -1,12 +1,12 @@
-# 🕷️ SWARM
+# SWARM
 
-> Automated web security scanner — 9-phase pipeline from subdomain discovery to JS secrets analysis, delivering a single self-contained HTML report in Portuguese, designed for both security analysts and tech leads.
+> Automated web security scanner — subfinder + httpx + nmap + testssl + Nuclei + OWASP ZAP, unified into a single self-contained HTML report.
+![Bash](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.8+-3776AB?logo=python&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-Kali%20%7C%20Ubuntu-557C94?logo=linux&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+---
 
-![Bash](docs/badges/bash.svg)
-![Python](docs/badges/python.svg)
-![Platform](docs/badges/platform.svg)
-![Tests](docs/badges/tests.svg)
-![License](docs/badges/license.svg)
 
 ---
 
