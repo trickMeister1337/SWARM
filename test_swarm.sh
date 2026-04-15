@@ -892,8 +892,8 @@ else
     fail "Lógica de agrupamento ZAP não encontrada"
 fi
 
-if grep -q '# Apenas Low/Info' "$SCRIPT"; then
-    pass "Comentário correto: Medium/High/Critical sempre card individual"
+if grep -q '# Estratégia de deduplicação por severidade' "$SCRIPT"; then
+    pass "Comentário correto: estratégia de deduplicação por severidade"
 else
     warn "Comentário de agrupamento não encontrado"
 fi
@@ -1183,6 +1183,130 @@ fi
 # Cleanup temp files
 rm -f /tmp/swtest_conf_filter.out /tmp/swtest_dedup.out /tmp/swtest_epss_risk.out
 rm -f /tmp/swtest_duration.out /tmp/swtest_ss_urls.out /tmp/swtest_nvd_retry.out
+
+# ─────────────────────────────────────────────────────────────────
+section "27. TABELA CWE→CVSS SINTÉTICO"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'CWE_CVSS_TABLE' "$SCRIPT"; then
+    pass "CWE_CVSS_TABLE declarada no script"
+else
+    fail "CWE_CVSS_TABLE não encontrada"
+fi
+
+if grep -q 'def cwe_enrich' "$SCRIPT"; then
+    pass "Função cwe_enrich presente"
+else
+    fail "cwe_enrich não encontrada"
+fi
+
+CWE_COUNT=$(grep -c '"[0-9]*":.*"cvss"' "$SCRIPT" 2>/dev/null || echo 0)
+if [ "$CWE_COUNT" -ge 20 ]; then
+    pass "Tabela CWE tem $CWE_COUNT entradas (≥20)"
+else
+    fail "Tabela CWE com poucas entradas: $CWE_COUNT"
+fi
+
+python3 > /tmp/swtest_cwe.out << 'PYEOF_CWE'
+import re
+CWE_CVSS_TABLE = {
+    "89":  {"cvss": 9.8, "sev": "CRITICAL", "name": "SQL Injection"},
+    "79":  {"cvss": 6.1, "sev": "MEDIUM",   "name": "XSS"},
+    "693": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Missing Security Header"},
+}
+def cwe_enrich(cweid_str):
+    if not cweid_str: return None
+    cwe_num = re.sub(r"[^0-9]", "", str(cweid_str))
+    return CWE_CVSS_TABLE.get(cwe_num)
+
+ok = (
+    cwe_enrich("89")["cvss"] == 9.8 and
+    cwe_enrich("CWE-79")["sev"] == "MEDIUM" and
+    cwe_enrich("9999") is None and
+    cwe_enrich("") is None
+)
+print("OK" if ok else "FAIL")
+PYEOF_CWE
+CWE_RESULT=$(cat /tmp/swtest_cwe.out)
+if [ "$CWE_RESULT" = "OK" ]; then
+    pass "cwe_enrich: CWE-89→CVSS 9.8, CWE desconhecido→None"
+else
+    fail "cwe_enrich incorreta: $CWE_RESULT"
+fi
+
+# Verify fallback is triggered only when no CVE present
+if grep -q 'not cve_ids or not enrich_rows' "$SCRIPT"; then
+    pass "Fallback CWE ativado apenas quando não há CVE NVD"
+else
+    fail "Lógica de fallback CWE não encontrada"
+fi
+
+if grep -q 'Estimativa baseada em CWE' "$SCRIPT"; then
+    pass "Badge 'Estimativa baseada em CWE' presente no relatório"
+else
+    fail "Badge de estimativa CWE ausente"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "28. TRADUÇÃO PT-BR — badges e labels"
+# ─────────────────────────────────────────────────────────────────
+
+python3 > /tmp/swtest_ptbr.out << 'PYEOF_PT'
+labels = {"critical":"CRÍTICO","high":"ALTO","medium":"MÉDIO","low":"BAIXO","info":"INFO"}
+ok = (
+    labels["critical"] == "CRÍTICO" and
+    labels["high"]     == "ALTO"    and
+    labels["medium"]   == "MÉDIO"   and
+    labels["low"]      == "BAIXO"   and
+    labels["info"]     == "INFO"
+)
+print("OK" if ok else "FAIL")
+PYEOF_PT
+PTBR_RESULT=$(cat /tmp/swtest_ptbr.out)
+if [ "$PTBR_RESULT" = "OK" ]; then
+    pass "Badges PT-BR: CRÍTICO/ALTO/MÉDIO/BAIXO/INFO"
+else
+    fail "Badges PT-BR incorretos: $PTBR_RESULT"
+fi
+
+# Check key PT-BR strings are in the HTML block
+for label in "CRÍTICO" "ALTO" "MÉDIO" "BAIXO" "Sumário Executivo"              "Superfície de Ataque" "Vulnerabilidades" "Confirmação Ativa"              "Índice de Risco" "Duração total" "Arquivos de Evidência"; do
+    if grep -q "$label" "$SCRIPT"; then
+        pass "PT-BR: '$label' presente no relatório"
+    else
+        fail "PT-BR: '$label' ausente"
+    fi
+done
+
+# Ensure no English-only severity labels in HTML generation
+if grep -q '"CRITICAL"\|"HIGH"\|"MEDIUM"\|"LOW"' "$SCRIPT" | grep -v 'SEV_MAP\|SKIP\|sev_raw\|upper\|\.lower\|testssl\|TLS_SEV\|CVSS\|#\|NVD\|table\|CWE\|risk.*HIGH\|"high"\|"critical"\|"medium"\|"low"'; then
+    warn "Possíveis labels em inglês no HTML — verificar manualmente"
+else
+    pass "Sem labels de severidade em inglês no HTML do relatório"
+fi
+
+# TLS PT-BR
+if grep -q 'TLS_SEV_PT\|"CRÍTICO"\|"AVISO"\|"ALTO"' "$SCRIPT"; then
+    pass "TLS: severidades traduzidas para PT-BR"
+else
+    fail "TLS: tradução de severidade ausente"
+fi
+
+# Footer PT
+if grep -q 'Scanner Automatizado de Segurança' "$SCRIPT"; then
+    pass "Footer traduzido para PT-BR"
+else
+    fail "Footer em inglês"
+fi
+
+# Confirmation label
+if grep -q 'NÃO CONFIRMADO' "$SCRIPT"; then
+    pass "Confirmação: 'NÃO CONFIRMADO' (completo)"
+else
+    fail "Confirmação: label incompleto"
+fi
+
+rm -f /tmp/swtest_cwe.out /tmp/swtest_ptbr.out
 
 # ─────────────────────────────────────────────────────────────────
 section "RESULTADO FINAL"

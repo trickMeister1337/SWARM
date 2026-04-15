@@ -681,16 +681,16 @@ if os.path.exists(nf):
             d = json.loads(line.strip())
             sev = d.get('info',{}).get('severity','')
             url = d.get('matched-at','')
-            if sev in ('critical','high') and url and url not in seen:
+            if sev in ('critical',) and url and url not in seen:
                 seen.add(url); urls.append(url)
         except: pass
-# ZAP
+# ZAP — apenas critical
 zf = '$OUTDIR/raw/zap_alerts.json'
 if os.path.exists(zf):
     try:
         data = json.load(open(zf))
         for a in data.get('alerts',[]):
-            if a.get('risk','').lower() in ('high','critical'):
+            if a.get('risk','').lower() == 'critical':
                 url = a.get('url','')
                 if url and url not in seen:
                     seen.add(url); urls.append(url)
@@ -788,6 +788,16 @@ def cwe_enrich(cweid_str):
     cwe_num = re.sub(r"[^0-9]", "", str(cweid_str))
     return CWE_CVSS_TABLE.get(cwe_num)
 
+def cvss_to_sev(score):
+    """Converte score CVSS para severidade pelo padrão NVD."""
+    if score is None: return None
+    score = float(score)
+    if score >= 9.0: return "critical"
+    if score >= 7.0: return "high"
+    if score >= 4.0: return "medium"
+    if score >= 0.1: return "low"
+    return "info"
+
 OUTDIR          = os.environ.get('OUTDIR','scan_output')
 TARGET          = os.environ.get('TARGET','https://example.com')
 DOMAIN          = os.environ.get('DOMAIN','example.com')
@@ -836,7 +846,8 @@ if os.path.exists(nuclei_file) and os.path.getsize(nuclei_file) > 0:
 
 # ZAP — com deduplicação de alertas repetidos e filtro de confiança
 zap_findings = []
-zap_low_groups = {}  # {alert_name: {count, urls, finding}}
+zap_low_groups = {}  # Low/Info: tabela compacta
+zap_dedup      = {}  # Critical/High/Medium: card único por tipo
 zap_file = os.path.join(OUTDIR,"raw","zap_alerts.json")
 if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
     try:
@@ -846,11 +857,24 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
         SKIP_CONFIDENCE = {"false positive"}
         for i,a in enumerate(zap_data.get("alerts",[])):
             try:
-                sev = rmap.get(a.get("risk","info").lower(),"info")
+                sev_orig = rmap.get(a.get("risk","info").lower(),"info")
                 conf = a.get("confidence","").lower()
                 # Descartar apenas confirmados como falsos positivos
                 if conf in SKIP_CONFIDENCE:
                     continue
+                # Reclassificar severidade via CVSS do CWE (Opção C — tabela sintética)
+                _cweid = str(a.get("cweid","") or "")
+                _cwe_data = cwe_enrich(_cweid)
+                sev_reclassified = False
+                if _cwe_data:
+                    sev_from_cvss = cvss_to_sev(_cwe_data["cvss"])
+                    if sev_from_cvss and sev_from_cvss != sev_orig:
+                        sev = sev_from_cvss
+                        sev_reclassified = True
+                    else:
+                        sev = sev_orig
+                else:
+                    sev = sev_orig
                 ev = (a.get("evidence","") or "")[:2000]
                 if a.get("param"): ev = f"Parâmetro: {a['param']}\n{ev}"
                 if a.get("attack"): ev = f"Ataque: {a['attack'][:200]}\n{ev}"
@@ -860,7 +884,11 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                 _cve_str = ", ".join(sorted(set(c.upper() for c in _cves))) if _cves \
                     else f"CWE-{a.get('cweid','N/A')}"
                 f_entry = {"source":"OWASP ZAP","name":a.get("name","Alerta"),
-                    "severity":sev,"description":(a.get("description","N/A") or "N/A"),
+                    "severity":sev,
+                    "severity_orig":sev_orig,
+                    "severity_reclassified":sev_reclassified,
+                    "cvss_synthetic":_cwe_data["cvss"] if _cwe_data else None,
+                    "description":(a.get("description","N/A") or "N/A"),
                     "cve": f"{_cve_str} | Conf: {a.get('confidence','?')}",
                     "url":a.get("url",TARGET),
                     "remediation":a.get("solution","Revisar.") or "Revisar.",
@@ -868,23 +896,54 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                     "param":(a.get("param","") or ""),
                     "attack":(a.get("attack","") or "")[:500],
                     "other":(a.get("other","") or "")[:500]}
-                # Apenas Low/Info: agrupar por nome (deduplicar)
-                # Critical/High/Medium: sempre card individual com evidência completa
+                # Estratégia de deduplicação por severidade:
+                # Critical/High → card único por nome (melhor evidência + lista de URLs)
+                # Medium        → card único por nome (melhor evidência + lista de URLs)
+                # Low/Info      → tabela compacta agrupada
+                name = a.get("name","Alerta")
+                url  = a.get("url","")
                 if sev in ("low","info"):
-                    name = a.get("name","Alerta")
                     if name not in zap_low_groups:
                         zap_low_groups[name] = {"count":0,"urls":[],"finding":f_entry,
                             "cve": _cve_str, "conf":a.get("confidence","?"),
                             "sev": sev}
                     zap_low_groups[name]["count"] += 1
-                    url = a.get("url","")
                     if url and url not in zap_low_groups[name]["urls"]:
                         zap_low_groups[name]["urls"].append(url)
                 else:
-                    zap_findings.append(f_entry)
+                    # Deduplicar Medium/High/Critical por nome
+                    # Manter o finding com maior evidência; acumular URLs distintas
+                    if name not in zap_dedup:
+                        zap_dedup[name] = {"finding": f_entry, "urls": [], "count": 0, "sev": sev}
+                    # Promover para maior severidade encontrada
+                    sev_order = {"critical":0,"high":1,"medium":2,"low":3,"info":4}
+                    if sev_order.get(sev,5) < sev_order.get(zap_dedup[name]["sev"],5):
+                        zap_dedup[name]["finding"] = f_entry
+                        zap_dedup[name]["sev"] = sev
+                    # Preferir finding com evidência real
+                    if f_entry.get("evidence") and not zap_dedup[name]["finding"].get("evidence"):
+                        zap_dedup[name]["finding"] = f_entry
+                    zap_dedup[name]["count"] += 1
+                    if url and url not in zap_dedup[name]["urls"]:
+                        zap_dedup[name]["urls"].append(url)
             except Exception as e: errors.append(f"ZAP alerta {i}: {e}")
     except json.JSONDecodeError as e: errors.append(f"ZAP JSON malformado: {e}")
     except Exception as e: errors.append(f"ZAP: {e}")
+
+# Converter zap_dedup em zap_findings, injetando lista de URLs afetadas
+for name, grp in zap_dedup.items():
+    f = dict(grp["finding"])  # cópia
+    affected = grp["urls"]
+    f["severity"] = grp["sev"]  # severidade mais alta encontrada
+    f["affected_count"] = grp["count"]
+    f["affected_urls"] = affected
+    # Se mais de uma URL, adicionar lista às outras informações do card
+    if len(affected) > 1:
+        extra = f"\n\n[{len(affected)} URLs afetadas]\n" + "\n".join(f"  • {u}" for u in affected[:20])
+        if len(affected) > 20:
+            extra += f"\n  ... e mais {len(affected)-20} URL(s)"
+        f["other"] = (f.get("other","") + extra).strip()
+    zap_findings.append(f)
 
 # httpx / nmap
 httpx_lines = []
@@ -935,6 +994,30 @@ if os.path.exists(cve_db_file) and os.path.getsize(cve_db_file) > 0:
     try: cve_enrichment = json.load(open(cve_db_file,"r",encoding="utf-8"))
     except Exception as e: errors.append(f"cve_enrichment: {e}")
 
+# Reclassificar achados Nuclei usando CVSS real do NVD quando disponível
+for f in findings:
+    cve_field = f.get('cve','')
+    cve_ids_f = re.findall(r'CVE-\d{4}-\d{4,7}', cve_field, re.IGNORECASE)
+    best_cvss = None
+    for cid in [c.upper() for c in cve_ids_f]:
+        ev = cve_enrichment.get(cid,{})
+        cvss_val = ev.get('cvss_v3') or ev.get('cvss_v2')
+        if cvss_val and (best_cvss is None or float(cvss_val) > best_cvss):
+            best_cvss = float(cvss_val)
+    if best_cvss is not None:
+        new_sev = cvss_to_sev(best_cvss)
+        if new_sev and new_sev != f['severity']:
+            f['severity_orig'] = f['severity']
+            f['severity'] = new_sev
+            f['severity_reclassified'] = True
+            f['cvss_real'] = best_cvss
+        else:
+            f.setdefault('severity_orig', f['severity'])
+            f.setdefault('severity_reclassified', False)
+    else:
+        f.setdefault('severity_orig', f['severity'])
+        f.setdefault('severity_reclassified', False)
+
 # ── screenshots ───────────────────────────────────────────────
 screenshots = []  # list of (label, base64_data)
 ss_dir = os.path.join(OUTDIR,"raw","screenshots")
@@ -959,6 +1042,12 @@ for f in all_f:
 for grp in zap_low_groups.values():
     sev = grp["finding"]["severity"]
     if sev in stats: stats[sev] += grp["count"]
+# Para Medium/High/Critical: contar pelo número real de ocorrências
+for grp in zap_dedup.values():
+    sev = grp["sev"]
+    if sev in stats:
+        # stats já contou 1 pelo zap_findings loop; adicionar as ocorrências extras
+        stats[sev] += (grp["count"] - 1)
 total = sum(stats.values())
 # Risk score base: contagem ponderada por severidade
 base_risk = (stats["critical"]*10) + (stats["high"]*5) + (stats["medium"]*2) + stats["low"]
@@ -1024,6 +1113,17 @@ def render_finding(f):
                     f'<span style="background:#636e72;color:white;padding:1px 6px;border-radius:3px;font-size:11px">Estimativa baseada em CWE</span>'
                     f'<br><small style="color:#555">{html.escape(cwe_name)}</small>'
                     f'</td></tr>')
+    # Badge de reclassificação — mostrar quando severidade original difere da atual
+    sev_orig = f.get('severity_orig', f.get('severity',''))
+    was_reclassified = f.get('severity_reclassified', False)
+    reclassify_badge = ''
+    if was_reclassified and sev_orig and sev_orig != f.get('severity',''):
+        labels = {'critical':'CRÍTICO','high':'ALTO','medium':'MÉDIO','low':'BAIXO','info':'INFO'}
+        orig_label = labels.get(sev_orig, sev_orig.upper())
+        reclassify_badge = (f'<span style="background:#2d3436;color:#dfe6e9;'
+            f'padding:2px 7px;border-radius:4px;font-size:10px;margin-left:6px">'
+            f'↑ Reclassificado de {orig_label} (CVE/CWE)</span>')
+
     rows = f"""
     <tr><th style="width:120px">CVE/CWE</th><td>{html.escape(str(f.get('cve','N/A')))}</td></tr>
     {enrich_rows}
@@ -1035,12 +1135,21 @@ def render_finding(f):
         rows += f"\n    <tr><th>Ataque</th><td><code>{html.escape(f['attack'])}</code></td></tr>"
     if f.get('evidence'):
         rows += f'\n    <tr><th>Evidência</th><td><div class="evidence-box">{html.escape(f["evidence"])}</div></td></tr>'
-    if f.get('other'):
-        rows += f"\n    <tr><th>Detalhe</th><td>{html.escape(f['other'])}</td></tr>"
+    if f.get('affected_count', 0) > 1:
+        n = f['affected_count']
+        urls_sample = f.get('affected_urls', [])
+        url_list = ''.join(f'<li><code>{html.escape(u)}</code></li>' for u in urls_sample[:15])
+        if len(urls_sample) > 15:
+            url_list += f'<li style="color:#666;font-style:italic">... e mais {len(urls_sample)-15} URL(s)</li>'
+        rows += (f'\n    <tr><th>URLs Afetadas</th>'
+            f'<td><strong>{n} ocorrência(s)</strong> do mesmo tipo de alerta:<ul style="margin:6px 0 0;padding-left:18px">{url_list}</ul></td></tr>')
+    other_val = f.get('other','')
+    if other_val and '[URLs afetadas]' not in other_val:
+        rows += f"\n    <tr><th>Detalhe</th><td>{html.escape(other_val)}</td></tr>"
     rows += f"\n    <tr><th>Recomendação</th><td>{html.escape(f.get('remediation',''))}</td></tr>"
     src_cls = 'source-nuclei' if f.get('source') == 'Nuclei' else 'source-zap'
     return f'''<div class="vuln {f['severity']}">
-  <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}</h3>
+  <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}{reclassify_badge}</h3>
   <table>{rows}
   </table></div>'''
 
