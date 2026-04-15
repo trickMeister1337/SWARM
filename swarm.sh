@@ -732,6 +732,62 @@ python3 << 'PYEOF'
 import json, os, html, re, base64
 from datetime import datetime
 
+# ── Tabela CWE → CVSS sintético (baseado em médias históricas NVD) ──
+# Usada como fallback para alertas ZAP que não trazem CVE nas referências
+CWE_CVSS_TABLE = {
+    # Injeção / execução
+    "89":  {"cvss": 9.8, "sev": "CRITICAL", "name": "SQL Injection"},
+    "78":  {"cvss": 9.8, "sev": "CRITICAL", "name": "OS Command Injection"},
+    "77":  {"cvss": 9.8, "sev": "CRITICAL", "name": "Command Injection"},
+    "94":  {"cvss": 9.8, "sev": "CRITICAL", "name": "Code Injection"},
+    "502": {"cvss": 9.8, "sev": "CRITICAL", "name": "Deserialization of Untrusted Data"},
+    "611": {"cvss": 9.1, "sev": "CRITICAL", "name": "XXE"},
+    "918": {"cvss": 9.8, "sev": "CRITICAL", "name": "SSRF"},
+    # Autenticação / controle de acesso
+    "287": {"cvss": 9.1, "sev": "CRITICAL", "name": "Improper Authentication"},
+    "306": {"cvss": 9.1, "sev": "CRITICAL", "name": "Missing Authentication"},
+    "284": {"cvss": 8.8, "sev": "HIGH",     "name": "Improper Access Control"},
+    "285": {"cvss": 8.8, "sev": "HIGH",     "name": "Improper Authorization"},
+    "862": {"cvss": 8.1, "sev": "HIGH",     "name": "Missing Authorization"},
+    "863": {"cvss": 8.1, "sev": "HIGH",     "name": "Incorrect Authorization"},
+    "269": {"cvss": 8.8, "sev": "HIGH",     "name": "Improper Privilege Management"},
+    # Exposição de dados
+    "22":  {"cvss": 7.5, "sev": "HIGH",     "name": "Path Traversal"},
+    "23":  {"cvss": 7.5, "sev": "HIGH",     "name": "Relative Path Traversal"},
+    "200": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Information Disclosure"},
+    "312": {"cvss": 5.5, "sev": "MEDIUM",   "name": "Cleartext Storage of Sensitive Info"},
+    "319": {"cvss": 5.9, "sev": "MEDIUM",   "name": "Cleartext Transmission"},
+    "359": {"cvss": 6.5, "sev": "MEDIUM",   "name": "Privacy Violation"},
+    # XSS / client-side
+    "79":  {"cvss": 6.1, "sev": "MEDIUM",   "name": "Cross-Site Scripting (XSS)"},
+    "80":  {"cvss": 6.1, "sev": "MEDIUM",   "name": "Basic XSS"},
+    "116": {"cvss": 5.4, "sev": "MEDIUM",   "name": "Improper Encoding/Escaping"},
+    "1021":{"cvss": 4.7, "sev": "MEDIUM",   "name": "Clickjacking"},
+    # CSRF / sessão
+    "352": {"cvss": 8.8, "sev": "HIGH",     "name": "Cross-Site Request Forgery"},
+    "384": {"cvss": 7.1, "sev": "HIGH",     "name": "Session Fixation"},
+    "613": {"cvss": 5.4, "sev": "MEDIUM",   "name": "Insufficient Session Expiration"},
+    # Criptografia / TLS
+    "326": {"cvss": 7.5, "sev": "HIGH",     "name": "Inadequate Encryption Strength"},
+    "327": {"cvss": 7.5, "sev": "HIGH",     "name": "Broken Crypto Algorithm"},
+    "330": {"cvss": 7.5, "sev": "HIGH",     "name": "Insufficient Random Values"},
+    "295": {"cvss": 7.4, "sev": "HIGH",     "name": "Improper Certificate Validation"},
+    # Configuração / exposição
+    "16":  {"cvss": 5.3, "sev": "MEDIUM",   "name": "Configuration"},
+    "693": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Missing Security Header"},
+    "1004":{"cvss": 4.0, "sev": "MEDIUM",   "name": "Cookie Without HttpOnly"},
+    "1395":{"cvss": 6.1, "sev": "MEDIUM",   "name": "Vulnerable JavaScript Library"},
+    "404": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Improper Resource Shutdown"},
+    "497": {"cvss": 4.3, "sev": "MEDIUM",   "name": "Exposure of System Data"},
+    "525": {"cvss": 3.7, "sev": "LOW",      "name": "Browser Caching Sensitive Info"},
+}
+
+def cwe_enrich(cweid_str):
+    """Dado CWE-89 ou 89, retorna dict com cvss/sev/name ou None."""
+    if not cweid_str: return None
+    cwe_num = re.sub(r"[^0-9]", "", str(cweid_str))
+    return CWE_CVSS_TABLE.get(cwe_num)
+
 OUTDIR          = os.environ.get('OUTDIR','scan_output')
 TARGET          = os.environ.get('TARGET','https://example.com')
 DOMAIN          = os.environ.get('DOMAIN','example.com')
@@ -924,8 +980,9 @@ duration_secs = int(_time.time()) - SCAN_START_TS if SCAN_START_TS else 0
 duration_str = f"{duration_secs//3600}h {(duration_secs%3600)//60}m {duration_secs%60}s" if duration_secs > 0 else "N/A"
 
 def badge(sev):
+    labels = {"critical":"CRÍTICO","high":"ALTO","medium":"MÉDIO","low":"BAIXO","info":"INFO"}
     c={"critical":"#7a2e2e","high":"#b34e4e","medium":"#d4833a","low":"#4a7c8c","info":"#6e8f72"}.get(sev,"#999")
-    return f'<span style="background:{c};color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{sev.upper()}</span>'
+    return f'<span style="background:{c};color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{labels.get(sev,sev.upper())}</span>'
 
 def trows(items,empty="Sem resultados"):
     if not items: return f'<tr><td style="color:#999;font-style:italic">{empty}</td></tr>'
@@ -949,9 +1006,24 @@ def render_finding(f):
             epss_color = '#7a2e2e' if epss and epss>=0.5 else '#d4833a' if epss and epss>=0.1 else '#27ae60'
             enrich_rows += f'<tr><th>{html.escape(cve_id)}</th><td>'
             if cvss: enrich_rows += f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS {cvss} {html.escape(sev)}</span> '
-            if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}° pct)</span> '
+            if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}° percentil)</span> '
             if desc_nvd: enrich_rows += f'<br><small style="color:#555">{html.escape(desc_nvd)}</small>'
             enrich_rows += '</td></tr>'
+    # Fallback CWE sintético — quando não há CVE NVD disponível
+    if not cve_ids or not enrich_rows:
+        cwe_match = re.search(r'CWE-?(\d+)', cve_val, re.IGNORECASE)
+        if cwe_match:
+            cwe_data = cwe_enrich(cwe_match.group(1))
+            if cwe_data:
+                cvss = cwe_data["cvss"]
+                sev_label = cwe_data["sev"]
+                cwe_name = cwe_data["name"]
+                cvss_color = '#7a2e2e' if cvss>=9 else '#b34e4e' if cvss>=7 else '#d4833a' if cvss>=4 else '#27ae60'
+                enrich_rows += (f'<tr><th>CWE-{cwe_match.group(1)}</th><td>'
+                    f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS ~{cvss} {sev_label}</span> '
+                    f'<span style="background:#636e72;color:white;padding:1px 6px;border-radius:3px;font-size:11px">Estimativa baseada em CWE</span>'
+                    f'<br><small style="color:#555">{html.escape(cwe_name)}</small>'
+                    f'</td></tr>')
     rows = f"""
     <tr><th style="width:120px">CVE/CWE</th><td>{html.escape(str(f.get('cve','N/A')))}</td></tr>
     {enrich_rows}
@@ -972,7 +1044,7 @@ def render_finding(f):
   <table>{rows}
   </table></div>'''
 
-vhtml = '<div class="info-box"><p>✅ Nenhuma vulnerabilidade encontrada.</p></div>' if not all_f else     "".join(render_finding(f) for f in all_f)
+vhtml = '<div class="info-box"><p>✅ Nenhuma vulnerabilidade encontrada no escopo analisado.</p></div>' if not all_f else     "".join(render_finding(f) for f in all_f)
 
 # Tabela compacta para Low/Info agrupados
 low_table_html = ""
@@ -987,30 +1059,31 @@ if zap_low_groups:
         f'<td style="font-size:11px">{html.escape((grp["finding"]["remediation"] or "")[:80])}...</td></tr>'
         for name, grp in sorted(zap_low_groups.items())
     )
-    low_table_html = f'''<h2>4. Achados Baixo / Informativo (ZAP — {len(zap_low_groups)} tipos únicos, {sum(g["count"] for g in zap_low_groups.values())} ocorrências)</h2>
-    <p style="color:#666;font-size:13px">Agrupados por tipo para reduzir ruído. Verificar manualmente antes de reportar.</p>
+    low_table_html = f'''<h2>4. Achados Baixo / Informativo — ZAP ({len(zap_low_groups)} tipos distintos, {sum(g["count"] for g in zap_low_groups.values())} ocorrências no total)</h2>
+    <p style="color:#666;font-size:13px">Agrupados por tipo para reduzir ruído. Validar manualmente antes de reportar.</p>
     <table>
       <tr style="background:#f5f5f5"><th>Tipo de Alerta</th><th>Qtd</th><th>Sev</th><th>CVE / CWE</th><th>Confiança</th><th>URLs (amostra)</th><th>Recomendação</th></tr>
       {rows_low}
     </table>'''
 
 errsec = "" if not errors else \
-    '<h2>⚠ Avisos</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
+    '<h2>⚠ Avisos de Processamento</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
     "".join(f"<li><code>{html.escape(e)}</code></li>" for e in errors) + "</ul></div>"
 
 # ── Gerar HTML: TLS ─────────────────────────────────────────
 SEV_TLS_CLASS = {"critical":"tls-critical","high":"tls-high","medium":"tls-warn","low":"tls-warn","info":"tls-ok"}
 if tls_findings:
+    TLS_SEV_PT = {"CRITICAL":"CRÍTICO","HIGH":"ALTO","WARN":"AVISO","LOW":"BAIXO","OK":"OK","INFO":"INFO"}
     tls_rows = "".join(
         f'<tr><td style="font-family:monospace;font-size:12px">{html.escape(f["id"])}</td>'
-        f'<td class="{SEV_TLS_CLASS.get(f["sev"],"tls-ok")}">{html.escape(f["sev_raw"])}</td>'
+        f'<td class="{SEV_TLS_CLASS.get(f["sev"],"tls-ok")}">{html.escape(TLS_SEV_PT.get(f["sev_raw"].upper(),f["sev_raw"]))}</td>'
         f'<td>{html.escape(f["finding"])}</td>'
         f'<td>{html.escape(f["cve"] or "—")}</td></tr>'
         for f in tls_findings
     )
-    tls_html = f'''<h2>TLS / SSL — {len(tls_findings)} problema(s) detectado(s)</h2>
+    tls_html = f'''<h2>TLS / SSL — {len(tls_findings)} problema(s) identificado(s)</h2>
     <table>
-      <tr style="background:#f5f5f5"><th>ID</th><th>Severidade</th><th>Achado</th><th>CVE</th></tr>
+      <tr style="background:#f5f5f5"><th>Identificador</th><th>Severidade</th><th>Achado</th><th>CVE</th></tr>
       {tls_rows}
     </table>'''
 else:
@@ -1023,15 +1096,15 @@ if confirmations:
         f'<td style="font-family:monospace;font-size:12px">{html.escape(c["template_id"])}</td>'
         f'<td><code>{html.escape(c["url"])}</code></td>'
         f'<td style="text-align:center"><span class="{"confirm-yes" if c["confirmed"] else "confirm-no"}">'
-        f'{"✓ CONFIRMADO" if c["confirmed"] else "— NÃO CONF."}</span></td>'
+        f'{"✓ CONFIRMADO" if c["confirmed"] else "✗ NÃO CONFIRMADO"}</span></td>'
         f'<td style="text-align:center"><code>{html.escape(c["http_status"])}</code></td>'
         f'<td><div class="evidence-box">{html.escape(c["response_snippet"]) if c["response_snippet"] else "—"}</div></td>'
         f'</tr>'
         for c in confirmations
     )
     n_conf = sum(1 for c in confirmations if c["confirmed"])
-    confirm_html = f'''<h2>Confirmação Ativa de Exploits — {n_conf}/{len(confirmations)} confirmados</h2>
-    <p style="color:#666;font-size:13px">Cada achado Nuclei foi re-executado com o curl original para verificar se a vulnerabilidade permanece ativa.</p>
+    confirm_html = f'''<h2>Confirmação Ativa de Exploits ({n_conf} de {len(confirmations)} confirmados)</h2>
+    <p style="color:#666;font-size:13px">Cada achado do Nuclei foi re-executado com o curl original para verificar se a vulnerabilidade permanece ativa no momento do scan.</p>
     <table>
       <tr style="background:#f5f5f5"><th>Template</th><th>URL</th><th>Status</th><th>HTTP</th><th>Resposta Completa</th></tr>
       {conf_rows}
@@ -1048,7 +1121,7 @@ if screenshots:
         f'</div>'
         for label, b64 in screenshots
     )
-    screenshots_html = f'''<h2>Screenshots de Evidência ({len(screenshots)} captura(s))</h2>
+    screenshots_html = f'''<h2>Capturas de Tela — Evidências ({len(screenshots)} imagem(ns))</h2>
     <div class="screenshot-grid">{ss_cards}</div>'''
 else:
     screenshots_html = ""
@@ -1098,20 +1171,20 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <div class="stat-card low"><div class="number">{stats['low']}</div><div>BAIXO</div></div>
 <div class="stat-card info"><div class="number">{stats['info']}</div><div>INFO</div></div></div>
 <div class="info-box">
-<p><strong>Pontuação de Risco (0–100):</strong> {risk}</p>
+<p><strong>Índice de Risco (0–100):</strong> {risk}</p>
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
-<p><strong>Total:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
+<p><strong>Total de Achados:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
 <p><strong>Duração total do scan:</strong> {duration_str}</p>
 <p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}{"+ Screenshots" if screenshots else ""}</p>
-<p><strong>Exploits confirmados:</strong> {CONFIRMED_COUNT} ativamente verificados</p></div>
+<p><strong>Exploits verificados ativamente:</strong> {CONFIRMED_COUNT} re-executados com resposta capturada</p></div>
 <h2>2. Superfície de Ataque</h2>
 <table>
 <tr><th style="width:220px">Subdomínios descobertos</th><td>{SUB_COUNT}</td></tr>
 <tr><th>Subdomínios ativos (HTTP)</th><td>{ACTIVE_COUNT}</td></tr>
 <tr><th>Portas abertas</th><td><code>{html.escape(OPEN_PORTS)}</code></td></tr></table>
-<h3>Subdomínios Ativos (httpx)</h3><table><tr><th>Resultado</th></tr>{trows(httpx_lines,"httpx não executado ou sem resultados")}</table>
-<h3>Portas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado")}</table>
-<h2>3. Vulnerabilidades Encontradas</h2>{vhtml}
+<h3>Hosts Ativos (httpx)</h3><table><tr><th>Resultado</th></tr>{trows(httpx_lines,"httpx não executado ou sem resultados detectados")}</table>
+<h3>Portas Abertas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado ou sem portas abertas")}</table>
+<h2>3. Vulnerabilidades Identificadas</h2>{vhtml}
 
 <!-- TLS Section -->
 {tls_html}
@@ -1123,22 +1196,22 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {screenshots_html}
 {errsec}
 {low_table_html}
-<h2>5. Anexos</h2><div class="info-box"><ul>
-<li><code>raw/subdomains.txt</code> — Subdomínios</li>
-<li><code>raw/httpx_results.txt</code> — Subdomínios ativos</li>
-<li><code>raw/nmap.txt</code> — Scan de portas</li>
-<li><code>raw/nuclei.json</code> — Resultados Nuclei</li>
-<li><code>raw/zap_alerts.json</code> — Alertas ZAP</li>
-<li><code>raw/zap_evidencias.xml</code> — Relatório ZAP XML</li>
-{"<li><code>raw/testssl.json</code> — Análise TLS</li>" if os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}
-{"<li><code>raw/cve_enrichment.json</code> — Enriquecimento CVE/EPSS</li>" if cve_enrichment else ""}
-{"<li><code>raw/exploit_confirmations.json</code> — Confirmações de exploit</li>" if confirmations else ""}
-{"<li><code>raw/openapi_spec.json</code> — OpenAPI spec importada</li>" if OPENAPI_FOUND else ""}
-{"<li><code>raw/screenshots/</code> — Screenshots de evidência</li>" if screenshots else ""}
+<h2>5. Arquivos de Evidência</h2><div class="info-box"><ul>
+<li><code>raw/subdomains.txt</code> — Subdomínios descobertos</li>
+<li><code>raw/httpx_results.txt</code> — Hosts HTTP ativos e tecnologias</li>
+<li><code>raw/nmap.txt</code> — Scan de portas e serviços</li>
+<li><code>raw/nuclei.json</code> — Achados do Nuclei (JSONL bruto)</li>
+<li><code>raw/zap_alerts.json</code> — Alertas do OWASP ZAP (JSON bruto)</li>
+<li><code>raw/zap_evidencias.xml</code> — Relatório completo do ZAP (XML)</li>
+{"<li><code>raw/testssl.json</code> — Análise TLS/SSL (testssl)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}
+{"<li><code>raw/cve_enrichment.json</code> — Dados CVE (CVSS + EPSS) do NVD/FIRST</li>" if cve_enrichment else ""}
+{"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
+{"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}
+{"<li><code>raw/screenshots/</code> — Capturas de tela das evidências</li>" if screenshots else ""}
 </ul>
-<p>Recomenda-se validação manual de todos os achados.</p></div></div>
-<div class="footer"><p><strong>CONFIDENCIAL — USO INTERNO AUTORIZADO</strong></p>
-<p>SWARM — Automated Security Scanner</p></div></div></body></html>"""
+<p><strong>Nota:</strong> Todos os achados devem ser validados manualmente antes de reportar ao cliente ou equipe de desenvolvimento.</p></div></div>
+<div class="footer"><p><strong>CONFIDENCIAL — USO INTERNO</strong></p>
+<p>SWARM — Scanner Automatizado de Segurança</p></div></div></body></html>"""
 
 out = os.path.join(OUTDIR,"relatorio_swarm.html")
 open(out,"w",encoding="utf-8").write(page)
