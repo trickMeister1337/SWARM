@@ -131,16 +131,6 @@ validate_tool "nuclei"    "optional"
 validate_tool "zaproxy"   "optional"
 validate_tool "testssl"   "optional"
 
-# Screenshot: detectar melhor ferramenta disponível
-SCREENSHOT_TOOL=""
-for _st in chromium chromium-browser google-chrome wkhtmltoimage; do
-    if command -v "$_st" &>/dev/null; then
-        SCREENSHOT_TOOL="$_st"
-        echo -e "${GREEN}[✓] Screenshot: $_st${NC}"
-        break
-    fi
-done
-[ -z "$SCREENSHOT_TOOL" ] && echo -e "${YELLOW}[○] Nenhuma ferramenta de screenshot disponível${NC}"
 
 _missing_go=()
 for _t in subfinder httpx nuclei; do
@@ -154,7 +144,7 @@ echo ""
 
 # ====================== FASE 1: DESCOBERTA ======================
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 1/9: DESCOBERTA DE SUBDOMÍNIOS${NC}"
+echo -e "${CYAN}  FASE 1/8: DESCOBERTA DE SUBDOMÍNIOS${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 command -v subfinder &>/dev/null && \
@@ -169,7 +159,7 @@ echo -e "${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 2/9: MAPEAMENTO DE SUPERFÍCIE${NC}"
+echo -e "${CYAN}  FASE 2/8: MAPEAMENTO DE SUPERFÍCIE${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ACTIVE_COUNT=0
@@ -199,7 +189,7 @@ fi
 
 # ====================== FASES 3+4: TESTSSL + NUCLEI (paralelo) ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 3/9: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
+echo -e "${CYAN}  FASE 3/8: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 TLS_ISSUES=0
@@ -218,7 +208,7 @@ fi
 
 # ====================== FASE 4: NUCLEI ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 4/9: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
+echo -e "${CYAN}  FASE 4/8: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 NUCLEI_COUNT=0
@@ -267,7 +257,7 @@ fi
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 5/9: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
+echo -e "${CYAN}  FASE 5/8: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 CONFIRMED_COUNT=0
@@ -475,7 +465,7 @@ fi
 
 # ====================== FASE 6: ZAP ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 6/9: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
+echo -e "${CYAN}  FASE 6/8: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ALERT_COUNT=0
@@ -675,101 +665,11 @@ else
     echo -e "${YELLOW}[○] ZAP não instalado — pulando fase 4${NC}"
 fi
 
-# ====================== FASE 7: SCREENSHOTS ======================
+export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT
+
+# ====================== FASE 7: JS ANALYSIS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 7/9: SCREENSHOTS DE EVIDÊNCIA${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-
-mkdir -p "$OUTDIR/raw/screenshots"
-SCREENSHOT_COUNT=0
-
-if [ -n "$SCREENSHOT_TOOL" ]; then
-    echo -e "${BLUE}[*] Capturando screenshots com $SCREENSHOT_TOOL...${NC}"
-
-    # Função de screenshot
-    take_screenshot() {
-        local url=$1 outfile=$2
-        case "$SCREENSHOT_TOOL" in
-            chromium|chromium-browser|google-chrome)
-                "$SCREENSHOT_TOOL" --headless --no-sandbox --disable-gpu \
-                    --disable-dev-shm-usage \
-                    --window-size=1280,800 \
-                    --screenshot="$outfile" \
-                    --timeout=15000 "$url" > /dev/null 2>&1
-                ;;
-            wkhtmltoimage)
-                wkhtmltoimage --quiet --width 1280 --height 800 \
-                    --load-error-handling ignore \
-                    --javascript-delay 2000 \
-                    "$url" "$outfile" > /dev/null 2>&1
-                ;;
-        esac
-        [ -f "$outfile" ] && [ "$(stat -c%s "$outfile" 2>/dev/null || echo 0)" -gt 1000 ]
-    }
-
-    # Capturar alvo principal
-    _ss_file="$OUTDIR/raw/screenshots/main.png"
-    if take_screenshot "$TARGET" "$_ss_file"; then
-        echo -e "${GREEN}[✓] Screenshot: $TARGET${NC}"
-        SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
-    fi
-
-    # Capturar URLs únicas dos achados críticos/altos (Nuclei + ZAP)
-    python3 -c "
-import json, sys, os
-seen = set()
-urls = []
-# Nuclei
-nf = '$OUTDIR/raw/nuclei.json'
-if os.path.exists(nf):
-    for line in open(nf):
-        try:
-            d = json.loads(line.strip())
-            sev = d.get('info',{}).get('severity','')
-            url = d.get('matched-at','')
-            if sev in ('critical',) and url and url not in seen:
-                seen.add(url); urls.append(url)
-        except: pass
-# ZAP — apenas critical
-zf = '$OUTDIR/raw/zap_alerts.json'
-if os.path.exists(zf):
-    try:
-        data = json.load(open(zf))
-        for a in data.get('alerts',[]):
-            if a.get('risk','').lower() == 'critical':
-                url = a.get('url','')
-                if url and url not in seen:
-                    seen.add(url); urls.append(url)
-    except: pass
-print('\n'.join(urls[:8]))" > "$OUTDIR/raw/swarm_ss_urls.txt" 2>/dev/null
-
-    if [ -s "$OUTDIR/raw/swarm_ss_urls.txt" ]; then
-
-        _idx=1
-        while IFS= read -r _ss_url; do
-            [ -z "$_ss_url" ] && continue
-            _ss_out="$OUTDIR/raw/screenshots/finding_${_idx}.png"
-            echo -ne "\r${BLUE}[*] Screenshot finding $_idx: ${_ss_url:0:60}...${NC}"
-            if take_screenshot "$_ss_url" "$_ss_out"; then
-                SCREENSHOT_COUNT=$((SCREENSHOT_COUNT + 1))
-            fi
-            _idx=$((_idx + 1))
-        done < "$OUTDIR/raw/swarm_ss_urls.txt"
-        echo ""
-        rm -f "$OUTDIR/raw/swarm_ss_urls.txt"
-    fi
-
-    echo -e "${GREEN}[✓] $SCREENSHOT_COUNT screenshot(s) capturado(s)${NC}"
-else
-    echo -e "${YELLOW}[○] Sem ferramenta de screenshot — pulando fase 7${NC}"
-    echo -e "${YELLOW}    Instale: sudo apt install chromium${NC}"
-fi
-
-export SCREENSHOT_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT
-
-# ====================== FASE 8: JS ANALYSIS ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 8/9: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
+echo -e "${CYAN}  FASE 7/8: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 JS_SECRETS=0
@@ -970,15 +870,15 @@ fi
 export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 
-# ====================== FASE 5: RELATÓRIO ======================
+# ====================== FASE 8: RELATÓRIO ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 9/9: GERAÇÃO DE RELATÓRIO${NC}"
+echo -e "${CYAN}  FASE 8/8: GERAÇÃO DE RELATÓRIO${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT SCREENSHOT_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 python3 << 'PYEOF'
-import json, os, html, re, base64
+import json, os, html, re
 from datetime import datetime
 
 # ── Tabela CWE → CVSS sintético (baseado em médias históricas NVD) ──
@@ -1098,7 +998,6 @@ DOMAIN          = os.environ.get('DOMAIN','example.com')
 OPEN_PORTS      = os.environ.get('OPEN_PORTS','N/A')
 ACTIVE_COUNT    = os.environ.get('ACTIVE_COUNT','0')
 SUB_COUNT       = os.environ.get('SUB_COUNT','0')
-SCREENSHOT_COUNT = int(os.environ.get('SCREENSHOT_COUNT','0'))
 OPENAPI_FOUND   = os.environ.get('OPENAPI_FOUND','0') == '1'
 TLS_ISSUES      = int(os.environ.get('TLS_ISSUES','0'))
 CONFIRMED_COUNT = int(os.environ.get('CONFIRMED_COUNT','0'))
@@ -1325,39 +1224,30 @@ for f in findings:
         f.setdefault('severity_orig', f['severity'])
         f.setdefault('severity_reclassified', False)
 
-# ── screenshots ───────────────────────────────────────────────
-screenshots = []  # list of (label, base64_data)
-ss_dir = os.path.join(OUTDIR,"raw","screenshots")
-if os.path.exists(ss_dir):
-    for fname in sorted(os.listdir(ss_dir)):
-        if fname.endswith(".png"):
-            fpath = os.path.join(ss_dir, fname)
-            try:
-                with open(fpath,"rb") as imgf:
-                    b64 = base64.b64encode(imgf.read()).decode()
-                label = "Alvo Principal" if fname=="main.png" else \
-                    f"Achado #{fname.replace('finding_','').replace('.png','')}"
-                screenshots.append((label, b64))
-            except Exception as e: errors.append(f"screenshot {fname}: {e}")
 
-# Stats — all_f contém Crítico/Alto/Médio completos + representante de cada grupo Low/Info
+# Stats — contagem de CARDS únicos por severidade (padrão relatórios profissionais)
+# Cada tipo de vulnerabilidade = 1, independente de quantas URLs afeta
 all_f = sorted(findings + zap_findings, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
 stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
 for f in all_f:
     if f["severity"] in stats: stats[f["severity"]] += 1
-# Contabilizar os agrupados de Low/Info
+# Low/Info: cada grupo = 1 card (tipo único)
 for grp in zap_low_groups.values():
     sev = grp["finding"]["severity"]
-    if sev in stats: stats[sev] += grp["count"]
-# Para Medium/High/Critical: contar pelo número real de ocorrências
+    if sev in stats: stats[sev] += 1
+total = sum(stats.values())
+
+# Ocorrências reais — usadas apenas para o risk score (reflete severidade total do ambiente)
+occurrences = dict(stats)
+for grp in zap_low_groups.values():
+    sev = grp["finding"]["severity"]
+    if sev in occurrences: occurrences[sev] += (grp["count"] - 1)
 for grp in zap_dedup.values():
     sev = grp["sev"]
-    if sev in stats:
-        # stats já contou 1 pelo zap_findings loop; adicionar as ocorrências extras
-        stats[sev] += (grp["count"] - 1)
-total = sum(stats.values())
-# Risk score base: contagem ponderada por severidade
-base_risk = (stats["critical"]*10) + (stats["high"]*5) + (stats["medium"]*2) + stats["low"]
+    if sev in occurrences: occurrences[sev] += (grp["count"] - 1)
+
+# Risk score usa ocorrências reais (não cards únicos)
+base_risk = (occurrences["critical"]*10) + (occurrences["high"]*5) + (occurrences["medium"]*2) + occurrences["low"]
 # Bônus EPSS
 epss_bonus = 0
 for ev in cve_enrichment.values():
@@ -1636,19 +1526,6 @@ if confirmations:
 else:
     confirm_html = ""
 
-# ── Gerar HTML: Screenshots ──────────────────────────────────
-if screenshots:
-    ss_cards = "".join(
-        f'<div class="screenshot-card">'
-        f'<div class="screenshot-label">{html.escape(label)}</div>'
-        f'<img src="data:image/png;base64,{b64}" alt="{html.escape(label)}" loading="lazy">'
-        f'</div>'
-        for label, b64 in screenshots
-    )
-    screenshots_html = f'''<h2>Capturas de Tela — Evidências ({len(screenshots)} imagem(ns))</h2>
-    <div class="screenshot-grid">{ss_cards}</div>'''
-else:
-    screenshots_html = ""
 
 # ── Gerar HTML: Plano de Ação Priorizado ─────────────────────────
 SEV_ORDER = {"critical":0,"high":1,"medium":2,"low":3,"info":4}
@@ -1729,10 +1606,6 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
     .tls-high{{color:#b34e4e;font-weight:bold}}.tls-critical{{color:#7a2e2e;font-weight:bold}}
     .confirm-yes{{background:#27ae60;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
     .confirm-no{{background:#95a5a6;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
-    .screenshot-grid{{display:flex;flex-wrap:wrap;gap:16px;margin:16px 0}}
-    .screenshot-card{{border:1px solid #ddd;border-radius:8px;overflow:hidden;max-width:100%}}
-    .screenshot-card img{{width:100%;display:block}}
-    .screenshot-label{{padding:8px 12px;background:#f5f5f5;font-size:13px;font-weight:600;color:#1a3a4f}}
 </style></head><body><div class="container">
 <div class="header"><h1>SWARM — Relatório de Segurança</h1>
 <p>Alvo: <strong>{html.escape(TARGET)}</strong> | Domínio: {html.escape(DOMAIN)}</p>
@@ -1750,7 +1623,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
 <p><strong>Total de Achados:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
 <p><strong>Duração total do scan:</strong> {duration_str}</p>
-<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}{"+ Screenshots" if screenshots else ""}</p>
+<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}</p>
 <p><strong>Exploits verificados ativamente:</strong> {CONFIRMED_COUNT} re-executados com resposta capturada</p></div>
 <h2>2. Superfície de Ataque</h2>
 <table>
@@ -1767,8 +1640,6 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <!-- Exploit Confirmations -->
 {confirm_html}
 
-<!-- Screenshots -->
-{screenshots_html}
 
 <!-- JS Analysis -->
 {js_html}
@@ -1788,7 +1659,6 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {"<li><code>raw/cve_enrichment.json</code> — Dados CVE (CVSS + EPSS) do NVD/FIRST</li>" if cve_enrichment else ""}
 {"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
 {"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}
-{"<li><code>raw/screenshots/</code> — Capturas de tela das evidências</li>" if screenshots else ""}
 {"<li><code>raw/js_analysis.json</code> — Análise JS/Secrets completa</li>" if js_analysis else ""}
 {"<li><code>raw/js_files/</code> — Arquivos JS para análise forense</li>" if js_files_list else ""}
 </ul>
