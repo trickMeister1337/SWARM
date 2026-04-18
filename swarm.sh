@@ -133,7 +133,7 @@ validate_tool "testssl"   "optional"
 
 
 _missing_go=()
-for _t in subfinder httpx nuclei; do
+for _t in subfinder httpx nuclei katana; do
     command -v "$_t" &>/dev/null || _missing_go+=("$_t")
 done
 [ ${#_missing_go[@]} -gt 0 ] && echo "" && \
@@ -469,6 +469,7 @@ echo -e "${CYAN}  FASE 6/8: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ALERT_COUNT=0
+KATANA_URLS=0
 if command -v zaproxy &>/dev/null; then
 
     if zap_api_call "core/view/version" "" 2>/dev/null | grep -q "version"; then
@@ -589,18 +590,74 @@ PYFIX
         rm -f "$OUTDIR/raw/swarm_oa_check.tmp"
         [ "$OPENAPI_FOUND" -eq 0 ] && echo -e "${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
 
-        echo -e "${BLUE}[*] Iniciando Spider...${NC}"
+        # ── Katana: crawl JavaScript-rendered pages ────────────────────
+        KATANA_URLS=0
+        if command -v katana &>/dev/null; then
+            echo -e "${BLUE}[*] Katana: crawling com suporte a JavaScript...${NC}"
+
+            # Detectar se chromium/chrome disponível para modo headless
+            KATANA_JS_FLAGS=""
+            for _br in chromium chromium-browser google-chrome; do
+                if command -v "$_br" &>/dev/null; then
+                    KATANA_JS_FLAGS="-jc -jsl"
+                    echo -e "${GREEN}[✓] Modo JS headless ativado ($_br)${NC}"
+                    break
+                fi
+            done
+            [ -z "$KATANA_JS_FLAGS" ] && \
+                echo -e "${YELLOW}[!] Chromium não encontrado — katana em modo HTTP apenas (sem JS rendering)${NC}"
+
+            katana -u "$TARGET" \
+                $KATANA_JS_FLAGS \
+                -d 5 \
+                -kf all \
+                -rl 20 \
+                -timeout 30 \
+                -ef css,png,jpg,gif,ico,svg,woff,woff2,ttf,eot,mp4,mp3,pdf \
+                -o "$OUTDIR/raw/katana_urls.txt" \
+                -silent 2>/dev/null || true
+
+            if [ -s "$OUTDIR/raw/katana_urls.txt" ]; then
+                KATANA_URLS=$(wc -l < "$OUTDIR/raw/katana_urls.txt" | tr -d " ")
+                echo -e "${GREEN}[✓] Katana descobriu ${KATANA_URLS} URL(s)${NC}"
+
+                # Filtrar apenas URLs do mesmo domínio e injetar no contexto ZAP
+                echo -e "${BLUE}[*] Injetando URLs do Katana no contexto ZAP...${NC}"
+                _injected=0
+                while IFS= read -r _k_url; do
+                    [ -z "$_k_url" ] && continue
+                    # Aceitar apenas URLs do alvo (sem assets externos)
+                    echo "$_k_url" | grep -qF "$DOMAIN" || continue
+                    _k_enc=$(python3 -c \
+                        "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
+                        "$_k_url" 2>/dev/null)
+                    zap_api_call "core/action/accessUrl" "url=${_k_enc}" > /dev/null 2>&1
+                    _injected=$((_injected + 1))
+                done < "$OUTDIR/raw/katana_urls.txt"
+                echo -e "${GREEN}[✓] $_injected URL(s) injetadas no contexto ZAP${NC}"
+                sleep 2  # ZAP processar URLs antes do spider
+            else
+                echo -e "${YELLOW}[!] Katana não encontrou URLs — continuando com ZAP spider${NC}"
+            fi
+        else
+            echo -e "${YELLOW}[○] Katana não instalado — usando apenas ZAP spider${NC}"
+            echo -e "${YELLOW}    Instale: go install github.com/projectdiscovery/katana/cmd/katana@latest${NC}"
+        fi
+
+        # ── ZAP Spider: complementa o Katana ou age sozinho ────────────
+        echo -e "${BLUE}[*] Iniciando ZAP Spider (complementa crawl)...${NC}"
         SPIDER_ID=$(zap_api_call "spider/action/scan" "url=${ENCODED_URL}" \
                     | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
         wait_for_zap_progress "spider/view/status" "${SPIDER_ID:-0}" "$ZAP_SPIDER_TIMEOUT" "Spider"
 
-        # ── Verificar quantas URLs o Spider coletou ──────────────────────
+        # ── Verificar total de URLs no contexto ZAP ───────────────────
         SPIDER_URLS=$(zap_api_call "spider/view/results" "scanId=${SPIDER_ID:-0}" \
                       | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('results',[])))" 2>/dev/null || echo 0)
-        echo -e "${BLUE}[*] Spider coletou ${SPIDER_URLS} URL(s) para o active scan${NC}"
+        TOTAL_URLS=$(( KATANA_URLS + SPIDER_URLS ))
+        echo -e "${BLUE}[*] Total no contexto ZAP: Katana=${KATANA_URLS} + Spider=${SPIDER_URLS} = ${TOTAL_URLS} URL(s)${NC}"
 
-        if [ "${SPIDER_URLS:-0}" -eq 0 ]; then
-            echo -e "${YELLOW}[!] Spider não coletou URLs — adicionando target manualmente ao contexto ZAP${NC}"
+        if [ "${TOTAL_URLS:-0}" -eq 0 ]; then
+            echo -e "${YELLOW}[!] Nenhuma URL descoberta — adicionando target manualmente${NC}"
             zap_api_call "core/action/accessUrl" "url=${ENCODED_URL}" > /dev/null 2>&1
             sleep 3
         fi
@@ -665,7 +722,7 @@ else
     echo -e "${YELLOW}[○] ZAP não instalado — pulando fase 4${NC}"
 fi
 
-export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT
+export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS
 
 # ====================== FASE 7: JS ANALYSIS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
@@ -875,7 +932,7 @@ echo -e "\n${CYAN}════════════════════�
 echo -e "${CYAN}  FASE 8/8: GERAÇÃO DE RELATÓRIO${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS
 
 python3 << 'PYEOF'
 import json, os, html, re
@@ -1002,6 +1059,11 @@ OPENAPI_FOUND   = os.environ.get('OPENAPI_FOUND','0') == '1'
 TLS_ISSUES      = int(os.environ.get('TLS_ISSUES','0'))
 CONFIRMED_COUNT = int(os.environ.get('CONFIRMED_COUNT','0'))
 SCAN_START_TS   = int(os.environ.get('SCAN_START_TS','0'))
+JS_SECRETS      = int(os.environ.get('JS_SECRETS','0'))
+JS_ENDPOINTS    = int(os.environ.get('JS_ENDPOINTS','0'))
+JS_FRAMEWORKS   = int(os.environ.get('JS_FRAMEWORKS','0'))
+JS_FILES        = int(os.environ.get('JS_FILES','0'))
+KATANA_URLS     = int(os.environ.get('KATANA_URLS','0'))
 errors = []
 
 # Nuclei
@@ -1623,13 +1685,14 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
 <p><strong>Total de Achados:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
 <p><strong>Duração total do scan:</strong> {duration_str}</p>
-<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}</p>
+<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ Katana" if KATANA_URLS > 0 else ""}{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}</p>
 <p><strong>Exploits verificados ativamente:</strong> {CONFIRMED_COUNT} re-executados com resposta capturada</p></div>
 <h2>2. Superfície de Ataque</h2>
 <table>
 <tr><th style="width:220px">Subdomínios descobertos</th><td>{SUB_COUNT}</td></tr>
 <tr><th>Subdomínios ativos (HTTP)</th><td>{ACTIVE_COUNT}</td></tr>
-<tr><th>Portas abertas</th><td><code>{html.escape(OPEN_PORTS)}</code></td></tr></table>
+<tr><th>Portas abertas</th><td><code>{html.escape(OPEN_PORTS)}</code></td></tr>
+{f'<tr><th>URLs (Katana JS crawl)</th><td>{KATANA_URLS} URL(s) descobertas com rendering JS</td></tr>' if KATANA_URLS > 0 else ""}</table>
 <h3>Hosts Ativos (httpx)</h3><table><tr><th>Resultado</th></tr>{trows(httpx_lines,"httpx não executado ou sem resultados detectados")}</table>
 <h3>Portas Abertas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado ou sem portas abertas")}</table>
 <h2>3. Vulnerabilidades Identificadas</h2>{vhtml}
@@ -1659,6 +1722,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {"<li><code>raw/cve_enrichment.json</code> — Dados CVE (CVSS + EPSS) do NVD/FIRST</li>" if cve_enrichment else ""}
 {"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
 {"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}
+{"<li><code>raw/katana_urls.txt</code> — URLs descobertas pelo Katana (JS crawl)</li>" if KATANA_URLS > 0 else ""}
 {"<li><code>raw/js_analysis.json</code> — Análise JS/Secrets completa</li>" if js_analysis else ""}
 {"<li><code>raw/js_files/</code> — Arquivos JS para análise forense</li>" if js_files_list else ""}
 </ul>
