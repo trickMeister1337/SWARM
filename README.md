@@ -2,11 +2,11 @@
 
 > Scanner de segurança web automatizado — pipeline de 8 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads.
 
-![Bash](docs/badges/bash.svg)
-![Python](docs/badges/python.svg)
-![Platform](docs/badges/platform.svg)
-![Tests](docs/badges/tests.svg)
-![License](docs/badges/license.svg)
+[![Bash](https://img.shields.io/badge/Language-Bash-4EAA25?style=flat-square&logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![Python](https://img.shields.io/badge/Language-Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux-E95420?style=flat-square&logo=linux&logoColor=white)](https://ubuntu.com/)
+[![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen?style=flat-square)](test_swarm.sh)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 ---
 
@@ -231,7 +231,7 @@ scan_target.com_20260418_143022/
 | 5 | Confirmação Ativa | Resultados de re-execução dos exploits Nuclei |
 | 6 | JS / Secrets | Secrets detectados (mascarados), frameworks, endpoints expostos |
 | 7 | Achados Baixo / Info | Tabela compacta agrupada por tipo |
-| 8 | Plano de Ação | Esta semana / Próximo sprint / Backlog 30 dias |
+| 8 | Plano de Action | Esta semana / Próximo sprint / Backlog 30 dias |
 | 9 | Arquivos de Evidência | Links para todos os arquivos raw |
 
 ---
