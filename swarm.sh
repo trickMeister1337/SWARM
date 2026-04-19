@@ -90,10 +90,413 @@ cleanup() {
 trap cleanup EXIT
 
 # ====================== VALIDAÇÃO INICIAL ======================
-TARGET=$1
-[ -z "$TARGET" ] && echo -e "${RED}Uso: $0 <URL_ALVO>${NC}" && \
-    echo -e "${YELLOW}Exemplo: $0 https://target.com${NC}" && exit 1
 
+# ── Suporte a modo single-target e multi-target (-f / --file) ───
+TARGETS_FILE=""
+TARGET=""
+
+PARALLEL_JOBS=1  # default: sequencial
+if [ "$1" = "-f" ] || [ "$1" = "--file" ] || [ "$1" = "--f" ]; then
+    TARGETS_FILE="$2"
+    [ -z "$TARGETS_FILE" ] && \
+        echo -e "${RED}[✗] Informe o arquivo de alvos: $0 -f targets.txt${NC}" && exit 1
+    [ ! -f "$TARGETS_FILE" ] && \
+        echo -e "${RED}[✗] Arquivo não encontrado: $TARGETS_FILE${NC}" && exit 1
+    # Aceitar --parallel N após -f: ./swarm.sh -f targets.txt --parallel 3
+    if [ "${3}" = "--parallel" ] || [ "${3}" = "-p" ]; then
+        PARALLEL_JOBS="${4:-2}"
+    fi
+elif [ -n "$1" ] && echo "$1" | grep -q '^-'; then
+    echo -e "${RED}[✗] Flag desconhecida: $1${NC}"
+    echo -e "${YELLOW}Uso:${NC}"
+    echo -e "  ${YELLOW}$0 https://target.com${NC}         — scan único"
+    echo -e "  ${YELLOW}$0 -f targets.txt${NC}             — múltiplos alvos"
+    exit 1
+elif [ -n "$1" ]; then
+    TARGET="$1"
+else
+    echo -e "${RED}Uso:${NC}"
+    echo -e "  ${YELLOW}$0 https://target.com${NC}         — scan único"
+    echo -e "  ${YELLOW}$0 -f targets.txt${NC}             — múltiplos alvos"
+    echo -e ""
+    echo -e "  targets.txt: uma URL por linha, linhas com # são ignoradas"
+    exit 1
+fi
+
+# ── Modo multi-target: orquestrar scans sequenciais ─────────────
+if [ -n "$TARGETS_FILE" ]; then
+    BATCH_START=$(date +%s)
+    BATCH_TS=$(date +%Y%m%d_%H%M%S)
+    BATCH_DIR="scan_batch_${BATCH_TS}"
+    mkdir -p "$BATCH_DIR"
+
+    # Ler alvos (ignorar linhas vazias e comentários; auto-prefixar https:// se necessário)
+    mapfile -t TARGETS < <(
+        grep -v '^\s*#' "$TARGETS_FILE" \
+        | grep -v '^\s*$' \
+        | sed 's/\s*#.*//' \
+        | sed $'s/\r//' \
+        | sed 's/[[:space:]]//g' \
+        | awk '{ if ($0 !~ /^https?:\/\//) print "https://" $0; else print $0 }' \
+        | grep -v '^$'
+    )
+    TOTAL_TARGETS=${#TARGETS[@]}
+
+    if [ "$TOTAL_TARGETS" -eq 0 ]; then
+        echo -e "${RED}[✗] Nenhum alvo válido encontrado em $TARGETS_FILE${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}${BOLD}  SWARM — MODO MULTI-TARGET${NC}"
+    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}[+] Arquivo   : $TARGETS_FILE${NC}"
+    echo -e "${GREEN}[+] Alvos     : $TOTAL_TARGETS${NC}"
+    echo -e "${GREEN}[+] Batch dir : $BATCH_DIR/${NC}"
+    echo -e "${GREEN}[+] Iniciado  : $(date '+%d/%m/%Y %H:%M:%S')${NC}"
+    echo ""
+
+    # Arquivo de log do batch
+    BATCH_LOG="$BATCH_DIR/batch_summary.log"
+    echo "# SWARM Batch — $BATCH_TS" > "$BATCH_LOG"
+    echo "# Alvos: $TOTAL_TARGETS" >> "$BATCH_LOG"
+    echo "" >> "$BATCH_LOG"
+
+    # Resultados por alvo (para relatório consolidado)
+    BATCH_RESULTS=()
+    BATCH_FAILED=()
+    SCAN_IDX=0
+
+    # Garantir que PARALLEL_JOBS é número válido (mín 1, máx 5)
+    PARALLEL_JOBS=$(( PARALLEL_JOBS < 1 ? 1 : PARALLEL_JOBS > 5 ? 5 : PARALLEL_JOBS ))
+
+    if [ "$PARALLEL_JOBS" -gt 1 ]; then
+        echo -e "${YELLOW}[*] Modo paralelo: até $PARALLEL_JOBS scans simultâneos${NC}"
+        echo -e "${YELLOW}    Atenção: scans paralelos compartilham CPU/RAM — recomendado para staging/lab${NC}"
+        echo -e "${YELLOW}    Logs individuais em: ${BATCH_DIR}/logs/${NC}"
+        mkdir -p "${BATCH_DIR}/logs"
+    else
+        echo -e "${BLUE}[*] Modo sequencial (padrão) — use --parallel N para rodar em paralelo${NC}"
+    fi
+    echo ""
+
+    # Função que executa um único scan e registra resultado
+    run_single_scan() {
+        local _bt_url="$1" _bt_idx="$2"
+        local _bt_start _bt_end _bt_dur _bt_domain _bt_outdir
+
+        echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${CYAN}  ALVO ${_bt_idx}/${TOTAL_TARGETS}: ${_bt_url}${NC}"
+        echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+        _bt_start=$(date +%s)
+        if SWARM_BATCH=1 bash "$0" "$_bt_url" 2>&1; then
+            _bt_end=$(date +%s)
+            _bt_dur=$(( _bt_end - _bt_start ))
+
+            # Localizar o diretório gerado para este alvo
+            _bt_domain=$(echo "$_bt_url" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
+            _bt_outdir=$(ls -td "scan_${_bt_domain}_"* 2>/dev/null | head -1)
+
+            if [ -n "$_bt_outdir" ]; then
+                mv "$_bt_outdir" "$BATCH_DIR/" 2>/dev/null || true
+                _bt_outdir="$BATCH_DIR/$(basename "$_bt_outdir")"
+
+                # Coletar stats do scan
+                _bt_crit=$(python3 -c "
+import json, os
+try:
+    f=open('$_bt_outdir/raw/zap_alerts.json'); d=json.load(f)
+    print(sum(1 for a in d.get('alerts',[]) if a.get('risk','').lower()=='high'))
+except: print(0)" 2>/dev/null || echo 0)
+
+                BATCH_RESULTS+=("$_bt_url|$_bt_outdir|$_bt_dur|OK")
+                echo "OK|$_bt_url|$_bt_outdir|${_bt_dur}s" >> "$BATCH_LOG"
+                echo -e "${GREEN}[✓] $_bt_url concluído em ${_bt_dur}s → $_bt_outdir${NC}"
+            else
+                BATCH_RESULTS+=("$_bt_url||$_bt_dur|OK")
+                echo -e "${YELLOW}[!] $_bt_url concluído mas diretório não localizado${NC}"
+            fi
+        else
+            BATCH_FAILED+=("$_bt_url")
+            echo "FAIL|$_bt_url" >> "$BATCH_LOG"
+            echo -e "${RED}[✗] $_bt_url falhou${NC}"
+        fi
+        echo ""
+    }
+
+    # Executar scans: sequencial ou paralelo com semáforo
+    if [ "$PARALLEL_JOBS" -eq 1 ]; then
+        # ── Modo sequencial ─────────────────────────────────────
+        for _bt_url in "${TARGETS[@]}"; do
+            SCAN_IDX=$((SCAN_IDX + 1))
+            run_single_scan "$_bt_url" "$SCAN_IDX"
+        done
+    else
+        # ── Modo paralelo com semáforo (max PARALLEL_JOBS) ──────
+        _pids=()
+        _pid_urls=()
+        for _bt_url in "${TARGETS[@]}"; do
+            SCAN_IDX=$((SCAN_IDX + 1))
+            _cur_idx=$SCAN_IDX
+
+            # Aguardar vaga se já atingiu o limite
+            while [ "${#_pids[@]}" -ge "$PARALLEL_JOBS" ]; do
+                # Verificar se algum job terminou
+                _new_pids=()
+                _new_urls=()
+                for _i in "${!_pids[@]}"; do
+                    if kill -0 "${_pids[$_i]}" 2>/dev/null; then
+                        _new_pids+=("${_pids[$_i]}")
+                        _new_urls+=("${_pid_urls[$_i]}")
+                    fi
+                done
+                _pids=("${_new_pids[@]}")
+                _pid_urls=("${_new_urls[@]}")
+                [ "${#_pids[@]}" -ge "$PARALLEL_JOBS" ] && sleep 5
+            done
+
+            # Lançar scan em background
+            _log="${BATCH_DIR}/logs/$(echo "$_bt_url" | sed "s|https\?://||g" | sed "s/[^a-zA-Z0-9._-]/_/g").log"
+            echo -e "${BLUE}[→] Lançando scan $_cur_idx/$TOTAL_TARGETS: $_bt_url${NC}"
+            (
+                run_single_scan "$_bt_url" "$_cur_idx" > "$_log" 2>&1
+                echo -e "${GREEN}[✓] Paralelo concluído: $_bt_url — log: $_log${NC}"
+            ) &
+            _pids+=($!)
+            _pid_urls+=("$_bt_url")
+            sleep 2  # pequeno delay para evitar colisão de timestamps
+        done
+
+        # Aguardar todos os jobs restantes
+        echo -e "${BLUE}[*] Aguardando scans paralelos finalizarem...${NC}"
+        for _pid in "${_pids[@]}"; do
+            wait "$_pid" 2>/dev/null || true
+        done
+        echo -e "${GREEN}[✓] Todos os scans paralelos concluídos${NC}"
+    fi
+
+    # ── Gerar relatório consolidado HTML ─────────────────────────
+    BATCH_END=$(date +%s)
+    BATCH_DUR=$(( BATCH_END - BATCH_START ))
+
+    python3 - "$BATCH_DIR" "$BATCH_TS" "$BATCH_DUR" "${BATCH_RESULTS[@]}" << 'PYBATCH'
+import sys, json, os, html
+from datetime import datetime
+
+batch_dir   = sys.argv[1]
+batch_ts    = sys.argv[2]
+batch_dur   = int(sys.argv[3])
+results_raw = sys.argv[4:]
+
+results = []
+for r in results_raw:
+    parts = r.split("|")
+    if len(parts) >= 4:
+        url, outdir, dur, status = parts[0], parts[1], parts[2], parts[3]
+        results.append({"url": url, "outdir": outdir, "dur": dur, "status": status})
+
+def read_stats(outdir):
+    """Lê stats do relatório HTML ou raw files."""
+    stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0,"risk":0,"total":0}
+    if not outdir or not os.path.exists(outdir): return stats
+    # Try reading from zap_alerts
+    zap_f = os.path.join(outdir,"raw","zap_alerts.json")
+    nuc_f = os.path.join(outdir,"raw","nuclei.json")
+    sev_map = {"high":"high","medium":"medium","low":"low","informational":"info"}
+    if os.path.exists(zap_f):
+        try:
+            data = json.load(open(zap_f))
+            for a in data.get("alerts",[]):
+                s = sev_map.get(a.get("risk","").lower(),"info")
+                if s in stats: stats[s] += 1
+        except: pass
+    if os.path.exists(nuc_f):
+        try:
+            for line in open(nuc_f):
+                line = line.strip()
+                if not line: continue
+                d = json.loads(line)
+                s = d.get("info",{}).get("severity","info").lower()
+                if s in stats: stats[s] += 1
+        except: pass
+    stats["total"] = sum(v for k,v in stats.items() if k != "risk" and k != "total")
+    stats["risk"] = min(
+        stats["critical"]*10 + stats["high"]*5 + stats["medium"]*2 + stats["low"], 100
+    )
+    return stats
+
+def risk_color(r):
+    if r >= 70: return "#7a2e2e"
+    if r >= 40: return "#b34e4e"
+    if r >= 15: return "#d4833a"
+    return "#27ae60"
+
+def risk_label(r):
+    if r >= 70: return "CRÍTICO"
+    if r >= 40: return "ALTO"
+    if r >= 15: return "MÉDIO"
+    return "BAIXO"
+
+rdate = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+dur_str = f"{batch_dur//3600}h {(batch_dur%3600)//60}m {batch_dur%60}s"
+total_scans = len(results)
+ok_scans    = sum(1 for r in results if r["status"] == "OK")
+
+# Build target rows
+rows_html = ""
+all_stats = []
+for r in results:
+    stats = read_stats(r["outdir"])
+    all_stats.append(stats)
+    report_path = os.path.join(r["outdir"], "relatorio_swarm.html") if r["outdir"] else ""
+    report_link = (f'<a href="{html.escape(report_path)}" target="_blank" '
+                   f'style="color:#388bfd">Ver Relatório</a>') if os.path.exists(report_path) else "—"
+    rc = risk_color(stats["risk"])
+    rl = risk_label(stats["risk"])
+
+    rows_html += f"""
+    <tr>
+      <td style="font-weight:500">{html.escape(r["url"])}</td>
+      <td style="text-align:center">
+        <span style="background:{rc};color:white;padding:2px 8px;border-radius:4px;
+          font-size:11px;font-weight:bold">{stats["risk"]}</span>
+        <span style="color:{rc};font-size:11px;font-weight:bold;margin-left:4px">{rl}</span>
+      </td>
+      <td style="text-align:center"><span style="color:#7a2e2e;font-weight:bold">{stats['critical']}</span></td>
+      <td style="text-align:center"><span style="color:#b34e4e;font-weight:bold">{stats['high']}</span></td>
+      <td style="text-align:center"><span style="color:#d4833a">{stats['medium']}</span></td>
+      <td style="text-align:center"><span style="color:#4a7c8c">{stats['low']}</span></td>
+      <td style="text-align:center;color:#666">{stats['info']}</td>
+      <td style="text-align:center;font-size:12px;color:#888">{r["dur"]}s</td>
+      <td style="text-align:center">{report_link}</td>
+    </tr>"""
+
+# Summary stats
+total_crit = sum(s["critical"] for s in all_stats)
+total_high = sum(s["high"]     for s in all_stats)
+total_med  = sum(s["medium"]   for s in all_stats)
+max_risk   = max((s["risk"] for s in all_stats), default=0)
+avg_risk   = int(sum(s["risk"] for s in all_stats) / len(all_stats)) if all_stats else 0
+
+page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
+<title>SWARM — Relatório Consolidado</title>
+<style>
+body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
+.container{{max-width:1200px;margin:0 auto;background:white;border-radius:10px;
+  overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.1)}}
+.header{{background:#1a3a4f;color:white;padding:30px;text-align:center}}
+.header h1{{margin:0 0 8px;font-size:22px}}
+.content{{padding:30px}}
+.stats{{display:flex;gap:15px;margin:20px 0;flex-wrap:wrap}}
+.stat-card{{flex:1;padding:18px;text-align:center;color:white;border-radius:8px;min-width:110px}}
+.stat-card .number{{font-size:32px;font-weight:bold}}
+.stat-card .label{{font-size:12px;margin-top:4px;opacity:.9}}
+table{{width:100%;border-collapse:collapse;margin:12px 0}}
+th,td{{border:1px solid #ddd;padding:10px;text-align:left;vertical-align:middle}}
+th{{background:#f5f5f5;font-weight:600;font-size:13px}}
+td{{font-size:13px}}
+tr:hover td{{background:#f9f9f9}}
+h2{{color:#1a3a4f;border-bottom:2px solid #e0e0e0;padding-bottom:8px;margin-top:30px}}
+.footer{{background:#f5f5f5;padding:16px;text-align:center;font-size:12px;color:#666}}
+.info-box{{background:#e8f4f8;padding:14px;border-radius:8px;
+  margin:16px 0;border-left:4px solid #1a3a4f;font-size:13px}}
+</style></head>
+<body><div class="container">
+<div class="header">
+  <h1>🕷️ SWARM — Relatório Consolidado de Segurança</h1>
+  <p>Batch: {html.escape(batch_ts)} &nbsp;|&nbsp; {ok_scans}/{total_scans} scan(s) concluídos
+     &nbsp;|&nbsp; Duração total: {dur_str}</p>
+  <p>Gerado em: {rdate} &nbsp;|&nbsp; <strong>CONFIDENCIAL</strong></p>
+</div>
+<div class="content">
+
+<h2>Sumário Executivo</h2>
+<div class="stats">
+  <div class="stat-card" style="background:#1a3a4f">
+    <div class="number">{total_scans}</div>
+    <div class="label">Alvos</div>
+  </div>
+  <div class="stat-card" style="background:#7a2e2e">
+    <div class="number">{total_crit}</div>
+    <div class="label">CRÍTICO (total)</div>
+  </div>
+  <div class="stat-card" style="background:#b34e4e">
+    <div class="number">{total_high}</div>
+    <div class="label">ALTO (total)</div>
+  </div>
+  <div class="stat-card" style="background:#d4833a">
+    <div class="number">{total_med}</div>
+    <div class="label">MÉDIO (total)</div>
+  </div>
+  <div class="stat-card" style="background:{risk_color(max_risk)}">
+    <div class="number">{max_risk}</div>
+    <div class="label">Risco Máximo</div>
+  </div>
+  <div class="stat-card" style="background:#4a7c8c">
+    <div class="number">{avg_risk}</div>
+    <div class="label">Risco Médio</div>
+  </div>
+</div>
+<div class="info-box">
+  <strong>Ordem:</strong> Alvos ordenados conforme listados no arquivo de entrada.
+  Clique em "Ver Relatório" para acessar a análise completa de cada alvo.
+  Os relatórios individuais ficam em subpastas deste diretório.
+</div>
+
+<h2>Resultados por Alvo</h2>
+<table>
+  <tr style="background:#1a3a4f;color:white">
+    <th style="background:#1a3a4f;color:white">Alvo</th>
+    <th style="background:#1a3a4f;color:white;text-align:center">Risco</th>
+    <th style="background:#7a2e2e;color:white;text-align:center">C</th>
+    <th style="background:#b34e4e;color:white;text-align:center">A</th>
+    <th style="background:#d4833a;color:white;text-align:center">M</th>
+    <th style="background:#4a7c8c;color:white;text-align:center">B</th>
+    <th style="background:#6e8f72;color:white;text-align:center">I</th>
+    <th style="background:#1a3a4f;color:white;text-align:center">Duração</th>
+    <th style="background:#1a3a4f;color:white;text-align:center">Relatório</th>
+  </tr>
+  {rows_html}
+</table>
+
+</div>
+<div class="footer">
+  <p><strong>CONFIDENCIAL — USO INTERNO</strong></p>
+  <p>SWARM — Scanner Automatizado de Segurança</p>
+</div>
+</div></body></html>"""
+
+out = os.path.join(batch_dir, "relatorio_consolidado.html")
+open(out,"w",encoding="utf-8").write(page)
+print(f"[✓] Relatório consolidado: {out}")
+print(f"[✓] {total_scans} alvo(s) | Risco máximo: {max_risk} | Risco médio: {avg_risk}")
+PYBATCH
+
+    # Resumo no terminal
+    echo -e "\n${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}${BOLD}  BATCH CONCLUÍDO — $(date '+%d/%m/%Y %H:%M:%S')${NC}"
+    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}📁 Diretório batch  : ${BATCH_DIR}/${NC}"
+    echo -e "${CYAN}📊 Relatório geral  : ${BATCH_DIR}/relatorio_consolidado.html${NC}"
+    echo -e "${CYAN}📋 Log do batch     : ${BATCH_DIR}/batch_summary.log${NC}"
+    echo ""
+    echo -e "${GREEN}  Scans: $SCAN_IDX/${TOTAL_TARGETS}${NC}"
+    if [ ${#BATCH_FAILED[@]} -gt 0 ]; then
+        echo -e "${RED}  Falharam:${NC}"
+        for _f in "${BATCH_FAILED[@]}"; do
+            echo -e "${RED}    • $_f${NC}"
+        done
+    fi
+    echo ""
+
+    [ -n "$DISPLAY" ] && command -v xdg-open &>/dev/null && \
+        xdg-open "$BATCH_DIR/relatorio_consolidado.html" 2>/dev/null
+
+    exit 0
+fi
+
+# ── Modo single-target: continua normalmente ─────────────────────
 DOMAIN=$(echo "$TARGET" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SCAN_START_TS=$(date +%s)
@@ -110,8 +513,12 @@ echo -e "${GREEN}[+] Iniciado : $(date '+%d/%m/%Y %H:%M:%S')${NC}"
 echo ""
 
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$TARGET" 2>/dev/null)
-echo "$HTTP_CODE" | grep -qE "^(200|301|302|401|403|404)$" || \
-    { echo -e "${RED}[✗] Site não acessível (HTTP ${HTTP_CODE:-timeout})${NC}"; exit 1; }
+if ! echo "$HTTP_CODE" | grep -qE "^(200|301|302|401|403|404)$"; then
+    echo -e "${RED}[✗] Site não acessível (HTTP ${HTTP_CODE:-timeout})${NC}"
+    # Em modo batch: registrar falha mas não abortar o processo inteiro
+    [ "${SWARM_BATCH:-0}" = "1" ] && exit 1
+    exit 1
+fi
 echo -e "${GREEN}[✓] Site acessível (HTTP ${HTTP_CODE})${NC}"
 echo ""
 
@@ -1746,7 +2153,9 @@ echo -e "${CYAN}📄 Relatório   : ${OUTDIR}/relatorio_swarm.html${NC}"
 echo -e "${CYAN}📦 Dados brutos: ${OUTDIR}/raw/${NC}"
 echo ""
 
-[ -n "$DISPLAY" ] && command -v xdg-open &>/dev/null && \
+# Abrir relatório apenas em modo single-target (batch abre o consolidado no final)
+[ "${SWARM_BATCH:-0}" = "0" ] && \
+    [ -n "$DISPLAY" ] && command -v xdg-open &>/dev/null && \
     xdg-open "$OUTDIR/relatorio_swarm.html" 2>/dev/null
 
 exit 0
