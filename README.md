@@ -1,18 +1,53 @@
 # 🕷️ SWARM
 
-> Scanner de segurança web automatizado — pipeline de 8 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads.
+> Scanner de segurança web automatizado — pipeline de 11 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads.
 
-![Bash](docs/badges/bash.svg)
-![Python](docs/badges/python.svg)
-![Platform](docs/badges/platform.svg)
-![Tests](docs/badges/tests.svg)
-![License](docs/badges/license.svg)
+[![Shell](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![Python](https://img.shields.io/badge/Python-3.8+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Kali%20%7C%20Ubuntu%20%7C%20WSL-557C94?logo=linux&logoColor=white)](#instalação)
+[![Tests](https://img.shields.io/badge/Tests-158%20passing-brightgreen)](#uso)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
 
 ## Arquitetura
 
-![SWARM Architecture](docs/architecture.svg)
+```mermaid
+flowchart TD
+    A([🎯 TARGET URL]) --> B
+
+    subgraph RECON["Reconhecimento"]
+        B[FASE 1 · Subfinder\nSubdomínios] --> C[FASE 2 · httpx + nmap\nHosts ativos + portas]
+    end
+
+    subgraph SCAN["Scan de Vulnerabilidades (paralelo)"]
+        C --> D[FASE 3 · testssl\nAnálise TLS/SSL]
+        C --> E[FASE 4 · Nuclei\nCVE · misconfig · default-login\ntakeover · cors]
+        D & E --> F[FASE 5 · Confirmação ativa\nRe-executa curl C/A/M]
+    end
+
+    subgraph INTEL["Inteligência"]
+        F --> G[FASE 6 · CVE/EPSS\nNVD + FIRST.org]
+        G --> H[FASE 7 · WAF Detection\nwafw00f]
+        H --> I[FASE 8 · Email Security\nSPF · DMARC · DKIM]
+    end
+
+    subgraph DYNAMIC["Análise Dinâmica"]
+        I --> J[FASE 9 · OWASP ZAP\nKatana JS crawl → Spider → Active Scan]
+        J --> K[FASE 10 · JS / Secrets\n20 padrões · endpoints · frameworks]
+    end
+
+    K --> L[FASE 11 · Relatório HTML\nPT-BR · self-contained · abre offline]
+    L --> M([📄 relatorio_swarm.html])
+
+    style A fill:#1a3a4f,color:#fff
+    style M fill:#27ae60,color:#fff
+    style L fill:#1a3a4f,color:#fff
+    style RECON fill:#f0f7ff,stroke:#388bfd
+    style SCAN fill:#fff8f0,stroke:#d4833a
+    style INTEL fill:#f0fff4,stroke:#27ae60
+    style DYNAMIC fill:#fff0f0,stroke:#e74c3c
+```
 
 ---
 
