@@ -22,6 +22,18 @@ ZAP_SCAN_TIMEOUT=0               # 0 = sem timeout (aguarda conclusão)
 NUCLEI_RATE_LIMIT=50
 NUCLEI_CONCURRENCY=10
 
+# Rotação de User-Agents — browsers reais para evasão passiva de WAF
+USER_AGENTS=(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15"
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/124.0.0.0 Safari/537.36"
+)
+# Selecionar UA aleatório
+RANDOM_UA="${USER_AGENTS[$((RANDOM % ${#USER_AGENTS[@]}))]}"
+
 # ====================== FUNÇÕES ======================
 
 validate_tool() {
@@ -251,11 +263,29 @@ echo -e "${CYAN}═════════════════════�
 NUCLEI_COUNT=0
 if command -v nuclei &>/dev/null; then
     echo -e "${YELLOW}[!] Scan pode levar 5-10 minutos (rate-limit: ${NUCLEI_RATE_LIMIT} req/s)...${NC}"
-    nuclei -u "$TARGET" \
+    # Construir flags de evasão baseado em WAF detectado
+    NUCLEI_EVASION_FLAGS=""
+    if [ "${WAF_DETECTED}" = "1" ]; then
+        # User-Agent de browser real + headers que imitam tráfego legítimo
+        NUCLEI_EVASION_FLAGS="-H \"User-Agent: ${RANDOM_UA}\""
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\""
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"Accept-Language: pt-BR,pt;q=0.9,en;q=0.8\""
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"X-Forwarded-For: 127.0.0.1\""
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"X-Real-IP: 127.0.0.1\""
+        # Ignorar respostas de bloqueio do WAF (403/406/429) e continuar
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -hc 403,406,429"
+        # Payload alterations — testa variações de encoding automaticamente
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -pa"
+        [ -n "$NUCLEI_DELAY" ] && NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -rl-duration $NUCLEI_DELAY"
+        echo -e "${BLUE}[*] Evasão passiva ativada: UA rotation + origin spoofing + payload alterations${NC}"
+    fi
+
+    eval nuclei -u "$TARGET" \
            -tags cve,tech,exposure,default-login,misconfig,takeover,cors \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
            -timeout 10 -no-interactsh \
+           $NUCLEI_EVASION_FLAGS \
            -jsonl -o "$OUTDIR/raw/nuclei.json" \
            > /dev/null 2>"$OUTDIR/raw/nuclei_error.log"
 
@@ -545,6 +575,24 @@ fi
 
 export WAF_DETECTED WAF_NAME
 
+# ── Ajuste adaptativo de parâmetros quando WAF detectado ────────
+if [ "${WAF_DETECTED}" = "1" ]; then
+    echo -e "${YELLOW}[*] WAF detectado — ajustando configurações para evasão passiva:${NC}"
+    # Rate limit reduzido para imitar tráfego legítimo
+    NUCLEI_RATE_LIMIT=5
+    NUCLEI_CONCURRENCY=2
+    echo -e "${YELLOW}    → Nuclei: rate limit ${NUCLEI_RATE_LIMIT} req/s, concurrency ${NUCLEI_CONCURRENCY}${NC}"
+    # Delay randômico entre requests (1-3s)
+    NUCLEI_DELAY="1s-3s"
+    echo -e "${YELLOW}    → Delay randômico: ${NUCLEI_DELAY} entre requests${NC}"
+    # Selecionar novo UA aleatório para esta fase
+    RANDOM_UA="${USER_AGENTS[$((RANDOM % ${#USER_AGENTS[@]}))]}"
+    echo -e "${YELLOW}    → User-Agent: ${RANDOM_UA:0:60}...${NC}"
+else
+    NUCLEI_DELAY=""
+fi
+export NUCLEI_RATE_LIMIT NUCLEI_CONCURRENCY NUCLEI_DELAY RANDOM_UA
+
 # ====================== FASE 7: EMAIL SECURITY ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}  FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)${NC}"
@@ -754,6 +802,35 @@ PYFIX
 
     if zap_api_call "core/view/version" "" | grep -q "version"; then
         echo -e "${GREEN}[✓] API do ZAP respondendo${NC}"
+
+        # Configurar evasão no ZAP quando WAF detectado
+        if [ "${WAF_DETECTED}" = "1" ]; then
+            echo -e "${BLUE}[*] Configurando ZAP para evasão passiva de WAF...${NC}"
+            # Definir User-Agent de browser real
+            _ua_encoded=$(python3 -c \
+                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
+                "${RANDOM_UA}" 2>/dev/null)
+            zap_api_call "network/action/setDefaultUserAgent" \
+                "userAgent=${_ua_encoded}" > /dev/null 2>&1
+            # Adicionar headers que imitam browser legítimo
+            for _hdr in \
+                "X-Forwarded-For:127.0.0.1" \
+                "X-Real-IP:127.0.0.1" \
+                "Accept-Language:pt-BR,pt;q=0.9,en;q=0.8" \
+                "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"; do
+                _hname="${_hdr%%:*}"
+                _hval="${_hdr#*:}"
+                _hval_enc=$(python3 -c \
+                    "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
+                    "${_hval}" 2>/dev/null)
+                zap_api_call "replacer/action/addRule" \
+                    "description=WAF-Evasion-${_hname}&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
+                    > /dev/null 2>&1
+            done
+            # Reduzir thread count do ZAP para imitar tráfego humano
+            zap_api_call "ascan/action/setOptionThreadPerHost" "Integer=2" > /dev/null 2>&1
+            echo -e "${GREEN}[✓] ZAP: UA rotation + headers de evasão configurados${NC}"
+        fi
 
         ENCODED_URL=$(python3 -c \
             "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$TARGET")

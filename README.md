@@ -1,4 +1,4 @@
-# SWARM
+# 🕷️ SWARM
 
 > Scanner de segurança web automatizado — pipeline de 11 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads.
 
@@ -28,7 +28,7 @@ flowchart TD
 
     subgraph INTEL["Inteligência"]
         F --> G[FASE 6 · CVE/EPSS\nNVD + FIRST.org]
-        G --> H[FASE 7 · WAF Detection\nwafw00f]
+        G --> H[FASE 7 · WAF Detection\nwafw00f + evasão passiva]
         H --> I[FASE 8 · Email Security\nSPF · DMARC · DKIM]
     end
 
@@ -114,6 +114,28 @@ FASE 11  Relatório HTML
 - **Misconfiguration** — configs expostos, debug endpoints, stack traces
 - **Exposure** — S3 buckets públicos, repos Git expostos, arquivos de backup
 - **Confirmação ativa** — re-executa o curl do Nuclei (só C/A/M) para verificar se ainda é explorável
+
+### WAF Detection & Evasão Passiva
+- **wafw00f** — detecta 140+ WAFs (Cloudflare, AWS WAF, Imperva, Akamai, F5, Sucuri, etc.)
+- **Quando WAF detectado**, o SWARM adapta o pipeline automaticamente:
+  - **Rate limit** — reduz para 5 req/s com delay randômico de 1–3s entre requests
+  - **User-Agent rotation** — troca para UA de browser real (Chrome, Firefox, Safari, Edge)
+  - **Origin spoofing** — injeta `X-Forwarded-For: 127.0.0.1` e `X-Real-IP: 127.0.0.1`
+  - **Payload alterations** — Nuclei testa variações de encoding automaticamente (`-pa`)
+  - **WAF response handling** — ignora 403/406/429 e continua o scan
+  - **ZAP threads** — reduz para 2 para imitar tráfego humano
+- Relatório inclui badge de aviso quando WAF detectado e evasão foi ativada
+
+### Segurança de Email (DNS-based, sem ferramentas extras)
+- **SPF** — detecta ausente, `+all` (qualquer remetente), `?all` (neutro), configurado corretamente
+- **DMARC** — detecta ausente, `p=none` (monitor only), `p=quarantine/reject`
+- **DKIM** — verifica seletores comuns (`default`, `google`, `mail`, `s1`, `s2`, etc.)
+- Tabela no relatório com status por protocolo, severidade e recomendação específica
+- Usa apenas `dig` — já instalado no Kali e Ubuntu
+
+### Subdomain Takeover & CORS (via Nuclei)
+- **Takeover templates** — CNAME apontando para Heroku, GitHub Pages, S3, Fastly desativados
+- **CORS templates** — reflexão de Origin sem validação, `null` origin, wildcard de subdomínio
 
 ### Análise Dinâmica (Katana + OWASP ZAP)
 - **Katana** — crawl com rendering JavaScript headless via chromium (`-jc -jsl`)
