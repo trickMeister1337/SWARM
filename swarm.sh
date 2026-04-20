@@ -56,12 +56,22 @@ wait_for_zap() {
 wait_for_zap_progress() {
     local status_endpoint=$1 scan_id=$2 timeout_secs=$3 label=$4
     local elapsed=0 interval=10 progress
-    # timeout_secs=0 significa aguardar indefinidamente até 100%
+    local api_fail_count=0 api_fail_limit=5  # 5 falhas consecutivas = ZAP morreu
     echo -e "${BLUE}[*] Aguardando $label completar (sem timeout)...${NC}"
     while true; do
-        progress=$(zap_api_call "$status_endpoint" "scanId=${scan_id}" 2>/dev/null \
-                   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',0))" 2>/dev/null)
-        progress=${progress:-0}
+        local raw_response
+        raw_response=$(zap_api_call "$status_endpoint" "scanId=${scan_id}" 2>/dev/null)
+        progress=$(echo "$raw_response" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',0))" 2>/dev/null)
+        if [ -z "$progress" ] || ! [[ "$progress" =~ ^[0-9]+$ ]]; then
+            api_fail_count=$((api_fail_count + 1))
+            progress=0
+            if [ "$api_fail_count" -ge "$api_fail_limit" ]; then
+                echo -e "\n${RED}[✗] $label: API ZAP não responde há ${api_fail_count} tentativas — abortando${NC}"
+                return 1
+            fi
+        else
+            api_fail_count=0
+        fi
         if [ "$timeout_secs" -gt 0 ] 2>/dev/null; then
             echo -ne "\r${YELLOW}[*] $label: ${progress}% (${elapsed}s/${timeout_secs}s)${NC}"
         else
@@ -69,7 +79,6 @@ wait_for_zap_progress() {
         fi
         { [ "$progress" = "100" ] || { [ "$progress" -eq "$progress" ] 2>/dev/null && [ "$progress" -ge 100 ]; }; } && \
             echo -e "\n${GREEN}[✓] $label concluído${NC}" && return 0
-        # Respeitar timeout se definido (>0)
         if [ "$timeout_secs" -gt 0 ] 2>/dev/null && [ "$elapsed" -ge "$timeout_secs" ]; then
             echo -e "\n${YELLOW}[!] $label atingiu limite de ${timeout_secs}s — coletando resultados parciais${NC}"
             return 1
@@ -96,404 +105,25 @@ TARGETS_FILE=""
 TARGET=""
 
 PARALLEL_JOBS=1  # default: sequencial
-if [ "$1" = "-f" ] || [ "$1" = "--file" ] || [ "$1" = "--f" ]; then
-    TARGETS_FILE="$2"
-    [ -z "$TARGETS_FILE" ] && \
-        echo -e "${RED}[✗] Informe o arquivo de alvos: $0 -f targets.txt${NC}" && exit 1
-    [ ! -f "$TARGETS_FILE" ] && \
-        echo -e "${RED}[✗] Arquivo não encontrado: $TARGETS_FILE${NC}" && exit 1
-    # Aceitar --parallel N após -f: ./swarm.sh -f targets.txt --parallel 3
-    if [ "${3}" = "--parallel" ] || [ "${3}" = "-p" ]; then
-        PARALLEL_JOBS="${4:-2}"
-    fi
-elif [ -n "$1" ] && echo "$1" | grep -q '^-'; then
-    echo -e "${RED}[✗] Flag desconhecida: $1${NC}"
-    echo -e "${YELLOW}Uso:${NC}"
-    echo -e "  ${YELLOW}$0 https://target.com${NC}         — scan único"
-    echo -e "  ${YELLOW}$0 -f targets.txt${NC}             — múltiplos alvos"
-    exit 1
-elif [ -n "$1" ]; then
+
+# Atribuir alvo se não for flag
+if [ -n "$1" ] && ! echo "$1" | grep -q '^-'; then
     TARGET="$1"
-else
-    echo -e "${RED}Uso:${NC}"
-    echo -e "  ${YELLOW}$0 https://target.com${NC}         — scan único"
-    echo -e "  ${YELLOW}$0 -f targets.txt${NC}             — múltiplos alvos"
-    echo -e ""
-    echo -e "  targets.txt: uma URL por linha, linhas com # são ignoradas"
-    exit 1
 fi
 
-# ── Modo multi-target: orquestrar scans sequenciais ─────────────
-if [ -n "$TARGETS_FILE" ]; then
-    BATCH_START=$(date +%s)
-    BATCH_TS=$(date +%Y%m%d_%H%M%S)
-    BATCH_DIR="scan_batch_${BATCH_TS}"
-    mkdir -p "$BATCH_DIR"
-
-    # Ler alvos (ignorar linhas vazias e comentários; auto-prefixar https:// se necessário)
-    mapfile -t TARGETS < <(
-        grep -v '^\s*#' "$TARGETS_FILE" \
-        | grep -v '^\s*$' \
-        | sed 's/\s*#.*//' \
-        | sed $'s/\r//' \
-        | sed 's/[[:space:]]//g' \
-        | awk '{ if ($0 !~ /^https?:\/\//) print "https://" $0; else print $0 }' \
-        | grep -v '^$'
-    )
-    TOTAL_TARGETS=${#TARGETS[@]}
-
-    if [ "$TOTAL_TARGETS" -eq 0 ]; then
-        echo -e "${RED}[✗] Nenhum alvo válido encontrado em $TARGETS_FILE${NC}"
+if [ "$1" = "-f" ] || [ "$1" = "--file" ] || [ "$1" = "--f" ]; then
+    echo -e "${CYAN}[*] Modo multi-target — use swarm_batch.sh para múltiplos alvos:${NC}"
+    echo -e "${YELLOW}    bash swarm_batch.sh targets.txt${NC}"
+    echo ""
+    # Redirecionar automaticamente para swarm_batch.sh se disponível
+    _batch="$(dirname "$0")/swarm_batch.sh"
+    if [ -f "$_batch" ]; then
+        echo -e "${BLUE}[*] Redirecionando para swarm_batch.sh...${NC}"
+        exec bash "$_batch" "${@:2}"
+    else
+        echo -e "${RED}[✗] swarm_batch.sh não encontrado em: $_batch${NC}"
         exit 1
     fi
-
-    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}${BOLD}  SWARM — MODO MULTI-TARGET${NC}"
-    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}[+] Arquivo   : $TARGETS_FILE${NC}"
-    echo -e "${GREEN}[+] Alvos     : $TOTAL_TARGETS${NC}"
-    echo -e "${GREEN}[+] Batch dir : $BATCH_DIR/${NC}"
-    echo -e "${GREEN}[+] Iniciado  : $(date '+%d/%m/%Y %H:%M:%S')${NC}"
-    echo ""
-
-    # Arquivo de log do batch
-    BATCH_LOG="$BATCH_DIR/batch_summary.log"
-    echo "# SWARM Batch — $BATCH_TS" > "$BATCH_LOG"
-    echo "# Alvos: $TOTAL_TARGETS" >> "$BATCH_LOG"
-    echo "" >> "$BATCH_LOG"
-
-    # Resultados por alvo (para relatório consolidado)
-    BATCH_RESULTS=()
-    BATCH_FAILED=()
-    SCAN_IDX=0
-
-    # Garantir que PARALLEL_JOBS é número válido (mín 1, máx 5)
-    PARALLEL_JOBS=$(( PARALLEL_JOBS < 1 ? 1 : PARALLEL_JOBS > 5 ? 5 : PARALLEL_JOBS ))
-
-    if [ "$PARALLEL_JOBS" -gt 1 ]; then
-        echo -e "${YELLOW}[*] Modo paralelo: até $PARALLEL_JOBS scans simultâneos${NC}"
-        echo -e "${YELLOW}    Atenção: scans paralelos compartilham CPU/RAM — recomendado para staging/lab${NC}"
-        echo -e "${YELLOW}    Logs individuais em: ${BATCH_DIR}/logs/${NC}"
-        mkdir -p "${BATCH_DIR}/logs"
-    else
-        echo -e "${BLUE}[*] Modo sequencial (padrão) — use --parallel N para rodar em paralelo${NC}"
-    fi
-    echo ""
-
-    # Função que executa um único scan e registra resultado
-    run_single_scan() {
-        local _bt_url="$1" _bt_idx="$2"
-        local _bt_start _bt_end _bt_dur _bt_domain _bt_outdir
-
-        echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${CYAN}  ALVO ${_bt_idx}/${TOTAL_TARGETS}: ${_bt_url}${NC}"
-        echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-
-        _bt_start=$(date +%s)
-        if SWARM_BATCH=1 bash "$0" "$_bt_url" 2>&1; then
-            _bt_end=$(date +%s)
-            _bt_dur=$(( _bt_end - _bt_start ))
-
-            # Localizar o diretório gerado para este alvo
-            _bt_domain=$(echo "$_bt_url" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
-            _bt_outdir=$(ls -td "scan_${_bt_domain}_"* 2>/dev/null | head -1)
-
-            if [ -n "$_bt_outdir" ]; then
-                mv "$_bt_outdir" "$BATCH_DIR/" 2>/dev/null || true
-                _bt_outdir="$BATCH_DIR/$(basename "$_bt_outdir")"
-
-                # Coletar stats do scan
-                _bt_crit=$(python3 -c "
-import json, os
-try:
-    f=open('$_bt_outdir/raw/zap_alerts.json'); d=json.load(f)
-    print(sum(1 for a in d.get('alerts',[]) if a.get('risk','').lower()=='high'))
-except: print(0)" 2>/dev/null || echo 0)
-
-                BATCH_RESULTS+=("$_bt_url|$_bt_outdir|$_bt_dur|OK")
-                echo "OK|$_bt_url|$_bt_outdir|${_bt_dur}s" >> "$BATCH_LOG"
-                echo -e "${GREEN}[✓] $_bt_url concluído em ${_bt_dur}s → $_bt_outdir${NC}"
-            else
-                BATCH_RESULTS+=("$_bt_url||$_bt_dur|OK")
-                echo -e "${YELLOW}[!] $_bt_url concluído mas diretório não localizado${NC}"
-            fi
-        else
-            BATCH_FAILED+=("$_bt_url")
-            echo "FAIL|$_bt_url" >> "$BATCH_LOG"
-            echo -e "${RED}[✗] $_bt_url falhou${NC}"
-        fi
-        echo ""
-    }
-
-    # Executar scans: sequencial ou paralelo com semáforo
-    if [ "$PARALLEL_JOBS" -eq 1 ]; then
-        # ── Modo sequencial ─────────────────────────────────────
-        for _bt_url in "${TARGETS[@]}"; do
-            SCAN_IDX=$((SCAN_IDX + 1))
-            run_single_scan "$_bt_url" "$SCAN_IDX"
-        done
-    else
-        # ── Modo paralelo com semáforo (max PARALLEL_JOBS) ──────
-        _pids=()
-        _pid_urls=()
-        for _bt_url in "${TARGETS[@]}"; do
-            SCAN_IDX=$((SCAN_IDX + 1))
-            _cur_idx=$SCAN_IDX
-
-            # Aguardar vaga se já atingiu o limite
-            while [ "${#_pids[@]}" -ge "$PARALLEL_JOBS" ]; do
-                # Verificar se algum job terminou
-                _new_pids=()
-                _new_urls=()
-                for _i in "${!_pids[@]}"; do
-                    if kill -0 "${_pids[$_i]}" 2>/dev/null; then
-                        _new_pids+=("${_pids[$_i]}")
-                        _new_urls+=("${_pid_urls[$_i]}")
-                    fi
-                done
-                _pids=("${_new_pids[@]}")
-                _pid_urls=("${_new_urls[@]}")
-                [ "${#_pids[@]}" -ge "$PARALLEL_JOBS" ] && sleep 5
-            done
-
-            # Lançar scan em background
-            _log="${BATCH_DIR}/logs/$(echo "$_bt_url" | sed "s|https\?://||g" | sed "s/[^a-zA-Z0-9._-]/_/g").log"
-            echo -e "${BLUE}[→] Lançando scan $_cur_idx/$TOTAL_TARGETS: $_bt_url${NC}"
-            (
-                run_single_scan "$_bt_url" "$_cur_idx" > "$_log" 2>&1
-                echo -e "${GREEN}[✓] Paralelo concluído: $_bt_url — log: $_log${NC}"
-            ) &
-            _pids+=($!)
-            _pid_urls+=("$_bt_url")
-            sleep 2  # pequeno delay para evitar colisão de timestamps
-        done
-
-        # Aguardar todos os jobs restantes
-        echo -e "${BLUE}[*] Aguardando scans paralelos finalizarem...${NC}"
-        for _pid in "${_pids[@]}"; do
-            wait "$_pid" 2>/dev/null || true
-        done
-        echo -e "${GREEN}[✓] Todos os scans paralelos concluídos${NC}"
-    fi
-
-    # ── Gerar relatório consolidado HTML ─────────────────────────
-    BATCH_END=$(date +%s)
-    BATCH_DUR=$(( BATCH_END - BATCH_START ))
-
-    python3 - "$BATCH_DIR" "$BATCH_TS" "$BATCH_DUR" "${BATCH_RESULTS[@]}" << 'PYBATCH'
-import sys, json, os, html
-from datetime import datetime
-
-batch_dir   = sys.argv[1]
-batch_ts    = sys.argv[2]
-batch_dur   = int(sys.argv[3])
-results_raw = sys.argv[4:]
-
-results = []
-for r in results_raw:
-    parts = r.split("|")
-    if len(parts) >= 4:
-        url, outdir, dur, status = parts[0], parts[1], parts[2], parts[3]
-        results.append({"url": url, "outdir": outdir, "dur": dur, "status": status})
-
-def read_stats(outdir):
-    """Lê stats do relatório HTML ou raw files."""
-    stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0,"risk":0,"total":0}
-    if not outdir or not os.path.exists(outdir): return stats
-    # Try reading from zap_alerts
-    zap_f = os.path.join(outdir,"raw","zap_alerts.json")
-    nuc_f = os.path.join(outdir,"raw","nuclei.json")
-    sev_map = {"high":"high","medium":"medium","low":"low","informational":"info"}
-    if os.path.exists(zap_f):
-        try:
-            data = json.load(open(zap_f))
-            for a in data.get("alerts",[]):
-                s = sev_map.get(a.get("risk","").lower(),"info")
-                if s in stats: stats[s] += 1
-        except: pass
-    if os.path.exists(nuc_f):
-        try:
-            for line in open(nuc_f):
-                line = line.strip()
-                if not line: continue
-                d = json.loads(line)
-                s = d.get("info",{}).get("severity","info").lower()
-                if s in stats: stats[s] += 1
-        except: pass
-    stats["total"] = sum(v for k,v in stats.items() if k != "risk" and k != "total")
-    stats["risk"] = min(
-        stats["critical"]*10 + stats["high"]*5 + stats["medium"]*2 + stats["low"], 100
-    )
-    return stats
-
-def risk_color(r):
-    if r >= 70: return "#7a2e2e"
-    if r >= 40: return "#b34e4e"
-    if r >= 15: return "#d4833a"
-    return "#27ae60"
-
-def risk_label(r):
-    if r >= 70: return "CRÍTICO"
-    if r >= 40: return "ALTO"
-    if r >= 15: return "MÉDIO"
-    return "BAIXO"
-
-rdate = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-dur_str = f"{batch_dur//3600}h {(batch_dur%3600)//60}m {batch_dur%60}s"
-total_scans = len(results)
-ok_scans    = sum(1 for r in results if r["status"] == "OK")
-
-# Build target rows
-rows_html = ""
-all_stats = []
-for r in results:
-    stats = read_stats(r["outdir"])
-    all_stats.append(stats)
-    report_path = os.path.join(r["outdir"], "relatorio_swarm.html") if r["outdir"] else ""
-    report_link = (f'<a href="{html.escape(report_path)}" target="_blank" '
-                   f'style="color:#388bfd">Ver Relatório</a>') if os.path.exists(report_path) else "—"
-    rc = risk_color(stats["risk"])
-    rl = risk_label(stats["risk"])
-
-    rows_html += f"""
-    <tr>
-      <td style="font-weight:500">{html.escape(r["url"])}</td>
-      <td style="text-align:center">
-        <span style="background:{rc};color:white;padding:2px 8px;border-radius:4px;
-          font-size:11px;font-weight:bold">{stats["risk"]}</span>
-        <span style="color:{rc};font-size:11px;font-weight:bold;margin-left:4px">{rl}</span>
-      </td>
-      <td style="text-align:center"><span style="color:#7a2e2e;font-weight:bold">{stats['critical']}</span></td>
-      <td style="text-align:center"><span style="color:#b34e4e;font-weight:bold">{stats['high']}</span></td>
-      <td style="text-align:center"><span style="color:#d4833a">{stats['medium']}</span></td>
-      <td style="text-align:center"><span style="color:#4a7c8c">{stats['low']}</span></td>
-      <td style="text-align:center;color:#666">{stats['info']}</td>
-      <td style="text-align:center;font-size:12px;color:#888">{r["dur"]}s</td>
-      <td style="text-align:center">{report_link}</td>
-    </tr>"""
-
-# Summary stats
-total_crit = sum(s["critical"] for s in all_stats)
-total_high = sum(s["high"]     for s in all_stats)
-total_med  = sum(s["medium"]   for s in all_stats)
-max_risk   = max((s["risk"] for s in all_stats), default=0)
-avg_risk   = int(sum(s["risk"] for s in all_stats) / len(all_stats)) if all_stats else 0
-
-page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
-<title>SWARM — Relatório Consolidado</title>
-<style>
-body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
-.container{{max-width:1200px;margin:0 auto;background:white;border-radius:10px;
-  overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.1)}}
-.header{{background:#1a3a4f;color:white;padding:30px;text-align:center}}
-.header h1{{margin:0 0 8px;font-size:22px}}
-.content{{padding:30px}}
-.stats{{display:flex;gap:15px;margin:20px 0;flex-wrap:wrap}}
-.stat-card{{flex:1;padding:18px;text-align:center;color:white;border-radius:8px;min-width:110px}}
-.stat-card .number{{font-size:32px;font-weight:bold}}
-.stat-card .label{{font-size:12px;margin-top:4px;opacity:.9}}
-table{{width:100%;border-collapse:collapse;margin:12px 0}}
-th,td{{border:1px solid #ddd;padding:10px;text-align:left;vertical-align:middle}}
-th{{background:#f5f5f5;font-weight:600;font-size:13px}}
-td{{font-size:13px}}
-tr:hover td{{background:#f9f9f9}}
-h2{{color:#1a3a4f;border-bottom:2px solid #e0e0e0;padding-bottom:8px;margin-top:30px}}
-.footer{{background:#f5f5f5;padding:16px;text-align:center;font-size:12px;color:#666}}
-.info-box{{background:#e8f4f8;padding:14px;border-radius:8px;
-  margin:16px 0;border-left:4px solid #1a3a4f;font-size:13px}}
-</style></head>
-<body><div class="container">
-<div class="header">
-  <h1>🕷️ SWARM — Relatório Consolidado de Segurança</h1>
-  <p>Batch: {html.escape(batch_ts)} &nbsp;|&nbsp; {ok_scans}/{total_scans} scan(s) concluídos
-     &nbsp;|&nbsp; Duração total: {dur_str}</p>
-  <p>Gerado em: {rdate} &nbsp;|&nbsp; <strong>CONFIDENCIAL</strong></p>
-</div>
-<div class="content">
-
-<h2>Sumário Executivo</h2>
-<div class="stats">
-  <div class="stat-card" style="background:#1a3a4f">
-    <div class="number">{total_scans}</div>
-    <div class="label">Alvos</div>
-  </div>
-  <div class="stat-card" style="background:#7a2e2e">
-    <div class="number">{total_crit}</div>
-    <div class="label">CRÍTICO (total)</div>
-  </div>
-  <div class="stat-card" style="background:#b34e4e">
-    <div class="number">{total_high}</div>
-    <div class="label">ALTO (total)</div>
-  </div>
-  <div class="stat-card" style="background:#d4833a">
-    <div class="number">{total_med}</div>
-    <div class="label">MÉDIO (total)</div>
-  </div>
-  <div class="stat-card" style="background:{risk_color(max_risk)}">
-    <div class="number">{max_risk}</div>
-    <div class="label">Risco Máximo</div>
-  </div>
-  <div class="stat-card" style="background:#4a7c8c">
-    <div class="number">{avg_risk}</div>
-    <div class="label">Risco Médio</div>
-  </div>
-</div>
-<div class="info-box">
-  <strong>Ordem:</strong> Alvos ordenados conforme listados no arquivo de entrada.
-  Clique em "Ver Relatório" para acessar a análise completa de cada alvo.
-  Os relatórios individuais ficam em subpastas deste diretório.
-</div>
-
-<h2>Resultados por Alvo</h2>
-<table>
-  <tr style="background:#1a3a4f;color:white">
-    <th style="background:#1a3a4f;color:white">Alvo</th>
-    <th style="background:#1a3a4f;color:white;text-align:center">Risco</th>
-    <th style="background:#7a2e2e;color:white;text-align:center">C</th>
-    <th style="background:#b34e4e;color:white;text-align:center">A</th>
-    <th style="background:#d4833a;color:white;text-align:center">M</th>
-    <th style="background:#4a7c8c;color:white;text-align:center">B</th>
-    <th style="background:#6e8f72;color:white;text-align:center">I</th>
-    <th style="background:#1a3a4f;color:white;text-align:center">Duração</th>
-    <th style="background:#1a3a4f;color:white;text-align:center">Relatório</th>
-  </tr>
-  {rows_html}
-</table>
-
-</div>
-<div class="footer">
-  <p><strong>CONFIDENCIAL — USO INTERNO</strong></p>
-  <p>SWARM — Scanner Automatizado de Segurança</p>
-</div>
-</div></body></html>"""
-
-out = os.path.join(batch_dir, "relatorio_consolidado.html")
-open(out,"w",encoding="utf-8").write(page)
-print(f"[✓] Relatório consolidado: {out}")
-print(f"[✓] {total_scans} alvo(s) | Risco máximo: {max_risk} | Risco médio: {avg_risk}")
-PYBATCH
-
-    # Resumo no terminal
-    echo -e "\n${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}${BOLD}  BATCH CONCLUÍDO — $(date '+%d/%m/%Y %H:%M:%S')${NC}"
-    echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${CYAN}📁 Diretório batch  : ${BATCH_DIR}/${NC}"
-    echo -e "${CYAN}📊 Relatório geral  : ${BATCH_DIR}/relatorio_consolidado.html${NC}"
-    echo -e "${CYAN}📋 Log do batch     : ${BATCH_DIR}/batch_summary.log${NC}"
-    echo ""
-    echo -e "${GREEN}  Scans: $SCAN_IDX/${TOTAL_TARGETS}${NC}"
-    if [ ${#BATCH_FAILED[@]} -gt 0 ]; then
-        echo -e "${RED}  Falharam:${NC}"
-        for _f in "${BATCH_FAILED[@]}"; do
-            echo -e "${RED}    • $_f${NC}"
-        done
-    fi
-    echo ""
-
-    [ -n "$DISPLAY" ] && command -v xdg-open &>/dev/null && \
-        xdg-open "$BATCH_DIR/relatorio_consolidado.html" 2>/dev/null
-
-    exit 0
 fi
 
 # ── Modo single-target: continua normalmente ─────────────────────
@@ -551,7 +181,7 @@ echo ""
 
 # ====================== FASE 1: DESCOBERTA ======================
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 1/8: DESCOBERTA DE SUBDOMÍNIOS${NC}"
+echo -e "${CYAN}  FASE 1/11: DESCOBERTA DE SUBDOMÍNIOS${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 command -v subfinder &>/dev/null && \
@@ -566,7 +196,7 @@ echo -e "${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 2/8: MAPEAMENTO DE SUPERFÍCIE${NC}"
+echo -e "${CYAN}  FASE 2/11: MAPEAMENTO DE SUPERFÍCIE${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ACTIVE_COUNT=0
@@ -596,7 +226,7 @@ fi
 
 # ====================== FASES 3+4: TESTSSL + NUCLEI (paralelo) ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 3/8: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
+echo -e "${CYAN}  FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 TLS_ISSUES=0
@@ -615,14 +245,14 @@ fi
 
 # ====================== FASE 4: NUCLEI ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 4/8: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
+echo -e "${CYAN}  FASE 4/11: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 NUCLEI_COUNT=0
 if command -v nuclei &>/dev/null; then
     echo -e "${YELLOW}[!] Scan pode levar 5-10 minutos (rate-limit: ${NUCLEI_RATE_LIMIT} req/s)...${NC}"
     nuclei -u "$TARGET" \
-           -tags cve,tech,exposure,default-login,misconfig \
+           -tags cve,tech,exposure,default-login,misconfig,takeover,cors \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
            -timeout 10 -no-interactsh \
@@ -664,7 +294,7 @@ fi
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 5/8: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
+echo -e "${CYAN}  FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 CONFIRMED_COUNT=0
@@ -763,9 +393,9 @@ else
     echo -e "${YELLOW}[○] Nenhum achado Nuclei para confirmar${NC}"
 fi
 
-# ====================== FASE 5.5: ENRIQUECIMENTO CVE/EPSS ======================
+# ====================== FASE 10: ENRIQUECIMENTO CVE/EPSS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  ENRIQUECIMENTO CVE / EPSS (FIRST.org)${NC}"
+echo -e "${CYAN}  FASE 6/11: ENRIQUECIMENTO CVE / EPSS (NVD + FIRST.org)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
@@ -870,9 +500,170 @@ else
     echo -e "${YELLOW}[○] Sem achados Nuclei para enriquecer${NC}"
 fi
 
-# ====================== FASE 6: ZAP ======================
+
+# ====================== FASE 7: WAF DETECTION ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 6/8: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
+echo -e "${CYAN}  FASE 7/11: DETECÇÃO DE WAF${NC}"
+echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+WAF_DETECTED=""
+WAF_NAME=""
+if command -v wafw00f &>/dev/null; then
+    echo -e "${BLUE}[*] Detectando Web Application Firewall...${NC}"
+    _waf_out=$(wafw00f "$TARGET" -o "$OUTDIR/raw/waf.json" -f json 2>/dev/null)
+    # Tentar ler do JSON gerado
+    if [ -f "$OUTDIR/raw/waf.json" ]; then
+        WAF_NAME=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$OUTDIR/raw/waf.json'))
+    # wafw00f JSON: lista de resultados
+    results = d if isinstance(d, list) else d.get('results', [])
+    for r in results:
+        fw = r.get('firewall','') or r.get('waf','')
+        if fw and fw.lower() not in ('none', 'generic', ''):
+            print(fw); break
+except: pass" 2>/dev/null)
+    fi
+    # Fallback: parse do stdout
+    if [ -z "$WAF_NAME" ]; then
+        WAF_NAME=$(echo "$_waf_out" | grep -oiE "is behind .+" | head -1 | sed 's/is behind //' | tr -d '[:punct:]' | xargs)
+        [ -z "$WAF_NAME" ] && echo "$_waf_out" | grep -qi "no waf detected\|not detected" && WAF_NAME=""
+    fi
+    if [ -n "$WAF_NAME" ]; then
+        WAF_DETECTED="1"
+        echo -e "${YELLOW}[!] WAF detectado: ${WAF_NAME}${NC}"
+        echo -e "${YELLOW}    Os achados do active scan podem ter falsos negativos.${NC}"
+    else
+        echo -e "${GREEN}[✓] Nenhum WAF detectado${NC}"
+    fi
+    echo "$WAF_NAME" > "$OUTDIR/raw/waf_name.txt"
+else
+    echo -e "${YELLOW}[○] wafw00f não instalado — pulando detecção de WAF${NC}"
+    echo -e "${YELLOW}    Instale: pip3 install wafw00f --break-system-packages${NC}"
+fi
+
+export WAF_DETECTED WAF_NAME
+
+# ====================== FASE 7: EMAIL SECURITY ======================
+echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)${NC}"
+echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+EMAIL_ISSUES=0
+if command -v dig &>/dev/null; then
+    echo -e "${BLUE}[*] Verificando registros DNS de segurança de email...${NC}"
+    python3 - "$DOMAIN" << 'PYEMAIL'
+import subprocess, json, sys, re
+
+domain = sys.argv[1]
+
+def dig(record_type, name, short=True):
+    cmd = ["dig", "+short", record_type, name] if short else ["dig", record_type, name]
+    try:
+        return subprocess.check_output(cmd, timeout=10, text=True).strip()
+    except: return ""
+
+results = {}
+
+# ── SPF ───────────────────────────────────────────────────────────
+spf_raw = dig("TXT", domain)
+spf_records = [l for l in spf_raw.splitlines() if "v=spf1" in l.lower()]
+
+if not spf_records:
+    results["spf"] = {"status": "MISSING", "severity": "high",
+        "detail": "Registro SPF ausente — qualquer servidor pode enviar e-mail em nome do domínio.",
+        "recommendation": "Adicione um registro TXT SPF, ex: v=spf1 include:_spf.google.com ~all"}
+elif any("+all" in r for r in spf_records):
+    results["spf"] = {"status": "PERMISSIVE", "severity": "high",
+        "detail": f"SPF com '+all' permite QUALQUER servidor enviar e-mail pelo domínio.",
+        "value": spf_records[0],
+        "recommendation": "Substitua '+all' por '~all' (softfail) ou '-all' (hardfail)."}
+elif any("?all" in r for r in spf_records):
+    results["spf"] = {"status": "NEUTRAL", "severity": "medium",
+        "detail": "SPF com '?all' (neutro) não bloqueia remetentes não autorizados.",
+        "value": spf_records[0],
+        "recommendation": "Substitua '?all' por '~all' ou '-all'."}
+else:
+    qual = "softfail (~all)" if "~all" in spf_records[0] else "hardfail (-all)" if "-all" in spf_records[0] else "configurado"
+    results["spf"] = {"status": "OK", "severity": "none",
+        "detail": f"SPF configurado corretamente ({qual}).",
+        "value": spf_records[0]}
+
+# ── DMARC ─────────────────────────────────────────────────────────
+dmarc_raw = dig("TXT", f"_dmarc.{domain}")
+dmarc_records = [l for l in dmarc_raw.splitlines() if "v=dmarc1" in l.lower()]
+
+if not dmarc_records:
+    results["dmarc"] = {"status": "MISSING", "severity": "high",
+        "detail": "Registro DMARC ausente — sem visibilidade ou controle sobre uso abusivo do domínio.",
+        "recommendation": "Adicione: _dmarc."+domain+" TXT \"v=DMARC1; p=quarantine; rua=mailto:dmarc@"+domain+"\""}
+else:
+    dmarc = dmarc_records[0]
+    policy_m = re.search(r'p=(none|quarantine|reject)', dmarc, re.IGNORECASE)
+    policy = policy_m.group(1).lower() if policy_m else "unknown"
+    if policy == "none":
+        results["dmarc"] = {"status": "MONITOR_ONLY", "severity": "medium",
+            "detail": "DMARC com p=none apenas monitora — e-mails falsos ainda chegam aos destinatários.",
+            "value": dmarc,
+            "recommendation": "Evolua para p=quarantine e depois p=reject após validar relatórios."}
+    elif policy in ("quarantine", "reject"):
+        results["dmarc"] = {"status": "OK", "severity": "none",
+            "detail": f"DMARC configurado com p={policy}.",
+            "value": dmarc}
+    else:
+        results["dmarc"] = {"status": "INVALID", "severity": "medium",
+            "detail": f"DMARC com política inválida ou não reconhecida: {policy}",
+            "value": dmarc,
+            "recommendation": "Verifique a sintaxe do registro DMARC."}
+
+# ── DKIM (heurística: verificar seletores comuns) ─────────────────
+selectors = ["default", "google", "mail", "k1", "s1", "s2", "email", "selector1", "selector2"]
+dkim_found = []
+for sel in selectors:
+    r = dig("TXT", f"{sel}._domainkey.{domain}")
+    if "v=dkim1" in r.lower() or "p=" in r:
+        dkim_found.append(sel)
+
+if dkim_found:
+    results["dkim"] = {"status": "OK", "severity": "none",
+        "detail": f"DKIM encontrado para seletores: {', '.join(dkim_found)}"}
+else:
+    results["dkim"] = {"status": "NOT_FOUND", "severity": "low",
+        "detail": "DKIM não detectado nos seletores comuns. Pode estar configurado com seletor personalizado.",
+        "recommendation": "Verifique se o provedor de e-mail configurou DKIM para o domínio."}
+
+# ── Salvar e exibir ────────────────────────────────────────────────
+import os
+outdir = os.environ.get("OUTDIR", ".")
+with open(os.path.join(outdir, "raw", "email_security.json"), "w") as f:
+    json.dump(results, f, ensure_ascii=False, indent=2)
+
+issues = sum(1 for v in results.values() if v["severity"] in ("high","medium"))
+print(f"  [{'!' if issues else '✓'}] SPF: {results['spf']['status']} | DMARC: {results['dmarc']['status']} | DKIM: {results['dkim']['status']}")
+if issues:
+    print(f"  [!] {issues} problema(s) de segurança de email encontrado(s)")
+    for key, val in results.items():
+        if val["severity"] in ("high","medium"):
+            print(f"      • {key.upper()}: {val['detail']}")
+PYEMAIL
+
+    EMAIL_ISSUES=$(python3 -c "
+import json, os
+try:
+    d = json.load(open('$OUTDIR/raw/email_security.json'))
+    print(sum(1 for v in d.values() if v.get('severity','') in ('high','medium')))
+except: print(0)" 2>/dev/null || echo 0)
+    echo -e "${GREEN}[✓] Análise de email concluída — $EMAIL_ISSUES problema(s) encontrado(s)${NC}"
+else
+    echo -e "${YELLOW}[○] dig não disponível — pulando análise de email${NC}"
+fi
+
+export EMAIL_ISSUES
+
+# ====================== FASE 9: ZAP ======================
+echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
+echo -e "${CYAN}  FASE 9/11: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 ALERT_COUNT=0
@@ -1129,11 +920,11 @@ else
     echo -e "${YELLOW}[○] ZAP não instalado — pulando fase 4${NC}"
 fi
 
-export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS
+export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES
 
-# ====================== FASE 7: JS ANALYSIS ======================
+# ====================== FASE 10: JS ANALYSIS ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 7/8: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
+echo -e "${CYAN}  FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
 JS_SECRETS=0
@@ -1334,12 +1125,12 @@ fi
 export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 
-# ====================== FASE 8: RELATÓRIO ======================
+# ====================== FASE 11: RELATÓRIO ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 8/8: GERAÇÃO DE RELATÓRIO${NC}"
+echo -e "${CYAN}  FASE 11/11: GERAÇÃO DE RELATÓRIO${NC}"
 echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES
 
 python3 << 'PYEOF'
 import json, os, html, re
@@ -1471,6 +1262,9 @@ JS_ENDPOINTS    = int(os.environ.get('JS_ENDPOINTS','0'))
 JS_FRAMEWORKS   = int(os.environ.get('JS_FRAMEWORKS','0'))
 JS_FILES        = int(os.environ.get('JS_FILES','0'))
 KATANA_URLS     = int(os.environ.get('KATANA_URLS','0'))
+WAF_DETECTED    = os.environ.get('WAF_DETECTED','') == '1'
+WAF_NAME        = os.environ.get('WAF_NAME','')
+EMAIL_ISSUES    = int(os.environ.get('EMAIL_ISSUES','0'))
 errors = []
 
 # Nuclei
@@ -1648,6 +1442,13 @@ cf = os.path.join(OUTDIR,"raw","exploit_confirmations.json")
 if os.path.exists(cf) and os.path.getsize(cf) > 0:
     try: confirmations = json.load(open(cf,"r",encoding="utf-8"))
     except Exception as e: errors.append(f"confirmations: {e}")
+
+# ── WAF & Email Security ───────────────────────────────────
+email_security = {}
+_esf = os.path.join(OUTDIR,'raw','email_security.json')
+if os.path.exists(_esf):
+    try: email_security = json.load(open(_esf))
+    except Exception as e: errors.append(f'email_security: {e}')
 
 # ── JS Analysis ──────────────────────────────────────────────
 js_analysis = {}
@@ -1859,6 +1660,49 @@ if zap_low_groups:
       <tr style="background:#f5f5f5"><th>Tipo de Alerta</th><th>Qtd</th><th>Sev</th><th>CVE / CWE</th><th>Confiança</th><th>URLs (amostra)</th><th>Recomendação</th></tr>
       {rows_low}
     </table>'''
+
+# ── Gerar HTML: WAF & Email Security ────────────────────────
+waf_email_html = ''
+
+# WAF banner
+if WAF_DETECTED and WAF_NAME:
+    waf_email_html += (f'<div style="background:#fff3cd;border-left:5px solid #d4833a;'
+        f'padding:14px 16px;border-radius:4px;margin:16px 0">'
+        f'<strong style="color:#856404">🛡 WAF Detectado: {html.escape(WAF_NAME)}</strong>'
+        f'<p style="margin:6px 0 0;font-size:13px;color:#555">'
+        f'O alvo está protegido por um Web Application Firewall. Achados do active scan '
+        f'podem ter falsos negativos — vulnerabilidades de injeção podem ter sido bloqueadas '
+        f'durante o scan sem serem detectadas.</p></div>')
+
+# Email security
+if email_security:
+    sev_color = {'high':'#b34e4e','medium':'#d4833a','low':'#4a7c8c','none':'#27ae60'}
+    sev_label = {'high':'ALTO','medium':'MÉDIO','low':'BAIXO','none':'OK','NOT_FOUND':'INFO'}
+    email_rows = ''
+    for proto, data in [('SPF', email_security.get('spf',{})),
+                         ('DMARC', email_security.get('dmarc',{})),
+                         ('DKIM',  email_security.get('dkim',{}))]:
+        sev  = data.get('severity','none')
+        stat = data.get('status','?')
+        det  = data.get('detail','')
+        rec  = data.get('recommendation','')
+        val  = data.get('value','')
+        sc   = sev_color.get(sev,'#999')
+        sl   = sev_label.get(stat, sev_label.get(sev,'?'))
+        email_rows += (f'<tr>'
+            f'<td style="font-weight:bold;width:80px">{proto}</td>'
+            f'<td style="text-align:center"><span style="background:{sc};color:white;'
+            f'padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{sl}</span></td>'
+            f'<td>{html.escape(det)}</td>'
+            f'<td style="font-size:11px;color:#555">{html.escape(rec[:100]) if rec else ("<code>"+html.escape(val[:80])+"</code>" if val else "—")}</td>'
+            f'</tr>')
+    waf_email_html += (f'<h3>Segurança de Email — {html.escape(DOMAIN)}</h3>'
+        '<table><tr style="background:#f5f5f5">'
+        '<th>Protocolo</th><th>Status</th><th>Detalhe</th><th>Recomendação / Valor</th></tr>'
+        + email_rows + '</table>')
+
+if waf_email_html:
+    waf_email_html = f'<h2>Infraestrutura & Segurança DNS</h2>' + waf_email_html
 
 errsec = "" if not errors else \
     '<h2>⚠ Avisos de Processamento</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
@@ -2092,8 +1936,11 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
 <p><strong>Total de Achados:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
 <p><strong>Duração total do scan:</strong> {duration_str}</p>
-<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ Katana" if KATANA_URLS > 0 else ""}{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}</p>
-<p><strong>Exploits verificados ativamente:</strong> {CONFIRMED_COUNT} re-executados com resposta capturada</p></div>
+<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ wafw00f" if WAF_DETECTED or os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}{"+ Katana" if KATANA_URLS > 0 else ""}{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}</p>
+<p><strong>Exploits verificados ativamente:</strong> {CONFIRMED_COUNT} re-executados com resposta capturada</p>
+{'<p style="background:#fff3cd;padding:8px 12px;border-radius:4px;margin:8px 0;font-size:13px"><strong style="color:#856404">🛡 WAF: '+html.escape(WAF_NAME)+'</strong> — active scan pode ter falsos negativos.</p>' if WAF_DETECTED and WAF_NAME else ""}
+{'<p style="color:#b34e4e;font-size:13px">⚠ <strong>'+str(EMAIL_ISSUES)+' problema(s) de segurança de email</strong> detectado(s).</p>' if EMAIL_ISSUES > 0 else ""}
+</div>
 <h2>2. Superfície de Ataque</h2>
 <table>
 <tr><th style="width:220px">Subdomínios descobertos</th><td>{SUB_COUNT}</td></tr>
@@ -2103,6 +1950,9 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <h3>Hosts Ativos (httpx)</h3><table><tr><th>Resultado</th></tr>{trows(httpx_lines,"httpx não executado ou sem resultados detectados")}</table>
 <h3>Portas Abertas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado ou sem portas abertas")}</table>
 <h2>3. Vulnerabilidades Identificadas</h2>{vhtml}
+
+<!-- WAF + Email Security -->
+{waf_email_html}
 
 <!-- TLS Section -->
 {tls_html}
@@ -2129,6 +1979,8 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {"<li><code>raw/cve_enrichment.json</code> — Dados CVE (CVSS + EPSS) do NVD/FIRST</li>" if cve_enrichment else ""}
 {"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
 {"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}
+{"<li><code>raw/waf.json</code> — Detecção de WAF (wafw00f)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}
+{"<li><code>raw/email_security.json</code> — SPF/DMARC/DKIM</li>" if email_security else ""}
 {"<li><code>raw/katana_urls.txt</code> — URLs descobertas pelo Katana (JS crawl)</li>" if KATANA_URLS > 0 else ""}
 {"<li><code>raw/js_analysis.json</code> — Análise JS/Secrets completa</li>" if js_analysis else ""}
 {"<li><code>raw/js_files/</code> — Arquivos JS para análise forense</li>" if js_files_list else ""}
