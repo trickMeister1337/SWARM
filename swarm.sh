@@ -292,6 +292,14 @@ if command -v nuclei &>/dev/null; then
     if [ -s "$OUTDIR/raw/nuclei.json" ]; then
         NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null || echo 0)
         echo -e "${GREEN}[✓] Nuclei concluído. $NUCLEI_COUNT vulnerabilidade(s)${NC}"
+        # Atualizar metadata com resultado Nuclei
+        python3 -c "
+import json,os
+mf=os.path.join('$OUTDIR','raw','scan_metadata.json')
+if os.path.exists(mf):
+    d=json.load(open(mf)); d['nuclei_results_after_evasion']=$NUCLEI_COUNT
+    json.dump(d,open(mf,'w'),indent=2)
+" 2>/dev/null || true
     else
         echo -e "${YELLOW}[!] Sem resultados com tags. Tentando scan completo...${NC}"
         nuclei -u "$TARGET" \
@@ -592,6 +600,34 @@ else
     NUCLEI_DELAY=""
 fi
 export NUCLEI_RATE_LIMIT NUCLEI_CONCURRENCY NUCLEI_DELAY RANDOM_UA
+
+# ── Registrar configuração de evasão para o relatório ───────────
+python3 - "$OUTDIR" "$WAF_DETECTED" "$WAF_NAME" \
+    "$NUCLEI_RATE_LIMIT" "$NUCLEI_CONCURRENCY" "${NUCLEI_DELAY:-none}" \
+    "$RANDOM_UA" << 'PYMETADATA'
+import json, sys, os
+outdir, waf_det, waf_name = sys.argv[1], sys.argv[2], sys.argv[3]
+rate, conc, delay, ua = sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[7]
+meta = {
+    "waf_detected": waf_det == "1",
+    "waf_name": waf_name,
+    "evasion_active": waf_det == "1",
+    "evasion_techniques": (
+        ["rate_limit_reduced","user_agent_rotation","origin_spoofing",
+         "payload_alterations","waf_response_bypass","zap_threads_reduced"]
+        if waf_det == "1" else []
+    ),
+    "nuclei_rate_limit": int(rate),
+    "nuclei_concurrency": int(conc),
+    "nuclei_delay": None if delay == "none" else delay,
+    "user_agent": ua,
+    "nuclei_results_before_evasion": None,
+    "nuclei_results_after_evasion": None,
+    "zap_results_after_evasion": None,
+}
+with open(os.path.join(outdir,"raw","scan_metadata.json"),"w") as f:
+    json.dump(meta, f, indent=2)
+PYMETADATA
 
 # ====================== FASE 7: EMAIL SECURITY ======================
 echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
@@ -990,6 +1026,14 @@ try:
     print(len(data.get('alerts',[])))
 except: print(0)" 2>/dev/null)
         echo -e "${GREEN}[✓] ZAP encontrou ${ALERT_COUNT} alerta(s)${NC}"
+        # Atualizar metadata com resultado ZAP
+        python3 -c "
+import json,os
+mf=os.path.join('$OUTDIR','raw','scan_metadata.json')
+if os.path.exists(mf):
+    d=json.load(open(mf)); d['zap_results_after_evasion']=$ALERT_COUNT
+    json.dump(d,open(mf,'w'),indent=2)
+" 2>/dev/null || true
     else
         echo -e "${RED}[✗] API do ZAP não respondeu — pulando coleta${NC}"
     fi
@@ -1527,6 +1571,13 @@ if os.path.exists(_esf):
     try: email_security = json.load(open(_esf))
     except Exception as e: errors.append(f'email_security: {e}')
 
+# ── Scan metadata (comportamento + evasão) ───────────────────
+scan_meta = {}
+_smf = os.path.join(OUTDIR,'raw','scan_metadata.json')
+if os.path.exists(_smf):
+    try: scan_meta = json.load(open(_smf))
+    except Exception as e: errors.append(f'scan_metadata: {e}')
+
 # ── JS Analysis ──────────────────────────────────────────────
 js_analysis = {}
 js_file = os.path.join(OUTDIR,"raw","js_analysis.json")
@@ -1781,6 +1832,86 @@ if email_security:
 if waf_email_html:
     waf_email_html = f'<h2>Infraestrutura & Segurança DNS</h2>' + waf_email_html
 
+# ── Gerar HTML: Comportamento do Scan ─────────────────────────
+scan_behavior_html = ""
+if scan_meta:
+    evasion_active = scan_meta.get("evasion_active", False)
+    waf_n          = scan_meta.get("waf_name", "")
+    techniques     = scan_meta.get("evasion_techniques", [])
+    rl             = scan_meta.get("nuclei_rate_limit", 50)
+    conc           = scan_meta.get("nuclei_concurrency", 10)
+    delay          = scan_meta.get("nuclei_delay")
+    ua             = scan_meta.get("user_agent", "")
+    nuc_count      = scan_meta.get("nuclei_results_after_evasion")
+    zap_count      = scan_meta.get("zap_results_after_evasion")
+
+    TECH_LABELS = {
+        "rate_limit_reduced":     ("🐢", "Rate limit reduzido",     f"Nuclei: {rl} req/s com delay randômico — imita tráfego humano"),
+        "user_agent_rotation":    ("🔄", "User-Agent rotation",     f"UA de browser real: {ua[:60]}..." if len(ua)>60 else f"UA: {ua}"),
+        "origin_spoofing":        ("🎭", "Origin spoofing",         "X-Forwarded-For: 127.0.0.1 + X-Real-IP: 127.0.0.1 injetados"),
+        "payload_alterations":    ("🔀", "Payload alterations",     "Nuclei testou variações de encoding automaticamente (-pa)"),
+        "waf_response_bypass":    ("⏭", "WAF response bypass",     "Respostas 403/406/429 ignoradas — scan não interrompe em bloqueios"),
+        "zap_threads_reduced":    ("🧵", "ZAP threads reduzidas",   "Active scan com 2 threads — reduz assinatura de scan automatizado"),
+    }
+
+    if evasion_active:
+        tech_rows = "".join(
+            f'<tr>'
+            f'<td style="font-size:18px;text-align:center;width:36px">{icon}</td>'
+            f'<td style="font-weight:600;width:180px">{label}</td>'
+            f'<td style="color:#555;font-size:13px">{desc}</td>'
+            f'<td style="text-align:center"><span style="background:#27ae60;color:white;'
+            f'padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">ATIVO</span></td>'
+            f'</tr>'
+            for t in techniques for icon, label, desc in [TECH_LABELS.get(t, ("","",""))]
+            if label
+        )
+
+        results_row = ""
+        if nuc_count is not None:
+            results_row += (f'<div style="display:inline-block;background:#f0f7ff;'
+                f'border:1px solid #388bfd;border-radius:8px;padding:12px 20px;margin:6px 8px 6px 0">'
+                f'<div style="font-size:28px;font-weight:bold;color:#1a3a4f">{nuc_count}</div>'
+                f'<div style="font-size:12px;color:#555">achados Nuclei\ncom evasão</div></div>')
+        if zap_count is not None:
+            results_row += (f'<div style="display:inline-block;background:#f0f7ff;'
+                f'border:1px solid #388bfd;border-radius:8px;padding:12px 20px;margin:6px 8px 6px 0">'
+                f'<div style="font-size:28px;font-weight:bold;color:#1a3a4f">{zap_count}</div>'
+                f'<div style="font-size:12px;color:#555">alertas ZAP\ncom evasão</div></div>')
+
+        scan_behavior_html = (
+            f'<h2>🔬 Comportamento do Scan & Evasão Passiva</h2>'
+            f'<div style="background:#fff8e6;border-left:5px solid #d4833a;'
+            f'padding:16px;border-radius:4px;margin-bottom:16px">'
+            f'<strong style="color:#856404">⚠ WAF Detectado: {html.escape(waf_n)}</strong>'
+            f'<p style="margin:6px 0 0;font-size:13px;color:#555">'
+            f'O scanner detectou um WAF e ativou automaticamente o modo de evasão passiva. '
+            f'As técnicas abaixo foram aplicadas para maximizar a cobertura e reduzir falsos negativos.</p></div>'
+            f'<h3 style="color:#1a3a4f;margin-bottom:8px">Técnicas de Evasão Passiva Aplicadas</h3>'
+            f'<table style="margin-bottom:16px"><tr style="background:#f5f5f5">'
+            f'<th></th><th style="text-align:left">Técnica</th>'
+            f'<th style="text-align:left">Detalhe</th><th>Status</th></tr>'
+            + tech_rows +
+            f'</table>'
+            + (f'<h3 style="color:#1a3a4f;margin-bottom:8px">Resultados com Evasão Ativa</h3>'
+               f'<div style="margin-bottom:8px">{results_row}</div>'
+               f'<p style="font-size:12px;color:#888;margin:4px 0">Resultados obtidos após aplicação das técnicas de evasão. '
+               f'Comparar com scans sem evasão não é aplicável pois o WAF teria bloqueado requests anteriores.</p>'
+               if results_row else "")
+        )
+    else:
+        # Sem WAF — registrar que scan foi direto
+        scan_behavior_html = (
+            f'<h2>🔬 Comportamento do Scan</h2>'
+            f'<div style="background:#f0fff4;border-left:5px solid #27ae60;'
+            f'padding:14px 16px;border-radius:4px">'
+            f'<strong style="color:#1a7a4a">✓ Nenhum WAF Detectado — Scan Direto</strong>'
+            f'<p style="margin:6px 0 0;font-size:13px;color:#555">'
+            f'O alvo não possui WAF identificado. O scan rodou com configurações padrão '
+            f'(Nuclei {rl} req/s, concurrency {conc}). '
+            f'Resultados têm alta confiança — sem filtros intermediários.</p></div>'
+        )
+
 errsec = "" if not errors else \
     '<h2>⚠ Avisos de Processamento</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
     "".join(f"<li><code>{html.escape(e)}</code></li>" for e in errors) + "</ul></div>"
@@ -2028,6 +2159,9 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <h3>Portas Abertas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado ou sem portas abertas")}</table>
 <h2>3. Vulnerabilidades Identificadas</h2>{vhtml}
 
+<!-- Comportamento do Scan -->
+{scan_behavior_html}
+
 <!-- WAF + Email Security -->
 {waf_email_html}
 
@@ -2056,6 +2190,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {"<li><code>raw/cve_enrichment.json</code> — Dados CVE (CVSS + EPSS) do NVD/FIRST</li>" if cve_enrichment else ""}
 {"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
 {"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}
+{"<li><code>raw/scan_metadata.json</code> — Comportamento e configuração de evasão do scan</li>" if scan_meta else ""}
 {"<li><code>raw/waf.json</code> — Detecção de WAF (wafw00f)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}
 {"<li><code>raw/email_security.json</code> — SPF/DMARC/DKIM</li>" if email_security else ""}
 {"<li><code>raw/katana_urls.txt</code> — URLs descobertas pelo Katana (JS crawl)</li>" if KATANA_URLS > 0 else ""}
