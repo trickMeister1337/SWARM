@@ -6,228 +6,210 @@
 
 O **SWARM** é uma ferramenta robusta de automação para avaliação de segurança (Security Assessment Tool), projetada para auxiliar consultores e equipes de segurança na identificação de vulnerabilidades em aplicações web e infraestruturas associadas. Este script Bash orquestra uma série de ferramentas de código aberto e processos de análise, desde a descoberta de subdomínios até a geração de relatórios detalhados, com suporte a varreduras em alvos únicos ou múltiplos, incluindo execução paralela para otimização de tempo.
 
-## Funcionalidades Detalhadas
+O que o SWARM faz
+Um comando. Um relatório. Cobertura completa.
+bashbash swarm.sh https://target.com
+O SWARM encadeia 10+ ferramentas de segurança em um pipeline automatizado — descoberta de subdomínios, mapeamento de superfície, análise TLS, scan de vulnerabilidades com templates CVE, confirmação ativa de exploits, crawling JavaScript-aware com Katana, análise dinâmica com OWASP ZAP, detecção de secrets em JS, enriquecimento CVE/EPSS — e consolida tudo em um único relatório HTML em Português.
+Para quem é
+PerfilO que recebeAnalista de segurançaEvidência completa (request/response brutos, curl commands), CVSS + EPSS, deduplicação, TLS findingsTech leadImpacto em linguagem de negócio, orientação de correção específica por tecnologia, plano de ação em 3 horizontesGestor de segurançaÍndice de risco 0–100 ponderado por EPSS, duração do scan, sumário executivo
 
-O SWARM executa uma sequência de 8 fases distintas, cada uma focada em um aspecto específico da avaliação de segurança. A seguir, detalhamos cada fase e as ferramentas empregadas:
+Pipeline de 11 Fases
+FASE 1   Subfinder ────────────────── Subdomínios
+FASE 2   httpx + nmap ─────────────── Hosts ativos + portas
+FASE 3   testssl ───────────────┐
+                  (background)  │ paralelo
+FASE 4   Nuclei ────────────────┘
+         CVE + misconfig + default-login + exposure
+         + takeover + cors
+FASE 5   Confirmação ativa (apenas C/A/M)
+FASE 6   Enriquecimento CVE / EPSS (NVD + FIRST.org)
+FASE 7   Detecção de WAF (wafw00f)
+FASE 8   Segurança de Email (SPF / DMARC / DKIM)
+FASE 9   OWASP ZAP
+         Katana JS crawl → Spider → Active Scan
+FASE 10  JS / Secrets
+         20 padrões + endpoints + frameworks
+FASE 11  Relatório HTML
+         PT-BR · self-contained · abre offline
 
-### Fase 1: Descoberta de Subdomínios
+Cobertura
+Reconhecimento
 
-Esta fase inicial concentra-se em expandir o escopo da avaliação, identificando subdomínios associados ao alvo principal. A descoberta de subdomínios é crucial para encontrar superfícies de ataque adicionais que podem não ser óbvias.
+Enumeração de subdomínios — subfinder com fallback automático para domínio principal
+Mapeamento HTTP — hosts ativos, status codes, tecnologias (httpx)
+Scan de portas — 80, 443, 8000, 8080, 8443, 8888, 3000, 9090
 
-*   **Ferramenta**: `subfinder`
+TLS / SSL
 
-### Fase 2: Mapeamento de Superfície
+Versões de protocolo (SSLv3, TLS 1.0/1.1/1.2/1.3)
+Cipher suites fracos e configurações inseguras
+Validade de certificado, cadeia de confiança, HSTS
+CVEs conhecidos: Heartbleed, POODLE, BEAST, ROBOT, DROWN
 
-Após a descoberta de subdomínios, esta fase verifica a acessibilidade dos alvos e realiza um mapeamento inicial de portas e serviços expostos. Isso ajuda a entender a infraestrutura de rede e os pontos de entrada potenciais.
+Scan de Vulnerabilidades (Nuclei)
 
-*   **Ferramentas**: `httpx`, `nmap`
+CVE templates — vulnerabilidades em versões específicas de software
+Default credentials — Node-RED, Grafana, Jupyter, Jenkins, e outros
+Misconfiguration — configs expostos, debug endpoints, stack traces
+Exposure — S3 buckets públicos, repos Git expostos, arquivos de backup
+Confirmação ativa — re-executa o curl do Nuclei (só C/A/M) para verificar se ainda é explorável
 
-### Fase 3: Análise TLS (testssl) — Paralelo com Nuclei
+Análise Dinâmica (Katana + OWASP ZAP)
 
-Focada na segurança da camada de transporte, esta fase avalia a configuração TLS/SSL dos servidores web. Verifica a presença de vulnerabilidades conhecidas, cifras fracas e configurações inadequadas que podem comprometer a confidencialidade e integridade da comunicação. Esta fase pode ser executada em paralelo com a Fase 4.
+Katana — crawl com rendering JavaScript headless via chromium (-jc -jsl)
+Injeção das URLs descobertas no contexto ZAP antes do spider
+OpenAPI/Swagger auto-import — detecta e importa specs de API antes de escanear
+Active Scan — XSS, SQLi, CSRF, bypass de auth, IDOR
+Deduplicação — um card por tipo de alerta com lista de todas as URLs afetadas
+Reclassificação CVSS — tabela CWE→CVSS sintético com 37 entradas sobreescreve severidade do ZAP
+Detecção de scan travado — aborta active scan após 90s em 0% com diagnóstico
 
-*   **Ferramenta**: `testssl`
+Inteligência CVE
 
-### Fase 4: Scan de Vulnerabilidades (Nuclei) — Paralelo com testssl
+NVD — CVSS v3, descrição oficial por CVE
+EPSS — probabilidade de exploração nos próximos 30 dias (FIRST.org)
+Retry com backoff — trata rate limiting do NVD (6s → 12s → 24s)
+Ponderação no risk score — EPSS alto eleva o índice de risco
 
-Utilizando o `Nuclei`, esta fase realiza varreduras ativas e passivas para identificar uma vasta gama de vulnerabilidades e configurações incorretas em aplicações web e serviços. O `Nuclei` é altamente configurável e utiliza templates para detectar problemas específicos. Esta fase pode ser executada em paralelo com a Fase 3.
+JavaScript & Secrets
 
-*   **Ferramenta**: `nuclei`
+Descoberta de arquivos JS — <script src>, webpack chunks, imports dinâmicos
+20 padrões de secrets: AWS, Google, GitHub, GitLab, OpenAI, Anthropic, JWT, Stripe, Firebase, DB connection strings, chaves privadas, Slack, senhas hardcoded, URLs de rede interna
+Detecção de frameworks — React, Angular, Vue.js, jQuery, Next.js com versão
+Versões vulneráveis — alerta com CVE para bibliotecas desatualizadas
+Extração de endpoints — fetch(), axios, URLs literais em JS
+Probing ativo — testa endpoints extraídos, identifica APIs sem autenticação
+Comentários sensíveis — TODO/FIXME/password no código-fonte
 
-### Fase 5: Confirmação Ativa de Exploits (Nuclei)
+Relatório em PT-BR
 
-Esta fase aprofunda a análise de vulnerabilidades, utilizando templates específicos do `Nuclei` para tentar confirmar a explorabilidade de certas falhas, minimizando falsos positivos e fornecendo evidências concretas de risco.
+Todos os labels em português: CRÍTICO / ALTO / MÉDIO / BAIXO / INFO
+Linha de impacto por achado — o que um atacante consegue fazer em linguagem direta
+Como corrigir — orientação específica por tecnologia (não boilerplate genérico)
+Badge de reclassificação — mostra quando CWE/CVE alterou a severidade original do ZAP
+Contador de cards únicos — exibe tipos distintos de vulnerabilidade, não ocorrências brutas
+Plano de ação — 3 horizontes: esta semana / próximo sprint / backlog 30 dias
+Duração total — no header e sumário executivo
 
-*   **Ferramenta**: `nuclei` (com templates de exploit)
 
-### Fase 6: Coleta de Evidências (OWASP ZAP)
+O que o SWARM NÃO cobre
+LacunaMotivoAlternativaScan autenticadoZAP roda sem token de sessãoConfigurar ZAP manualmente com Bearer tokenSCA de dependências backendSem acesso a package.json, pom.xmlSnyk, Dependabot, OWASP Dependency CheckSubdomain takeoverFora do escopo atualnuclei -tags takeover separadoAtaques de redeFoco em aplicação webScanner de rede separadoServiços internosRequer acesso à redeExecutar de dentro da rede
 
-O OWASP ZAP (Zed Attack Proxy) é empregado nesta fase para realizar um crawling extensivo da aplicação web, identificar pontos de entrada e coletar evidências de vulnerabilidades através de seus scanners ativo e passivo. O ZAP é uma ferramenta essencial para a detecção de falhas como XSS, SQL Injection, CSRF, entre outras.
+Instalação
+bash# Clone o repositório
+git clone https://github.com/trickMeister1337/swarm.git
+cd swarm
 
-*   **Ferramenta**: `zaproxy` (OWASP ZAP)
+# Instalar tudo automaticamente
+bash install.sh
+O instalador detecta o ambiente (Kali, Ubuntu, WSL) e instala todas as dependências.
+Instalação manual — Kali Linux
+bash# Pacotes do sistema
+sudo apt update && sudo apt install -y \
+    curl python3 python3-pip jq nmap git \
+    zaproxy testssl chromium golang-go
 
-### Fase 7: Análise de JavaScript & Secrets
+# Python
+pip3 install requests pdfminer.six wafw00f --break-system-packages
 
-Esta fase foca na análise de arquivos JavaScript para identificar endpoints ocultos, segredos expostos (chaves de API, credenciais) e bibliotecas vulneráveis. A análise de código client-side é crucial para descobrir informações sensíveis que podem ser exploradas.
+# Ferramentas Go (ProjectDiscovery)
+go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+go install github.com/projectdiscovery/katana/cmd/katana@latest
+nuclei -update-templates
 
-*   **Ferramentas**: `katana`, `trufflehog`, `gitleaks`, `secretfinder`, `subjs`, `linkfinder` (e análise Python customizada)
+# PATH
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc && source ~/.bashrc
+Instalação manual — Ubuntu / WSL
+bashsudo apt update && sudo apt upgrade -y
+sudo apt install -y \
+    curl python3 python3-pip jq nmap git \
+    zaproxy testssl chromium-browser golang-go
 
-### Fase 8: Geração de Relatório
-
-A fase final consolida todos os achados das etapas anteriores em um relatório HTML interativo e de fácil compreensão. O relatório inclui um resumo das vulnerabilidades, detalhes técnicos, classificações de severidade (CVSS), impacto prático e recomendações de remediação, facilitando a comunicação dos riscos para diferentes públicos (técnicos e não-técnicos).
-
-*   **Ferramentas**: `python3` (para processamento de dados e geração de HTML)
-
-## Diagrama de Arquitetura
-
-O diagrama a seguir ilustra o fluxo de execução do SWARM, desde a entrada dos alvos até a geração do relatório final, destacando as principais fases e ferramentas envolvidas.
-
-![Diagrama de Arquitetura do SWARM](https://private-us-east-1.manuscdn.com/sessionFile/d3fQmeSKo5DWgkypYuDsVL/sandbox/4VhRdhLA5U2tWZUaFJy4oj-images_1776565159083_na1fn_L2hvbWUvdWJ1bnR1L2FyY2hpdGVjdHVyZV9iaWc0.png?Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9wcml2YXRlLXVzLWVhc3QtMS5tYW51c2Nkbi5jb20vc2Vzc2lvbkZpbGUvZDNmUW1lU0tvNURXZ2t5cFl1RHNWTC9zYW5kYm94LzRWaFJkaExBNVUydFdaVWFGSnk0b2otaW1hZ2VzXzE3NzY1NjUxNTkwODNfbmExZm5fTDJodmJXVXZkV0oxYm5SMUwyRnlZMmhwZEdWamRIVnlaVjlpYVdjMC5wbmciLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3OTg3NjE2MDB9fX1dfQ__&Key-Pair-Id=K2HSFNDJXOU9YS&Signature=d6H2fc0CnqanG9CD0dISEUaa4T8LNAwqqzkc4ymIWYhFMFAzFC697W4rT-bpdHFkWb3Mn3EcS1PndRChEsymSdp7E7gk7MuKqmL04bBwq9S26lCX7Zwc4Qe-eEBpF~acSX5YIElG57S5uHnCn00Lsd-nBOqWS1jOhuGkeC7DUQ2t8vNJw5c2JWUkMtUOS4Xq0WhUl64IF7aAVB5HlqtQmD5QHOsk~KTdZqLLN6OmRsC9rTzeYb2Xc0c2Qlt4A5~-bSyLyhDnslklJLEXU3pxSf2a8bYGN~EtjUvNYoL7rFb3LAvwdEOZJm5DhtNVwvsCR~CgaJu~MvtMrpFESdFdSg__)
-
-## Como Usar
-
-### Instalação
-
-Para começar a usar o SWARM, siga os passos abaixo:
-
-1.  **Clone o repositório** (substitua `trickMeister1337` pelo seu usuário GitHub se for um fork):
-    ```bash
-    git clone https://github.com/trickMeister1337/SWARM.git
-    cd SWARM
-    ```
-
-2.  **Torne o script executável**:
-    ```bash
-    chmod +x swarm.sh
-    ```
-
-### Instalação de Dependências
-
-O SWARM depende de várias ferramentas de segurança de código aberto. Algumas são obrigatórias para o funcionamento básico, enquanto outras são opcionais e habilitam fases de análise mais aprofundadas. Recomenda-se instalar todas as ferramentas opcionais para obter a cobertura completa.
-
-#### Ferramentas Obrigatórias
-
-*   **`curl`**: Geralmente pré-instalado na maioria dos sistemas Linux.
-*   **`python3`**: Geralmente pré-instalado na maioria dos sistemas Linux.
-
-#### Ferramentas Opcionais (Recomendadas)
-
-Para instalar as ferramentas, você pode usar os gerenciadores de pacotes de sua distribuição ou seguir as instruções de instalação de cada ferramenta. Para ferramentas Go, o método `go install` é o mais comum.
-
-**Exemplo de instalação de ferramentas Go:**
-
-```bash
-# Certifique-se de ter o Go instalado e configurado corretamente (GO111MODULE=on)
-# Adicione $HOME/go/bin ao seu PATH
-export PATH=$PATH:$HOME/go/bin
+pip3 install requests pdfminer.six wafw00f --break-system-packages
 
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
-go install github.com/projectdiscovery/nuclei/v2/cmd/nuclei@latest
+go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 go install github.com/projectdiscovery/katana/cmd/katana@latest
-```
+nuclei -update-templates
 
-**Outras ferramentas:**
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
+echo 'export DISPLAY=""' >> ~/.bashrc
+echo 'export JAVA_TOOL_OPTIONS="-Djava.awt.headless=true"' >> ~/.bashrc
+source ~/.bashrc
 
-*   **`jq`**: Processador JSON em linha de comando.
-    ```bash
-    sudo apt install jq # Debian/Ubuntu
-    sudo yum install jq # CentOS/RHEL
-    brew install jq # macOS
-    ```
-*   **`nmap`**: Scanner de portas e descoberta de rede.
-    ```bash
-    sudo apt install nmap
-    ```
-*   **`zaproxy` (OWASP ZAP)**: Proxy de segurança para testes de aplicações web. Recomenda-se a instalação via Docker ou o pacote oficial.
-    *   [Guia de Instalação do ZAP](https://www.zaproxy.org/docs/desktop/start/install/)
-*   **`testssl`**: Ferramenta de linha de comando para verificar configurações TLS/SSL.
-    ```bash
-    git clone --depth 1 https://github.com/drwetter/testssl.sh.git
-    # Adicione o diretório testssl.sh ao seu PATH ou chame diretamente
-    ```
-*   **`trufflehog`**: Para encontrar credenciais e segredos em código.
-    ```bash
-    go install github.com/trufflesecurity/trufflehog@latest
-    ```
-*   **`gitleaks`**: Scanner de segredos para repositórios Git.
-    ```bash
-    go install github.com/zricethezav/gitleaks@latest
-    ```
-*   **`secretfinder`**: Ferramenta para encontrar segredos em arquivos JavaScript.
-    ```bash
-    pip3 install secretfinder
-    ```
-*   **`subjs`**: Para extrair URLs de arquivos JavaScript.
-    ```bash
-    go install github.com/lc/subjs@latest
-    ```
-*   **`linkfinder`**: Para encontrar endpoints em arquivos JavaScript.
-    ```bash
-    git clone https://github.com/GerbenJavado/LinkFinder.git
-    cd LinkFinder
-    pip3 install -r requirements.txt
-    # python3 linkfinder.py -i <arquivo.js> -o <saida.html>
-    ```
+WSL: se testssl não for encontrado: sudo apt install testssl.sh
 
-**Nota**: Ferramentas Go (como `subfinder`, `httpx`, `nuclei`, `katana`, `trufflehog`, `gitleaks`, `subjs`) devem ter seus binários no `$PATH` (ex: `$HOME/go/bin`). Certifique-se de que o diretório `go/bin` esteja no seu `PATH` após a instalação do Go.
 
-### Scan de Alvo Único
+Uso
+bash# Validar instalação (158 testes)
+bash test_swarm.sh
 
-Para realizar um scan em uma única URL:
+# Executar scan completo
+bash swarm.sh https://target.com
+Estrutura de output
+scan_target.com_20260418_143022/
+├── relatorio_swarm.html            ← abrir no browser, funciona offline
+└── raw/
+    ├── subdomains.txt              ← subfinder
+    ├── httpx_results.txt           ← hosts HTTP ativos + tecnologias
+    ├── nmap.txt                    ← scan de portas
+    ├── testssl.json                ← análise TLS/SSL
+    ├── nuclei.json                 ← achados Nuclei (JSONL)
+    ├── exploit_confirmations.json  ← confirmações ativas de exploits
+    ├── cve_enrichment.json         ← CVSS + EPSS do NVD/FIRST
+    ├── katana_urls.txt             ← URLs descobertas pelo Katana (JS crawl)
+    ├── zap_alerts.json             ← alertas do OWASP ZAP (JSON)
+    ├── zap_evidencias.xml          ← relatório completo ZAP (XML)
+    ├── openapi_spec.json           ← spec OpenAPI importada (se encontrada)
+    ├── js_urls.txt                 ← arquivos JS descobertos
+    ├── js_analysis.json            ← secrets, endpoints, frameworks
+    └── js_files/                   ← arquivos JS para análise forense
 
-```bash
-./swarm.sh https://exemplo.com
-```
+Seções do Relatório
+#SeçãoConteúdo1Sumário ExecutivoÍndice de risco 0–100, contadores por severidade (cards únicos), duração2Superfície de AtaqueSubdomínios, hosts ativos, portas, URLs Katana3Vulnerabilidades IdentificadasCards C/A/M com CVE, CVSS, EPSS, impacto, como corrigir4TLS / SSLAchados testssl com severidade e CVE5Confirmação AtivaResultados de re-execução dos exploits Nuclei6JS / SecretsSecrets detectados (mascarados), frameworks, endpoints expostos7Achados Baixo / InfoTabela compacta agrupada por tipo8Plano de AçãoEsta semana / Próximo sprint / Backlog 30 dias9Arquivos de EvidênciaLinks para todos os arquivos raw
 
-### Scan de Múltiplos Alvos
+Configuração
+Edite as variáveis no topo do swarm.sh:
+bashZAP_PORT=8080
+ZAP_HOST="127.0.0.1"
+ZAP_SPIDER_TIMEOUT=0    # 0 = sem timeout (aguarda 100%)
+ZAP_SCAN_TIMEOUT=0      # 0 = sem timeout (aguarda 100%)
+NUCLEI_RATE_LIMIT=50    # req/s
+NUCLEI_CONCURRENCY=10   # templates em paralelo
+AmbienteRate limit recomendadoProdução / sensível20–30Staging (padrão)50Lab interno100–150
 
-Para escanear múltiplos alvos a partir de um arquivo de texto (uma URL por linha):
+Referência de Ferramentas
+FerramentaFaseFunçãoObrigatóriacurlTodasRequisições HTTP, API ZAP✅ Simpython3TodasAnálise e relatório✅ Simsubfinder1Enumeração de subdomíniosOpcionalhttpx2Mapeamento HTTPOpcionalnmap2Scan de portasOpcionaltestssl3Análise TLS/SSLOpcionalnuclei4Scan de vulnerabilidadesOpcionalkatana6Crawl JS-aware para SPAsOpcionalzaproxy6Scan dinâmico de aplicaçãoOpcionalchromium6Rendering JS headless para KatanaOpcionaljqMiscProcessamento JSONOpcional
 
-```bash
-./swarm.sh -f targets.txt
-```
+SWARM adiciona ~/go/bin ao PATH automaticamente no startup — não é necessário executar source ~/.bashrc antes de rodar.
 
-Onde `targets.txt` é um arquivo com o seguinte formato:
 
-```
-# Comentários são ignorados
-https://alvo1.com
-alvo2.net
-https://sub.alvo3.org
-```
+Katana + ZAP: Crawl de SPAs
+SPAs com React, Angular e Vue.js renderizam conteúdo via JavaScript. Um spider tradicional vê apenas <div id="root"></div> e para. O SWARM resolve isso com crawl em duas etapas:
 
-### Modo Paralelo (para Múltiplos Alvos)
+Katana roda primeiro com Chrome headless (-jc -jsl), executa JavaScript e segue links gerados dinamicamente até profundidade 5
+Todas as URLs descobertas são injetadas no contexto do ZAP via core/action/accessUrl
+ZAP Spider roda depois do Katana para complementar com descoberta de formulários
+O Active Scan roda sobre a superfície combinada Katana + Spider
 
-Para executar scans em múltiplos alvos em paralelo (recomendado para ambientes de staging/laboratório devido ao consumo de recursos):
+Sem Katana ou chromium instalados, o SWARM usa apenas o ZAP spider com aviso.
 
-```bash
-./swarm.sh -f targets.txt --parallel 3
-```
+Aviso Legal
 
-Substitua `3` pelo número desejado de jobs paralelos (máximo de 5).
+O SWARM destina-se exclusivamente a testes de segurança autorizados.
+O uso contra sistemas que você não possui ou para os quais não tem permissão escrita explícita é ilegal e antiético. Os autores não assumem qualquer responsabilidade pelo uso indevido. Sempre obtenha autorização formal antes de executar avaliações de segurança.
 
-## Requisitos
 
-O SWARM requer as seguintes ferramentas instaladas e acessíveis no PATH do sistema. Algumas são obrigatórias, outras opcionais e suas fases serão ignoradas se não encontradas.
+Contribuindo
 
-### Obrigatórias
+Fork do repositório
+Criar branch (git checkout -b feature/sua-feature)
+Garantir que todos os 158 testes passam: bash test_swarm.sh
+Abrir pull request com descrição clara
 
-*   `curl`
-*   `python3`
 
-### Opcionais (recomendadas)
-
-*   `jq`
-*   `subfinder`
-*   `httpx`
-*   `nmap`
-*   `nuclei`
-*   `zaproxy` (OWASP ZAP)
-*   `testssl`
-*   `katana`
-*   `trufflehog`
-*   `gitleaks`
-*   `secretfinder`
-*   `subjs`
-*   `linkfinder`
-
-## Demandas Atendidas
-
-O SWARM atende a diversas demandas no contexto de avaliações de segurança e consultoria:
-
-*   **Automação de Varreduras**: Reduz o esforço manual e o tempo necessário para executar múltiplas ferramentas de segurança.
-*   **Cobertura Abrangente**: Integra diversas técnicas de descoberta e análise (subdomínios, portas, TLS, vulnerabilidades web, segredos em JS) em um único fluxo.
-*   **Relatórios Detalhados**: Gera relatórios claros e acionáveis, com informações técnicas e contexto de impacto para diferentes stakeholders.
-*   **Suporte a Múltiplos Alvos**: Facilita a gestão de varreduras em portfólios de aplicações ou grandes infraestruturas.
-*   **Otimização de Recursos**: Permite a execução paralela de scans, otimizando o uso de recursos e o tempo total da avaliação.
-*   **Flexibilidade**: Utiliza ferramentas de código aberto, permitindo personalização e extensão conforme as necessidades específicas do consultor.
-*   **Identificação de Superfície de Ataque**: Ajuda a mapear a superfície de ataque completa de uma organização, incluindo ativos menos conhecidos.
-
-## Contribuição
-
-Contribuições são bem-vindas! Sinta-se à vontade para abrir issues para bugs ou sugestões, e enviar Pull Requests com melhorias ou novas funcionalidades.
-
-## Licença
-
-Este projeto está licenciado sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+Licença
+MIT License — veja LICENSE para detalhes.
