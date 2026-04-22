@@ -6,10 +6,27 @@
 # ==============================================================================
 
 # ── PATH: garantir ferramentas Go e instalações locais ────────────────────────
-for _dir in "$HOME/go/bin" "/root/go/bin" "$HOME/.local/bin" "/usr/local/go/bin" "/opt/go/bin"; do
+for _dir in "$HOME/go/bin" "/root/go/bin" "$HOME/.local/bin" \
+            "/usr/local/go/bin" "/opt/go/bin" \
+            "/usr/local/bin" "/usr/bin" \
+            "$HOME/.go/bin" "/snap/bin"; do
     [ -d "$_dir" ] && [[ ":$PATH:" != *":$_dir:"* ]] && export PATH="$PATH:$_dir"
 done
 unset _dir
+
+# Para cada ferramenta Go, tentar localizar o binário se não estiver no PATH
+for _tool in subfinder httpx nuclei katana; do
+    if ! command -v "$_tool" &>/dev/null; then
+        # Busca ampla — find é lento mas só roda quando o comando não é encontrado
+        _found=$(find "$HOME" /usr/local /snap 2>/dev/null \
+            -name "$_tool" -type f -perm /111 2>/dev/null | head -1)
+        if [ -n "$_found" ]; then
+            _found_dir=$(dirname "$_found")
+            [[ ":$PATH:" != *":$_found_dir:"* ]] && export PATH="$PATH:$_found_dir"
+        fi
+    fi
+done
+unset _tool _found _found_dir
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -21,6 +38,7 @@ ZAP_SPIDER_TIMEOUT=0             # 0 = sem timeout (aguarda conclusão)
 ZAP_SCAN_TIMEOUT=0               # 0 = sem timeout (aguarda conclusão)
 NUCLEI_RATE_LIMIT=50
 NUCLEI_CONCURRENCY=10
+
 
 # Rotação de User-Agents — browsers reais para evasão passiva de WAF
 USER_AGENTS=(
@@ -183,12 +201,30 @@ validate_tool "testssl"   "optional"
 
 _missing_go=()
 for _t in subfinder httpx nuclei katana; do
-    command -v "$_t" &>/dev/null || _missing_go+=("$_t")
+    if command -v "$_t" &>/dev/null; then
+        true  # encontrado
+    else
+        _missing_go+=("$_t")
+    fi
 done
-[ ${#_missing_go[@]} -gt 0 ] && echo "" && \
-    echo -e "${YELLOW}[!] Ferramentas Go ausentes: ${_missing_go[*]}${NC}" && \
-    echo -e "${YELLOW}    Fix: export PATH=\$PATH:\$HOME/go/bin${NC}"
-unset _missing_go _t
+if [ ${#_missing_go[@]} -gt 0 ]; then
+    echo ""
+    echo -e "${YELLOW}[!] Ferramentas Go ausentes: ${_missing_go[*]}${NC}"
+    echo -e "${YELLOW}    PATH atual: $PATH${NC}"
+    # Tentar diagnosticar onde o binário está
+    for _t in "${_missing_go[@]}"; do
+        _loc=$(find "$HOME" /usr/local /usr/bin /snap 2>/dev/null \
+            -name "$_t" -type f -perm /111 2>/dev/null | head -1)
+        if [ -n "$_loc" ]; then
+            echo -e "${YELLOW}    Binário $( basename "$_t") encontrado em: $_loc${NC}"
+            echo -e "${YELLOW}    Fix: export PATH=\$PATH:$(dirname "$_loc")${NC}"
+        else
+            echo -e "${YELLOW}    $( basename "$_t") não instalado — instale com:${NC}"
+            echo -e "${YELLOW}    go install github.com/projectdiscovery/${_t}/cmd/${_t}@latest${NC}"
+        fi
+    done
+fi
+unset _missing_go _t _loc
 echo ""
 
 # ====================== FASE 1: DESCOBERTA ======================
@@ -546,9 +582,28 @@ echo -e "${CYAN}═════════════════════�
 
 WAF_DETECTED=""
 WAF_NAME=""
-if command -v wafw00f &>/dev/null; then
-    echo -e "${BLUE}[*] Detectando Web Application Firewall...${NC}"
-    _waf_out=$(wafw00f "$TARGET" -o "$OUTDIR/raw/waf.json" -f json 2>/dev/null)
+
+# wafw00f pode estar em ~/.local/bin (pip --user) ou como módulo Python
+_wafw00f_cmd=""
+for _wc in wafw00f wafwoof; do
+    command -v "$_wc" &>/dev/null && _wafw00f_cmd="$_wc" && break
+done
+# Fallback: tentar como módulo Python
+if [ -z "$_wafw00f_cmd" ]; then
+    python3 -m wafw00f --help &>/dev/null 2>&1 && _wafw00f_cmd="python3 -m wafw00f"
+fi
+# Fallback: procurar binário em locais comuns
+if [ -z "$_wafw00f_cmd" ]; then
+    for _loc in "$HOME/.local/bin/wafw00f" "/usr/local/bin/wafw00f" \
+                "$HOME/.local/lib/python3."*"/site-packages/../../../bin/wafw00f"; do
+        _expanded=$(eval echo "$_loc" 2>/dev/null | head -1)
+        [ -f "$_expanded" ] && _wafw00f_cmd="$_expanded" && break
+    done
+fi
+
+if [ -n "$_wafw00f_cmd" ]; then
+    echo -e "${BLUE}[*] Detectando Web Application Firewall (${_wafw00f_cmd})...${NC}"
+    _waf_out=$($_wafw00f_cmd "$TARGET" -o "$OUTDIR/raw/waf.json" -f json 2>/dev/null)
     # Tentar ler do JSON gerado
     if [ -f "$OUTDIR/raw/waf.json" ]; then
         WAF_NAME=$(python3 -c "
@@ -577,9 +632,11 @@ except: pass" 2>/dev/null)
     fi
     echo "$WAF_NAME" > "$OUTDIR/raw/waf_name.txt"
 else
-    echo -e "${YELLOW}[○] wafw00f não instalado — pulando detecção de WAF${NC}"
+    echo -e "${YELLOW}[○] wafw00f não encontrado — pulando detecção de WAF${NC}"
     echo -e "${YELLOW}    Instale: pip3 install wafw00f --break-system-packages${NC}"
+    echo -e "${YELLOW}    Depois execute: source ~/.bashrc (para atualizar PATH)${NC}"
 fi
+unset _wafw00f_cmd _wc _loc _expanded
 
 export WAF_DETECTED WAF_NAME
 
@@ -637,10 +694,11 @@ echo -e "${CYAN}═════════════════════�
 EMAIL_ISSUES=0
 if command -v dig &>/dev/null; then
     echo -e "${BLUE}[*] Verificando registros DNS de segurança de email...${NC}"
-    python3 - "$DOMAIN" << 'PYEMAIL'
-import subprocess, json, sys, re
+    python3 - "$DOMAIN" "$OUTDIR" << 'PYEMAIL'
+import subprocess, json, sys, re, os
 
 domain = sys.argv[1]
+outdir = sys.argv[2]
 
 def dig(record_type, name, short=True):
     cmd = ["dig", "+short", record_type, name] if short else ["dig", record_type, name]
@@ -718,8 +776,6 @@ else:
         "recommendation": "Verifique se o provedor de e-mail configurou DKIM para o domínio."}
 
 # ── Salvar e exibir ────────────────────────────────────────────────
-import os
-outdir = os.environ.get("OUTDIR", ".")
 with open(os.path.join(outdir, "raw", "email_security.json"), "w") as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
 
@@ -1179,7 +1235,7 @@ for js_url in js_list:
             line_start = content.rfind("\n", 0, m.start())+1
             line_end = content.find("\n", m.end()); line_end = len(content) if line_end==-1 else line_end
             ctx = content[line_start:line_end].strip()[:200]
-            all_secrets.append({"url":js_url,"file":fname,"type":label,"value":val[:120],"context":ctx})
+            all_secrets.append({"url":js_url,"file":fname,"type":label,"value":val,"context":ctx})
 
     for pat in ENDPOINT_PATTERNS:
         for m in re.finditer(pat, content, re.IGNORECASE):
@@ -1425,6 +1481,28 @@ if os.path.exists(nuclei_file) and os.path.getsize(nuclei_file) > 0:
 zap_findings = []
 zap_low_groups = {}  # Low/Info: tabela compacta
 zap_dedup      = {}  # Critical/High/Medium: card único por tipo
+# Carregar request/response do XML ZAP para evidência completa
+_zap_xml_evidence = {}  # name -> {request, response}
+_zap_xml_path = os.path.join(OUTDIR,"raw","zap_evidencias.xml")
+if os.path.exists(_zap_xml_path):
+    try:
+        import xml.etree.ElementTree as ET
+        _xtree = ET.parse(_zap_xml_path)
+        for _xalert in _xtree.findall(".//alertitem"):
+            _xname = (_xalert.findtext("alert") or "").strip()
+            if _xname and _xname not in _zap_xml_evidence:
+                _xreq  = (_xalert.findtext("requestheader") or "").strip()
+                _xreqb = (_xalert.findtext("requestbody") or "").strip()
+                _xres  = (_xalert.findtext("responseheader") or "").strip()
+                _xresb = (_xalert.findtext("responsebody") or "").strip()
+                _xfull_req = _xreq + ("\n\n" + _xreqb if _xreqb else "")
+                _xfull_res = _xres + ("\n\n" + _xresb if _xresb else "")  # evidência completa sem truncagem
+                _zap_xml_evidence[_xname] = {
+                    "request":  _xfull_req,
+                    "response": _xfull_res
+                }
+    except Exception as _xe: errors.append(f"ZAP XML: {_xe}")
+
 zap_file = os.path.join(OUTDIR,"raw","zap_alerts.json")
 if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
     try:
@@ -1452,9 +1530,17 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                         sev = sev_orig
                 else:
                     sev = sev_orig
-                ev = (a.get("evidence","") or "")[:2000]
-                if a.get("param"): ev = f"Parâmetro: {a['param']}\n{ev}"
-                if a.get("attack"): ev = f"Ataque: {a['attack'][:200]}\n{ev}"
+                # Evidência completa: campos JSON + request/response do XML ZAP
+                ev_parts_zap = []
+                _alert_name = a.get("name","")
+                _xml_ev = _zap_xml_evidence.get(_alert_name, {})
+                if a.get("param",""):      ev_parts_zap.append(f"Parâmetro: {a['param']}")
+                if a.get("attack",""):     ev_parts_zap.append(f"Vetor de Ataque:\n{a['attack']}")
+                if a.get("evidence",""):   ev_parts_zap.append(f"Evidência:\n{a['evidence']}")
+                if _xml_ev.get("request"): ev_parts_zap.append(f"--- REQUISIÇÃO HTTP ---\n{_xml_ev['request']}")
+                if _xml_ev.get("response"):ev_parts_zap.append(f"--- RESPOSTA HTTP ---\n{_xml_ev['response']}")
+                if a.get("other",""):      ev_parts_zap.append(f"Detalhe adicional:\n{a['other']}")
+                ev = "\n\n".join(ev_parts_zap)  # sem truncagem — evidência completa
                 # Extrair CVE do campo reference; fallback para CWE
                 _refs = a.get("reference","") or ""
                 _cves = re.findall(r"CVE-\d{4}-\d{4,7}", _refs, re.IGNORECASE)
@@ -1471,8 +1557,8 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
                     "remediation":a.get("solution","Revisar.") or "Revisar.",
                     "evidence":ev,
                     "param":(a.get("param","") or ""),
-                    "attack":(a.get("attack","") or "")[:500],
-                    "other":(a.get("other","") or "")[:500]}
+                    "attack":(a.get("attack","") or ""),
+                    "other":(a.get("other","") or "")}
                 # Estratégia de deduplicação por severidade:
                 # Critical/High → card único por nome (melhor evidência + lista de URLs)
                 # Medium        → card único por nome (melhor evidência + lista de URLs)
@@ -1747,14 +1833,22 @@ def render_finding(f):
         rows += f"\n    <tr><th>Parâmetro</th><td><code>{html.escape(f['param'])}</code></td></tr>"
     if f.get('attack'):
         rows += f"\n    <tr><th>Ataque</th><td><code>{html.escape(f['attack'])}</code></td></tr>"
-    if f.get('evidence'):
-        rows += f'\n    <tr><th>Evidência</th><td><div class="evidence-box">{html.escape(f["evidence"])}</div></td></tr>'
+    # Exibir evidência dividida em blocos legíveis
+    _ev_full = f.get("evidence","")
+    if _ev_full:
+        _req_match  = re.search(r"--- REQUISIÇÃO HTTP ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
+        _res_match  = re.search(r"--- RESPOSTA HTTP ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
+        _ev_other   = re.sub(r"--- (REQUISIÇÃO|RESPOSTA) HTTP ---\n.*?(?=---|$)", "", _ev_full, flags=re.DOTALL).strip()
+        if _ev_other:
+            rows += f'\n    <tr><th>Evidência</th><td><div class="evidence-box">{html.escape(_ev_other)}</div></td></tr>'
+        if _req_match:
+            rows += f'\n    <tr><th>Requisição HTTP</th><td><div class="evidence-box">{html.escape(_req_match.group(1).strip())}</div></td></tr>'
+        if _res_match:
+            rows += f'\n    <tr><th>Resposta HTTP</th><td><div class="evidence-box">{html.escape(_res_match.group(1).strip())}</div></td></tr>'
     if f.get('affected_count', 0) > 1:
         n = f['affected_count']
         urls_sample = f.get('affected_urls', [])
-        url_list = ''.join(f'<li><code>{html.escape(u)}</code></li>' for u in urls_sample[:15])
-        if len(urls_sample) > 15:
-            url_list += f'<li style="color:#666;font-style:italic">... e mais {len(urls_sample)-15} URL(s)</li>'
+        url_list = ''.join(f'<li><code>{html.escape(u)}</code></li>' for u in urls_sample)
         rows += (f'\n    <tr><th>URLs Afetadas</th>'
             f'<td><strong>{n} ocorrência(s)</strong> do mesmo tipo de alerta:<ul style="margin:6px 0 0;padding-left:18px">{url_list}</ul></td></tr>')
     other_val = f.get('other','')
@@ -1778,8 +1872,8 @@ if zap_low_groups:
         f'<td style="text-align:center">{badge(grp.get("sev", grp["finding"]["severity"]))}</td>'
         f'<td>{html.escape(grp["cve"])}</td>'
         f'<td>{html.escape(grp["conf"])}</td>'
-        f'<td style="font-size:11px;color:#555">{html.escape(", ".join(grp["urls"][:3]))}{"..." if len(grp["urls"])>3 else ""}</td>'
-        f'<td style="font-size:11px">{html.escape((grp["finding"]["remediation"] or "")[:80])}...</td></tr>'
+        f'<td style="font-size:11px;color:#555">{"<br>".join(html.escape(u) for u in grp["urls"])}</td>'
+        f'<td style="font-size:11px">{html.escape(grp["finding"]["remediation"] or "")}</td></tr>'
         for name, grp in sorted(zap_low_groups.items())
     )
     low_table_html = f'''<h2>4. Achados Baixo / Informativo — ZAP ({len(zap_low_groups)} tipos distintos, {sum(g["count"] for g in zap_low_groups.values())} ocorrências no total)</h2>
@@ -1822,7 +1916,7 @@ if email_security:
             f'<td style="text-align:center"><span style="background:{sc};color:white;'
             f'padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{sl}</span></td>'
             f'<td>{html.escape(det)}</td>'
-            f'<td style="font-size:11px;color:#555">{html.escape(rec[:100]) if rec else ("<code>"+html.escape(val[:80])+"</code>" if val else "—")}</td>'
+            f'<td style="font-size:11px;color:#555">{html.escape(rec) if rec else ("<code>"+html.escape(val)+"</code>" if val else "—")}</td>'
             f'</tr>')
     waf_email_html += (f'<h3>Segurança de Email — {html.escape(DOMAIN)}</h3>'
         '<table><tr style="background:#f5f5f5">'
@@ -1952,18 +2046,36 @@ if js_analysis:
         js_html += "<h3>Secrets e Credenciais Detectadas</h3>"
         for stype, items in sorted(by_type.items(), key=lambda x: 0 if js_sev(x[0])=="high" else 1):
             c = js_sev_color(js_sev(stype))
-            js_html += (f'<div style="border-left:6px solid {c};padding:12px 16px;margin:10px 0;'
-                f'background:#fafafa;border-radius:4px;border:1px solid #ddd">'
-                f'<strong>{html.escape(stype)}</strong> {js_badge(stype)}'
-                f' <span style="color:#666;font-size:12px">({len(items)} ocorrência(s))</span>'
-                f'<table style="margin-top:8px">')
-            for item in items[:3]:
-                v = item["value"]; masked = v[:10]+"..."+v[-6:] if len(v)>20 else v
-                js_html += (f'<tr><td style="font-family:monospace;font-size:11px;background:#2d3436;'
-                    f'color:#dfe6e9;padding:4px 8px;border-radius:3px;white-space:nowrap">{html.escape(masked)}</td>'
-                    f'<td style="font-size:11px;color:#555;padding:4px 8px">{html.escape(item.get("context","")[:100])}</td></tr>')
-            if len(items)>3:
-                js_html += f'<tr><td colspan="2" style="color:#888;font-size:11px;padding:4px 8px;font-style:italic">... e mais {len(items)-3} ocorrência(s)</td></tr>'
+            js_html += (f'<div style="border-left:5px solid {c};padding:14px 16px;margin:12px 0;'
+                f'background:#ffffff;border-radius:6px;border:1px solid #e0e0e0;box-shadow:0 1px 3px rgba(0,0,0,.06)">'
+                f'<div style="margin-bottom:10px">'
+                f'<strong style="font-size:14px">{html.escape(stype)}</strong> {js_badge(stype)}'
+                f' <span style="color:#888;font-size:12px;margin-left:6px">({len(items)} ocorrência(s))</span>'
+                f'</div>'
+                f'<table style="width:100%;border-collapse:collapse">'
+                f'<tr>'
+                f'<th style="background:#f5f5f5;color:#1a3a4f;font-weight:700;font-size:12px;'
+                f'padding:8px 12px;text-align:left;border:1px solid #ddd;width:35%">Valor / Pattern</th>'
+                f'<th style="background:#f5f5f5;color:#1a3a4f;font-weight:700;font-size:12px;'
+                f'padding:8px 12px;text-align:left;border:1px solid #ddd">Contexto no Código</th>'
+                f'</tr>')
+            for item in items:
+                v    = item["value"]
+                ctx  = item.get("context", "")
+                furl = item.get("url", "")
+                js_html += (
+                    f'<tr>'
+                    f'<td style="padding:8px 12px;border:1px solid #eee;vertical-align:top;background:#fafafa">'
+                    f'<code style="font-size:11px;color:#c0392b;background:#fff5f5;padding:3px 6px;'
+                    f'border-radius:3px;word-break:break-all;display:block">{html.escape(v)}</code>'
+                    + (f'<div style="font-size:10px;color:#888;margin-top:5px">📄 {html.escape(furl)}</div>' if furl else "")
+                    + f'</td>'
+                    f'<td style="padding:8px 12px;border:1px solid #eee;vertical-align:top">'
+                    f'<pre style="margin:0;font-size:10px;font-family:monospace;background:#f8f9fa;'
+                    f'color:#333;padding:6px 8px;border-radius:3px;white-space:pre-wrap;'
+                    f'word-break:break-all;border:1px solid #e0e0e0;max-height:160px;'
+                    f'overflow-y:auto">{html.escape(ctx) if ctx else "—"}</pre>'
+                    + f'</td></tr>')
             js_html += "</table></div>"
 
     # Frameworks
@@ -1987,7 +2099,7 @@ if js_analysis:
     # Endpoints acessíveis
     if js_accessible:
         ep_rows = "".join(
-            f'<tr><td><code style="font-size:11px">{html.escape(p["url"][:80])}</code></td>'
+            f'<tr><td><code style="font-size:11px;word-break:break-all">{html.escape(p["url"])}</code></td>'
             f'<td style="text-align:center"><span style="background:#27ae60;color:white;'
             f'padding:1px 6px;border-radius:3px;font-size:11px">{p["status"]}</span></td>'
             f'<td style="font-size:11px">{"JSON API" if p.get("is_json") else "HTML"}</td></tr>'
@@ -1999,11 +2111,16 @@ if js_analysis:
     # Comentários sensíveis
     if js_comments:
         comm_rows = "".join(
-            f'<tr><td><code style="font-size:11px;background:#2d3436;color:#dfe6e9;'
-            f'padding:3px 6px;border-radius:3px;display:block">{html.escape(c["comment"][:150])}</code></td></tr>'
+            f'<tr><td style="padding:6px 10px;border-bottom:1px solid #eee">'
+            f'<code style="font-size:11px;background:#f8f9fa;color:#c0392b;'
+            f'padding:3px 6px;border-radius:3px;display:block;white-space:pre-wrap;'
+            f'word-break:break-all;border:1px solid #e0e0e0">{html.escape(c["comment"])}</code>'
+            f'<div style="font-size:10px;color:#888;margin-top:3px">📄 {html.escape(c.get("url",""))}</div>'
+            f'</td></tr>'
             for c in js_comments[:10])
         js_html += ('<h3>Comentários Sensíveis no Código</h3>'
-            '<table>' + comm_rows + '</table>')
+            '<table style="width:100%;border-collapse:collapse;border:1px solid #eee;border-radius:6px">'
+            + comm_rows + '</table>')
 
 # ── Gerar HTML: TLS ─────────────────────────────────────────
 SEV_TLS_CLASS = {"critical":"tls-critical","high":"tls-high","medium":"tls-warn","low":"tls-warn","info":"tls-ok"}
