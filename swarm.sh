@@ -173,7 +173,7 @@ echo -e "${GREEN}[+] Iniciado : $(date '+%d/%m/%Y %H:%M:%S')${NC}"
 echo ""
 
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$TARGET" 2>/dev/null)
-if ! echo "$HTTP_CODE" | grep -qE "^(200|301|302|401|403|404)$"; then
+if ! echo "$HTTP_CODE" | grep -qE "^(200|301|302|303|307|308|401|403|404)$"; then
     echo -e "${RED}[✗] Site não acessível (HTTP ${HTTP_CODE:-timeout})${NC}"
     # Em modo batch: registrar falha mas não abortar o processo inteiro
     [ "${SWARM_BATCH:-0}" = "1" ] && exit 1
