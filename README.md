@@ -1,6 +1,6 @@
-# SWARM
+# 🕷️ SWARM
 
-> Scanner de segurança web automatizado — pipeline de 11 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads.
+> Scanner de segurança web automatizado — pipeline de 11 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads e gestores de segurança.
 
 [![Shell](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Python](https://img.shields.io/badge/Python-3.8+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -28,7 +28,7 @@ flowchart TD
 
     subgraph INTEL["Inteligência"]
         F --> G[FASE 6 · CVE/EPSS\nNVD + FIRST.org]
-        G --> H[FASE 7 · WAF Detection\nwafw00f + evasão passiva]
+        G --> H[FASE 7 · WAF Detection\nwafw00f + evasão passiva automática]
         H --> I[FASE 8 · Email Security\nSPF · DMARC · DKIM]
     end
 
@@ -56,18 +56,22 @@ flowchart TD
 Um comando. Um relatório. Cobertura completa.
 
 ```bash
+# Scan único
 bash swarm.sh https://target.com
+
+# Múltiplos alvos via arquivo
+bash swarm_batch.sh targets.txt
 ```
 
-O SWARM encadeia 10+ ferramentas de segurança em um pipeline automatizado — descoberta de subdomínios, mapeamento de superfície, análise TLS, scan de vulnerabilidades com templates CVE, confirmação ativa de exploits, crawling JavaScript-aware com Katana, análise dinâmica com OWASP ZAP, detecção de secrets em JS, enriquecimento CVE/EPSS — e consolida tudo em um único relatório HTML em Português.
+O SWARM encadeia 10+ ferramentas de segurança em um pipeline automatizado e entrega um único relatório HTML em Português com evidências completas, impacto em linguagem de negócio e plano de ação por horizonte.
 
 ### Para quem é
 
 | Perfil | O que recebe |
 |---|---|
-| **Analista de segurança** | Evidência completa (request/response brutos, curl commands), CVSS + EPSS, deduplicação, TLS findings |
-| **Tech lead** | Impacto em linguagem de negócio, orientação de correção específica por tecnologia, plano de ação em 3 horizontes |
-| **Gestor de segurança** | Índice de risco 0–100 ponderado por EPSS, duração do scan, sumário executivo |
+| **Analista de segurança** | Evidência completa (request/response brutos, curl commands), CVSS + EPSS, deduplicação por tipo, TLS findings |
+| **Tech lead** | Impacto em linguagem de negócio, orientação de correção por tecnologia, plano de ação em 3 horizontes |
+| **Gestor de segurança** | Índice de risco 0–100 ponderado por EPSS, comportamento do scan, duração, sumário executivo |
 
 ---
 
@@ -82,13 +86,18 @@ FASE 4   Nuclei ────────────────┘
          CVE + misconfig + default-login + exposure
          + takeover + cors
 FASE 5   Confirmação ativa (apenas C/A/M)
+         Re-executa curl de cada achado Nuclei
 FASE 6   Enriquecimento CVE / EPSS (NVD + FIRST.org)
+         CVSS v3 · probabilidade de exploit · retry backoff
 FASE 7   Detecção de WAF (wafw00f)
+         + evasão passiva automática quando detectado
 FASE 8   Segurança de Email (SPF / DMARC / DKIM)
+         Análise DNS sem ferramentas extras
 FASE 9   OWASP ZAP
          Katana JS crawl → Spider → Active Scan
+         OpenAPI/Swagger auto-import
 FASE 10  JS / Secrets
-         20 padrões + endpoints + frameworks
+         20 padrões · endpoints · frameworks vulneráveis
 FASE 11  Relatório HTML
          PT-BR · self-contained · abre offline
 ```
@@ -113,7 +122,15 @@ FASE 11  Relatório HTML
 - **Default credentials** — Node-RED, Grafana, Jupyter, Jenkins, e outros
 - **Misconfiguration** — configs expostos, debug endpoints, stack traces
 - **Exposure** — S3 buckets públicos, repos Git expostos, arquivos de backup
+- **Subdomain takeover** — CNAME apontando para serviços desativados
+- **CORS misconfiguration** — reflexão de origin, null origin, wildcard
 - **Confirmação ativa** — re-executa o curl do Nuclei (só C/A/M) para verificar se ainda é explorável
+
+### Inteligência CVE
+- **NVD** — CVSS v3, descrição oficial por CVE
+- **EPSS** — probabilidade de exploração nos próximos 30 dias (FIRST.org)
+- **Retry com backoff exponencial** — trata rate limiting do NVD (6s → 12s → 24s)
+- **Ponderação no risk score** — EPSS alto eleva o índice de risco
 
 ### WAF Detection & Evasão Passiva
 - **wafw00f** — detecta 140+ WAFs (Cloudflare, AWS WAF, Imperva, Akamai, F5, Sucuri, etc.)
@@ -124,33 +141,23 @@ FASE 11  Relatório HTML
   - **Payload alterations** — Nuclei testa variações de encoding automaticamente (`-pa`)
   - **WAF response handling** — ignora 403/406/429 e continua o scan
   - **ZAP threads** — reduz para 2 para imitar tráfego humano
-- Relatório inclui badge de aviso quando WAF detectado e evasão foi ativada
+- Relatório inclui seção **"Comportamento do Scan"** com todas as técnicas aplicadas e resultados obtidos
 
 ### Segurança de Email (DNS-based, sem ferramentas extras)
-- **SPF** — detecta ausente, `+all` (qualquer remetente), `?all` (neutro), configurado corretamente
+- **SPF** — detecta ausente, `+all` (qualquer remetente), `?all` (neutro), correto
 - **DMARC** — detecta ausente, `p=none` (monitor only), `p=quarantine/reject`
 - **DKIM** — verifica seletores comuns (`default`, `google`, `mail`, `s1`, `s2`, etc.)
-- Tabela no relatório com status por protocolo, severidade e recomendação específica
-- Usa apenas `dig` — já instalado no Kali e Ubuntu
-
-### Subdomain Takeover & CORS (via Nuclei)
-- **Takeover templates** — CNAME apontando para Heroku, GitHub Pages, S3, Fastly desativados
-- **CORS templates** — reflexão de Origin sem validação, `null` origin, wildcard de subdomínio
+- Tabela no relatório com status, severidade e recomendação específica por protocolo
 
 ### Análise Dinâmica (Katana + OWASP ZAP)
 - **Katana** — crawl com rendering JavaScript headless via chromium (`-jc -jsl`)
 - Injeção das URLs descobertas no contexto ZAP antes do spider
 - **OpenAPI/Swagger auto-import** — detecta e importa specs de API antes de escanear
 - **Active Scan** — XSS, SQLi, CSRF, bypass de auth, IDOR
-- **Deduplicação** — um card por tipo de alerta com lista de todas as URLs afetadas
-- **Reclassificação CVSS** — tabela CWE→CVSS sintético com 37 entradas sobreescreve severidade do ZAP
+- **Deduplicação** — um card por tipo de alerta com lista completa de URLs afetadas
+- **Reclassificação CVSS** — tabela CWE→CVSS sintético com 37 entradas
 - **Detecção de scan travado** — aborta active scan após 90s em 0% com diagnóstico
-
-### Inteligência CVE
-- **NVD** — CVSS v3, descrição oficial por CVE
-- **EPSS** — probabilidade de exploração nos próximos 30 dias (FIRST.org)
-- **Retry com backoff** — trata rate limiting do NVD (6s → 12s → 24s)
-- **Ponderação no risk score** — EPSS alto eleva o índice de risco
+- **Evidência completa** — request/response HTTP bruto do ZAP XML incluído no relatório
 
 ### JavaScript & Secrets
 - **Descoberta de arquivos JS** — `<script src>`, webpack chunks, imports dinâmicos
@@ -163,11 +170,13 @@ FASE 11  Relatório HTML
 
 ### Relatório em PT-BR
 - Todos os labels em português: **CRÍTICO / ALTO / MÉDIO / BAIXO / INFO**
+- **Contador de cards únicos** — tipos distintos de vulnerabilidade, não ocorrências brutas
 - **Linha de impacto** por achado — o que um atacante consegue fazer em linguagem direta
 - **Como corrigir** — orientação específica por tecnologia (não boilerplate genérico)
 - **Badge de reclassificação** — mostra quando CWE/CVE alterou a severidade original do ZAP
-- **Contador de cards únicos** — exibe tipos distintos de vulnerabilidade, não ocorrências brutas
+- **Evidência completa** — request/response HTTP sem truncagem, todas as URLs afetadas
 - **Plano de ação** — 3 horizontes: esta semana / próximo sprint / backlog 30 dias
+- **Comportamento do scan** — seção dedicada com técnicas de evasão aplicadas e resultados
 - **Duração total** — no header e sumário executivo
 
 ---
@@ -178,7 +187,6 @@ FASE 11  Relatório HTML
 |---|---|---|
 | **Scan autenticado** | ZAP roda sem token de sessão | Configurar ZAP manualmente com Bearer token |
 | **SCA de dependências backend** | Sem acesso a `package.json`, `pom.xml` | Snyk, Dependabot, OWASP Dependency Check |
-| **Subdomain takeover** | Fora do escopo atual | `nuclei -tags takeover` separado |
 | **Ataques de rede** | Foco em aplicação web | Scanner de rede separado |
 | **Serviços internos** | Requer acesso à rede | Executar de dentro da rede |
 
@@ -194,8 +202,6 @@ cd swarm
 # Instalar tudo automaticamente
 bash install.sh
 ```
-
-O instalador detecta o ambiente (Kali, Ubuntu, WSL) e instala todas as dependências.
 
 ### Instalação manual — Kali Linux
 
@@ -216,7 +222,9 @@ go install github.com/projectdiscovery/katana/cmd/katana@latest
 nuclei -update-templates
 
 # PATH
-echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc && source ~/.bashrc
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
+echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ### Instalação manual — Ubuntu / WSL
@@ -236,6 +244,7 @@ go install github.com/projectdiscovery/katana/cmd/katana@latest
 nuclei -update-templates
 
 echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
+echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc
 echo 'export DISPLAY=""' >> ~/.bashrc
 echo 'export JAVA_TOOL_OPTIONS="-Djava.awt.headless=true"' >> ~/.bashrc
 source ~/.bashrc
@@ -251,11 +260,23 @@ source ~/.bashrc
 # Validar instalação (158 testes)
 bash test_swarm.sh
 
-# Executar scan completo
+# Scan único
 bash swarm.sh https://target.com
+
+# Múltiplos alvos via arquivo
+bash swarm_batch.sh targets.txt
 ```
 
-### Estrutura de output
+### Formato do arquivo de alvos (`targets.txt`)
+
+```
+# Comentários são ignorados
+https://app.example.com
+https://api.example.com    # comentários inline também
+staging.example.com        # https:// é adicionado automaticamente
+```
+
+### Estrutura de output — scan único
 
 ```
 scan_target.com_20260418_143022/
@@ -268,13 +289,27 @@ scan_target.com_20260418_143022/
     ├── nuclei.json                 ← achados Nuclei (JSONL)
     ├── exploit_confirmations.json  ← confirmações ativas de exploits
     ├── cve_enrichment.json         ← CVSS + EPSS do NVD/FIRST
-    ├── katana_urls.txt             ← URLs descobertas pelo Katana (JS crawl)
+    ├── waf.json                    ← resultado wafw00f
+    ├── email_security.json         ← SPF/DMARC/DKIM
+    ├── scan_metadata.json          ← comportamento do scan + evasão
+    ├── katana_urls.txt             ← URLs descobertas pelo Katana
     ├── zap_alerts.json             ← alertas do OWASP ZAP (JSON)
-    ├── zap_evidencias.xml          ← relatório completo ZAP (XML)
+    ├── zap_evidencias.xml          ← relatório completo ZAP com request/response
     ├── openapi_spec.json           ← spec OpenAPI importada (se encontrada)
     ├── js_urls.txt                 ← arquivos JS descobertos
     ├── js_analysis.json            ← secrets, endpoints, frameworks
     └── js_files/                   ← arquivos JS para análise forense
+```
+
+### Estrutura de output — scan em lote
+
+```
+scan_batch_20260418_143022/
+├── relatorio_consolidado.html      ← tabela comparativa de todos os alvos
+├── batch_summary.log               ← log com status de cada scan
+├── logs/                           ← log individual por alvo
+├── scan_app.example.com_xxx/       ← relatório completo do alvo 1
+└── scan_api.example.com_xxx/       ← relatório completo do alvo 2
 ```
 
 ---
@@ -285,13 +320,15 @@ scan_target.com_20260418_143022/
 |---|---|---|
 | 1 | Sumário Executivo | Índice de risco 0–100, contadores por severidade (cards únicos), duração |
 | 2 | Superfície de Ataque | Subdomínios, hosts ativos, portas, URLs Katana |
-| 3 | Vulnerabilidades Identificadas | Cards C/A/M com CVE, CVSS, EPSS, impacto, como corrigir |
-| 4 | TLS / SSL | Achados testssl com severidade e CVE |
-| 5 | Confirmação Ativa | Resultados de re-execução dos exploits Nuclei |
-| 6 | JS / Secrets | Secrets detectados (mascarados), frameworks, endpoints expostos |
-| 7 | Achados Baixo / Info | Tabela compacta agrupada por tipo |
-| 8 | Plano de Ação | Esta semana / Próximo sprint / Backlog 30 dias |
-| 9 | Arquivos de Evidência | Links para todos os arquivos raw |
+| 3 | Vulnerabilidades Identificadas | Cards C/A/M com CVE, CVSS, EPSS, impacto, como corrigir, evidência completa |
+| 4 | 🔬 Comportamento do Scan | WAF detectado, técnicas de evasão aplicadas, resultados com evasão ativa |
+| 5 | Infraestrutura & DNS | WAF detectado + análise SPF/DMARC/DKIM |
+| 6 | TLS / SSL | Achados testssl com severidade e CVE |
+| 7 | Confirmação Ativa | Resultados de re-execução dos exploits Nuclei |
+| 8 | JS / Secrets | Secrets detectados, frameworks, endpoints expostos |
+| 9 | Achados Baixo / Info | Tabela compacta agrupada por tipo, todas as URLs |
+| 10 | Plano de Ação | Esta semana / Próximo sprint / Backlog 30 dias |
+| 11 | Arquivos de Evidência | Links para todos os arquivos raw |
 
 ---
 
@@ -304,14 +341,14 @@ ZAP_PORT=8080
 ZAP_HOST="127.0.0.1"
 ZAP_SPIDER_TIMEOUT=0    # 0 = sem timeout (aguarda 100%)
 ZAP_SCAN_TIMEOUT=0      # 0 = sem timeout (aguarda 100%)
-NUCLEI_RATE_LIMIT=50    # req/s
+NUCLEI_RATE_LIMIT=50    # req/s — reduzido automaticamente para 5 quando WAF detectado
 NUCLEI_CONCURRENCY=10   # templates em paralelo
 ```
 
 | Ambiente | Rate limit recomendado |
 |---|---|
-| Produção / sensível | 20–30 |
-| Staging (padrão) | 50 |
+| Produção / sensível | 20–30 (ou automático via WAF detection) |
+| Staging | 50 |
 | Lab interno | 100–150 |
 
 ---
@@ -326,13 +363,15 @@ NUCLEI_CONCURRENCY=10   # templates em paralelo
 | `httpx` | 2 | Mapeamento HTTP | Opcional |
 | `nmap` | 2 | Scan de portas | Opcional |
 | `testssl` | 3 | Análise TLS/SSL | Opcional |
-| `nuclei` | 4 | Scan de vulnerabilidades | Opcional |
-| `katana` | 6 | Crawl JS-aware para SPAs | Opcional |
-| `zaproxy` | 6 | Scan dinâmico de aplicação | Opcional |
-| `chromium` | 6 | Rendering JS headless para Katana | Opcional |
+| `nuclei` | 4 | Scan de vulnerabilidades + takeover + cors | Opcional |
+| `wafw00f` | 7 | Detecção de WAF + evasão passiva automática | Opcional |
+| `katana` | 9 | Crawl JS-aware para SPAs | Opcional |
+| `zaproxy` | 9 | Scan dinâmico de aplicação | Opcional |
+| `chromium` | 9 | Rendering JS headless para Katana | Opcional |
+| `dig` | 8 | Análise DNS (SPF/DMARC/DKIM) | Padrão do sistema |
 | `jq` | Misc | Processamento JSON | Opcional |
 
-> SWARM adiciona `~/go/bin` ao PATH automaticamente no startup — não é necessário executar `source ~/.bashrc` antes de rodar.
+> SWARM adiciona `~/go/bin` e `~/.local/bin` ao PATH automaticamente no startup.
 
 ---
 
