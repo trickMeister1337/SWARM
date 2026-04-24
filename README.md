@@ -133,6 +133,42 @@ FASE 11  Relatório HTML
 - **Retry com backoff exponencial** — trata rate limiting do NVD (6s → 12s → 24s)
 - **Risk score 2026: KEV (+25/CVE) > EPSS (+15/+7/+2) > CVSS (base ponderada) > JS secrets**
 
+### Metodologia de Classificação de Criticidade
+
+O SWARM usa uma metodologia de priorização em 4 camadas, alinhada com as recomendações atuais do NIST e CISA para 2026. A lógica central é: **evidência de exploração real supera severidade teórica**.
+
+#### Camada 1 — KEV (peso máximo)
+O catálogo [CISA Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) responde à pergunta: *"essa vulnerabilidade está sendo explorada em ambiente real agora?"*. Um CVE no KEV recebe +25 pontos no risk score independente do CVSS. Motivo: uma falha CVSS 6.5 com exploração ativa confirmada é operacionalmente mais urgente que uma falha CVSS 9.8 sem exploração documentada.
+
+#### Camada 2 — EPSS (probabilidade futura)
+O [Exploit Prediction Scoring System](https://www.first.org/epss) da FIRST.org estima a probabilidade de um CVE ser explorado nos próximos 30 dias com base em dados de ameaças em tempo real. Bônus aplicado:
+- EPSS ≥ 50% → +15 (exploit muito provável)
+- EPSS ≥ 10% → +7  (exploit provável)
+- EPSS ≥ 1%  → +2  (exploit possível)
+
+#### Camada 3 — CVSS v3 (severidade base)
+O Common Vulnerability Scoring System fornece a base técnica de severidade. Usado como ponto de partida, não como critério exclusivo de prioridade. Limitação conhecida: o NIST passou a priorizar enriquecimento NVD apenas para CVEs no KEV e softwares críticos — CVEs recentes podem não ter CVSS disponível imediatamente.
+
+#### Camada 4 — Validação ativa
+O SWARM re-executa o curl de cada achado Nuclei classificado como C/A/M para confirmar se a vulnerabilidade é explorável no momento do scan. Um achado confirmado ativamente tem prioridade máxima independente das camadas anteriores.
+
+#### Fórmula do Risk Score (0–100)
+
+```
+base_risk  = (críticos × 10) + (altos × 5) + (médios × 2) + baixos
+kev_bonus  = min(CVEs_no_KEV × 25, 50)
+epss_bonus = Σ bônus por CVE conforme faixas EPSS
+js_bonus   = min(secrets_críticos × 15 + secrets_médios × 5 + fw_vulneráveis × 8, 30)
+risk       = min(base_risk + kev_bonus + epss_bonus + js_bonus, 100)
+```
+
+| Score | Classificação | Ação recomendada |
+|---|---|---|
+| 70–100 | CRÍTICO | Ação imediata — escalar hoje |
+| 40–69 | ALTO | Atenção urgente — corrigir esta sprint |
+| 15–39 | MÉDIO | Correção planejada — próximo sprint |
+| 0–14 | BAIXO | Monitoramento — backlog |
+
 ### WAF Detection & Evasão Passiva
 - **wafw00f** — detecta 140+ WAFs (Cloudflare, AWS WAF, Imperva, Akamai, F5, Sucuri, etc.)
 - **Quando WAF detectado**, o SWARM adapta o pipeline automaticamente:
