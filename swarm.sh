@@ -58,11 +58,11 @@ validate_tool() {
     local tool=$1 required=${2:-optional}
     if ! command -v "$tool" &>/dev/null; then
         [ "$required" = "required" ] && \
-            echo -e "${RED}[✗] $tool não encontrado — obrigatório. Abortando.${NC}" && exit 1
-        echo -e "${YELLOW}[○] $tool não encontrado (opcional — fase será ignorada)${NC}"
+            echo -e "  ${RED}[✗] $tool não encontrado — obrigatório. Abortando.${NC}" && exit 1
+        echo -e "  ${YELLOW}[○] $tool não encontrado (opcional — fase será ignorada)${NC}"
         return 1
     fi
-    echo -e "${GREEN}[✓] $tool encontrado${NC}"
+    echo -e "  ${GREEN}[✓] $tool encontrado${NC}"
 }
 
 zap_api_call() {
@@ -72,7 +72,7 @@ zap_api_call() {
 }
 
 wait_for_zap() {
-    echo -e "${BLUE}[*] Aguardando ZAP ficar pronto...${NC}"
+    echo -e "  ${BLUE}[…] Aguardando ZAP ficar pronto...${NC}"
     for i in {1..180}; do
         zap_api_call "core/view/version" "" | grep -q "version" && \
             echo -e "\n${GREEN}[✓] ZAP pronto${NC}" && return 0
@@ -87,7 +87,7 @@ wait_for_zap_progress() {
     local status_endpoint=$1 scan_id=$2 timeout_secs=$3 label=$4
     local elapsed=0 interval=10 progress
     local api_fail_count=0 api_fail_limit=5  # 5 falhas consecutivas = ZAP morreu
-    echo -e "${BLUE}[*] Aguardando $label completar (sem timeout)...${NC}"
+    echo -e "  ${BLUE}[…] Aguardando $label completar (sem timeout)...${NC}"
     while true; do
         local raw_response
         raw_response=$(zap_api_call "$status_endpoint" "scanId=${scan_id}" 2>/dev/null)
@@ -123,7 +123,7 @@ cleanup() {
     zap_api_call "core/action/shutdown" "" > /dev/null 2>&1
     sleep 2
     pkill -f "zaproxy.*-port ${ZAP_PORT}" 2>/dev/null
-    echo -e "${GREEN}[✓] ZAP encerrado${NC}"
+    echo -e "  ${GREEN}[✓] ZAP encerrado${NC}"
 }
 
 trap cleanup EXIT
@@ -148,10 +148,10 @@ if [ "$1" = "-f" ] || [ "$1" = "--file" ] || [ "$1" = "--f" ]; then
     # Redirecionar automaticamente para swarm_batch.sh se disponível
     _batch="$(dirname "$0")/swarm_batch.sh"
     if [ -f "$_batch" ]; then
-        echo -e "${BLUE}[*] Redirecionando para swarm_batch.sh...${NC}"
+        echo -e "  ${BLUE}[…] Redirecionando para swarm_batch.sh...${NC}"
         exec bash "$_batch" "${@:2}"
     else
-        echo -e "${RED}[✗] swarm_batch.sh não encontrado em: $_batch${NC}"
+        echo -e "  ${RED}[✗] swarm_batch.sh não encontrado em: $_batch${NC}"
         exit 1
     fi
 fi
@@ -163,30 +163,50 @@ SCAN_START_TS=$(date +%s)
 OUTDIR="scan_${DOMAIN}_${TIMESTAMP}"
 mkdir -p "$OUTDIR/raw"
 
-echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}       SWARM - SECURITY ASSESSMENT${NC}"
-echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}[+] Alvo     : $TARGET${NC}"
-echo -e "${GREEN}[+] Domínio  : $DOMAIN${NC}"
-echo -e "${GREEN}[+] Diretório: $OUTDIR${NC}"
-echo -e "${GREEN}[+] Iniciado : $(date '+%d/%m/%Y %H:%M:%S')${NC}"
+# ── Banner ASCII ──────────────────────────────────────────────────────────────
+clear 2>/dev/null || true
+echo -e "${CYAN}"
+cat << 'ASCIIART'
+  ███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
+  ██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
+  ███████╗██║ █╗ ██║███████║██████╔╝██╔████╔██║
+  ╚════██║██║███╗██║██╔══██║██╔══██╗██║╚██╔╝██║
+  ███████║╚███╔███╔╝██║  ██║██║  ██║██║ ╚═╝ ██║
+  ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+ASCIIART
+echo -e "${NC}"
+echo -e "  ${BOLD}Security Web Assessment & Recon Module${NC}"
+echo -e "  ${BLUE}Metodologia: KEV + EPSS + CVSS · Pipeline de 11 Fases${NC}"
+echo ""
+echo -e "  ${GREEN}▸${NC} Alvo     ${BOLD}$TARGET${NC}"
+echo -e "  ${GREEN}▸${NC} Domínio  ${BOLD}$DOMAIN${NC}"
+echo -e "  ${GREEN}▸${NC} Output   ${BOLD}$OUTDIR/${NC}"
+echo -e "  ${GREEN}▸${NC} Iniciado ${BOLD}$(date '+%d/%m/%Y %H:%M:%S')${NC}"
+echo ""
+echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
+# ── Verificação de acesso ao alvo ─────────────────────────────────────────────
+echo -ne "  ${BLUE}[…]${NC} Verificando acesso ao alvo..."
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$TARGET" 2>/dev/null)
 if ! echo "$HTTP_CODE" | grep -qE "^(200|301|302|303|307|308|401|403|404)$"; then
-    echo -e "${RED}[✗] Site não acessível (HTTP ${HTTP_CODE:-timeout})${NC}"
-    # Em modo batch: registrar falha mas não abortar o processo inteiro
+    echo -e "\r  ${RED}[✗]${NC} Site não acessível ${RED}(HTTP ${HTTP_CODE:-timeout})${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Possíveis causas:${NC}"
+    echo -e "  ${YELLOW}  • URL incorreta — verifique o protocolo (https://)${NC}"
+    echo -e "  ${YELLOW}  • Alvo offline ou firewall bloqueando${NC}"
+    echo -e "  ${YELLOW}  • Timeout de rede (>10s)${NC}"
     [ "${SWARM_BATCH:-0}" = "1" ] && exit 1
     exit 1
 fi
-echo -e "${GREEN}[✓] Site acessível (HTTP ${HTTP_CODE})${NC}"
+echo -e "\r  ${GREEN}[✓]${NC} Alvo acessível ${GREEN}(HTTP ${HTTP_CODE})${NC}"
 echo ""
 
 # ====================== VALIDAÇÃO DE FERRAMENTAS ======================
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  VALIDAÇÃO DE FERRAMENTAS${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}[*] PATH ativo: $PATH${NC}"; echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  VALIDAÇÃO DE FERRAMENTAS                                   │${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 validate_tool "curl"      "required"
 validate_tool "python3"   "required"
@@ -209,7 +229,7 @@ for _t in subfinder httpx nuclei katana; do
 done
 if [ ${#_missing_go[@]} -gt 0 ]; then
     echo ""
-    echo -e "${YELLOW}[!] Ferramentas Go ausentes: ${_missing_go[*]}${NC}"
+    echo -e "  ${YELLOW}[!] Ferramentas Go ausentes: ${_missing_go[*]}${NC}"
     echo -e "${YELLOW}    PATH atual: $PATH${NC}"
     # Tentar diagnosticar onde o binário está
     for _t in "${_missing_go[@]}"; do
@@ -237,15 +257,18 @@ command -v subfinder &>/dev/null && \
 
 [ ! -s "$OUTDIR/raw/subdomains.txt" ] && \
     echo "$DOMAIN" > "$OUTDIR/raw/subdomains.txt" && \
-    echo -e "${YELLOW}[!] Subfinder sem resultados — usando domínio principal${NC}"
+    echo -e "  ${YELLOW}[!] Subfinder sem resultados — usando domínio principal${NC}"
 
 SUB_COUNT=$(wc -l < "$OUTDIR/raw/subdomains.txt" | tr -d ' ')
-echo -e "${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
+echo -e "  ${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 2/11: MAPEAMENTO DE SUPERFÍCIE${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 2/11: MAPEAMENTO DE SUPERFÍCIE${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 ACTIVE_COUNT=0
 if command -v httpx &>/dev/null; then
@@ -254,51 +277,57 @@ if command -v httpx &>/dev/null; then
               -o "$OUTDIR/raw/httpx_results.txt" 2>"$OUTDIR/raw/httpx_error.log"
     [ -f "$OUTDIR/raw/httpx_results.txt" ] && \
         ACTIVE_COUNT=$(grep -c . "$OUTDIR/raw/httpx_results.txt" 2>/dev/null || echo 0)
-    echo -e "${GREEN}[✓] $ACTIVE_COUNT subdomínio(s) ativo(s) detectado(s)${NC}"
+    echo -e "  ${GREEN}[✓] $ACTIVE_COUNT subdomínio(s) ativo(s) detectado(s)${NC}"
 else
-    echo -e "${YELLOW}[○] httpx não disponível — pulando mapeamento HTTP${NC}"
+    echo -e "  ${YELLOW}[○] httpx não disponível — pulando mapeamento HTTP${NC}"
 fi
 
 OPEN_PORTS="N/A"
 if command -v nmap &>/dev/null; then
-    echo -e "${BLUE}[*] Executando nmap...${NC}"
+    echo -e "  ${BLUE}[…] Executando nmap...${NC}"
     nmap -p 80,443,8000,8080,8443,8888,3000,9090 -T4 -sV --open \
          "$DOMAIN" -oN "$OUTDIR/raw/nmap.txt" > /dev/null 2>&1
     OPEN_PORTS=$(grep -E "^[0-9]+/tcp.*open" "$OUTDIR/raw/nmap.txt" 2>/dev/null \
                  | awk '{print $1}' | tr '\n' ' ' | sed 's/ $//')
     OPEN_PORTS=${OPEN_PORTS:-nenhuma}
-    echo -e "${GREEN}[✓] Portas abertas: ${OPEN_PORTS}${NC}"
+    echo -e "  ${GREEN}[✓] Portas abertas: ${OPEN_PORTS}${NC}"
 else
-    echo -e "${YELLOW}[○] nmap não disponível — pulando scan de portas${NC}"
+    echo -e "  ${YELLOW}[○] nmap não disponível — pulando scan de portas${NC}"
 fi
 
 # ====================== FASES 3+4: TESTSSL + NUCLEI (paralelo) ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 TLS_ISSUES=0
 TLS_PID=""
 if command -v testssl &>/dev/null; then
-    echo -e "${BLUE}[*] Iniciando testssl em background...${NC}"
+    echo -e "  ${BLUE}[…] Iniciando testssl em background...${NC}"
     testssl --color 0 --warnings off --quiet \
             --jsonfile "$OUTDIR/raw/testssl.json" \
             "$DOMAIN" > "$OUTDIR/raw/testssl.log" 2>&1 &
     TLS_PID=$!
-    echo -e "${BLUE}[*] testssl rodando em paralelo com nuclei...${NC}"
+    echo -e "  ${BLUE}[…] testssl rodando em paralelo com nuclei...${NC}"
 else
-    echo -e "${YELLOW}[○] testssl não disponível — pulando análise TLS${NC}"
+    echo -e "  ${YELLOW}[○] testssl não disponível — pulando análise TLS${NC}"
     echo -e "${YELLOW}    Instale: sudo apt install testssl.sh${NC}"
 fi
 
 # ====================== FASE 4: NUCLEI ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 4/11: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 4/11: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 NUCLEI_COUNT=0
 if command -v nuclei &>/dev/null; then
-    echo -e "${YELLOW}[!] Scan pode levar 5-10 minutos (rate-limit: ${NUCLEI_RATE_LIMIT} req/s)...${NC}"
+    echo -e "  ${YELLOW}[!] Scan pode levar 5-10 minutos (rate-limit: ${NUCLEI_RATE_LIMIT} req/s)...${NC}"
     # Construir flags de evasão baseado em WAF detectado
     NUCLEI_EVASION_FLAGS=""
     if [ "${WAF_DETECTED}" = "1" ]; then
@@ -313,7 +342,7 @@ if command -v nuclei &>/dev/null; then
         # Payload alterations — testa variações de encoding automaticamente
         NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -pa"
         [ -n "$NUCLEI_DELAY" ] && NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -rl-duration $NUCLEI_DELAY"
-        echo -e "${BLUE}[*] Evasão passiva ativada: UA rotation + origin spoofing + payload alterations${NC}"
+        echo -e "  ${BLUE}[…] Evasão passiva ativada: UA rotation + origin spoofing + payload alterations${NC}"
     fi
 
     eval nuclei -u "$TARGET" \
@@ -327,7 +356,7 @@ if command -v nuclei &>/dev/null; then
 
     if [ -s "$OUTDIR/raw/nuclei.json" ]; then
         NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null || echo 0)
-        echo -e "${GREEN}[✓] Nuclei concluído. $NUCLEI_COUNT vulnerabilidade(s)${NC}"
+        echo -e "  ${GREEN}[✓] Nuclei concluído. $NUCLEI_COUNT vulnerabilidade(s)${NC}"
         # Atualizar metadata com resultado Nuclei
         python3 -c "
 import json,os
@@ -337,21 +366,21 @@ if os.path.exists(mf):
     json.dump(d,open(mf,'w'),indent=2)
 " 2>/dev/null || true
     else
-        echo -e "${YELLOW}[!] Sem resultados com tags. Tentando scan completo...${NC}"
+        echo -e "  ${YELLOW}[!] Sem resultados com tags. Tentando scan completo...${NC}"
         nuclei -u "$TARGET" \
                -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                -no-interactsh -jsonl -o "$OUTDIR/raw/nuclei.json" \
                > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log"
         NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null || echo 0)
-        echo -e "${GREEN}[✓] $NUCLEI_COUNT vulnerabilidade(s) encontrada(s)${NC}"
+        echo -e "  ${GREEN}[✓] $NUCLEI_COUNT vulnerabilidade(s) encontrada(s)${NC}"
     fi
 else
-    echo -e "${YELLOW}[○] nuclei não disponível — pulando scan de templates${NC}"
+    echo -e "  ${YELLOW}[○] nuclei não disponível — pulando scan de templates${NC}"
 fi
 
 # Aguardar testssl terminar (rodou em paralelo com nuclei)
 if [ -n "$TLS_PID" ] && kill -0 "$TLS_PID" 2>/dev/null; then
-    echo -e "${BLUE}[*] Aguardando testssl finalizar...${NC}"
+    echo -e "  ${BLUE}[…] Aguardando testssl finalizar...${NC}"
     wait "$TLS_PID"
 fi
 # Coletar resultado testssl agora que terminou
@@ -363,17 +392,20 @@ try:
     findings = data if isinstance(data, list) else data.get('scanResult',[{}])[0].get('findings',[])
     print(len([f for f in findings if f.get('severity','') in ('WARN','HIGH','CRITICAL','LOW')]))
 except: print(0)" 2>/dev/null)
-    echo -e "${GREEN}[✓] testssl concluído — $TLS_ISSUES problema(s) TLS detectado(s)${NC}"
+    echo -e "  ${GREEN}[✓] testssl concluído — $TLS_ISSUES problema(s) TLS detectado(s)${NC}"
 fi
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 CONFIRMED_COUNT=0
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
-    echo -e "${BLUE}[*] Re-executando curl de cada achado para confirmar...${NC}"
+    echo -e "  ${BLUE}[…] Re-executando curl de cada achado para confirmar...${NC}"
     python3 - "$OUTDIR" << 'PYCONFIRM'
 import json, subprocess, re, sys, os
 from datetime import datetime, timezone
@@ -462,18 +494,21 @@ try:
     data = json.load(open('$OUTDIR/raw/exploit_confirmations.json'))
     print(sum(1 for c in data if c['confirmed']))
 except: print(0)" 2>/dev/null)
-    echo -e "${GREEN}[✓] $CONFIRMED_COUNT exploit(s) confirmado(s) ativamente${NC}"
+    echo -e "  ${GREEN}[✓] $CONFIRMED_COUNT exploit(s) confirmado(s) ativamente${NC}"
 else
-    echo -e "${YELLOW}[○] Nenhum achado Nuclei para confirmar${NC}"
+    echo -e "  ${YELLOW}[○] Nenhum achado Nuclei para confirmar${NC}"
 fi
 
 # ====================== FASE 10: ENRIQUECIMENTO CVE/EPSS ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 6/11: ENRIQUECIMENTO CVE / EPSS (NVD + FIRST.org)${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 6/11: ENRIQUECIMENTO CVE / EPSS (NVD + FIRST.org)${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
-    echo -e "${BLUE}[*] Consultando NVD e EPSS para CVEs encontrados...${NC}"
+    echo -e "  ${BLUE}[…] Consultando NVD e EPSS para CVEs encontrados...${NC}"
     python3 - "$OUTDIR" << 'PYCVE'
 import json, sys, os, urllib.request, urllib.parse, time, csv, io
 
@@ -620,14 +655,17 @@ with open(cve_db_file, "w", encoding="utf-8") as f:
 print(f"  [✓] Enriquecimento salvo: {cve_db_file}")
 PYCVE
 else
-    echo -e "${YELLOW}[○] Sem achados Nuclei para enriquecer${NC}"
+    echo -e "  ${YELLOW}[○] Sem achados Nuclei para enriquecer${NC}"
 fi
 
 
 # ====================== FASE 7: WAF DETECTION ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 7/11: DETECÇÃO DE WAF${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 7/11: DETECÇÃO DE WAF${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 WAF_DETECTED=""
 WAF_NAME=""
@@ -651,7 +689,7 @@ if [ -z "$_wafw00f_cmd" ]; then
 fi
 
 if [ -n "$_wafw00f_cmd" ]; then
-    echo -e "${BLUE}[*] Detectando Web Application Firewall (${_wafw00f_cmd})...${NC}"
+    echo -e "  ${BLUE}[…] Detectando Web Application Firewall (${_wafw00f_cmd})...${NC}"
     _waf_out=$($_wafw00f_cmd "$TARGET" -o "$OUTDIR/raw/waf.json" -f json 2>/dev/null)
     # Tentar ler do JSON gerado
     if [ -f "$OUTDIR/raw/waf.json" ]; then
@@ -674,14 +712,14 @@ except: pass" 2>/dev/null)
     fi
     if [ -n "$WAF_NAME" ]; then
         WAF_DETECTED="1"
-        echo -e "${YELLOW}[!] WAF detectado: ${WAF_NAME}${NC}"
+        echo -e "  ${YELLOW}[!] WAF detectado: ${WAF_NAME}${NC}"
         echo -e "${YELLOW}    Os achados do active scan podem ter falsos negativos.${NC}"
     else
-        echo -e "${GREEN}[✓] Nenhum WAF detectado${NC}"
+        echo -e "  ${GREEN}[✓] Nenhum WAF detectado${NC}"
     fi
     echo "$WAF_NAME" > "$OUTDIR/raw/waf_name.txt"
 else
-    echo -e "${YELLOW}[○] wafw00f não encontrado — pulando detecção de WAF${NC}"
+    echo -e "  ${YELLOW}[○] wafw00f não encontrado — pulando detecção de WAF${NC}"
     echo -e "${YELLOW}    Instale: pip3 install wafw00f --break-system-packages${NC}"
     echo -e "${YELLOW}    Depois execute: source ~/.bashrc (para atualizar PATH)${NC}"
 fi
@@ -736,13 +774,16 @@ with open(os.path.join(outdir,"raw","scan_metadata.json"),"w") as f:
 PYMETADATA
 
 # ====================== FASE 7: EMAIL SECURITY ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 EMAIL_ISSUES=0
 if command -v dig &>/dev/null; then
-    echo -e "${BLUE}[*] Verificando registros DNS de segurança de email...${NC}"
+    echo -e "  ${BLUE}[…] Verificando registros DNS de segurança de email...${NC}"
     python3 - "$DOMAIN" "$OUTDIR" << 'PYEMAIL'
 import subprocess, json, sys, re, os
 
@@ -843,27 +884,30 @@ try:
     d = json.load(open('$OUTDIR/raw/email_security.json'))
     print(sum(1 for v in d.values() if v.get('severity','') in ('high','medium')))
 except: print(0)" 2>/dev/null || echo 0)
-    echo -e "${GREEN}[✓] Análise de email concluída — $EMAIL_ISSUES problema(s) encontrado(s)${NC}"
+    echo -e "  ${GREEN}[✓] Análise de email concluída — $EMAIL_ISSUES problema(s) encontrado(s)${NC}"
 else
-    echo -e "${YELLOW}[○] dig não disponível — pulando análise de email${NC}"
+    echo -e "  ${YELLOW}[○] dig não disponível — pulando análise de email${NC}"
 fi
 
 export EMAIL_ISSUES
 
 # ====================== FASE 9: ZAP ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 9/11: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 9/11: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 ALERT_COUNT=0
 KATANA_URLS=0
 if command -v zaproxy &>/dev/null; then
 
     if zap_api_call "core/view/version" "" 2>/dev/null | grep -q "version"; then
-        echo -e "${GREEN}[✓] ZAP já estava rodando — reutilizando${NC}"
+        echo -e "  ${GREEN}[✓] ZAP já estava rodando — reutilizando${NC}"
         ZAP_STARTED_BY_SCRIPT=0
     else
-        echo -e "${BLUE}[*] Preparando ambiente ZAP...${NC}"
+        echo -e "  ${BLUE}[…] Preparando ambiente ZAP...${NC}"
 
         # Limpar instâncias travadas e lock file
         pkill -9 -f "zap-.*\.jar" 2>/dev/null
@@ -915,12 +959,12 @@ if changed:
     with open(path, 'w', encoding='utf-8') as f:
         f.write(content)
 PYFIX
-            echo -e "${GREEN}[✓] config.xml configurado${NC}"
+            echo -e "  ${GREEN}[✓] config.xml configurado${NC}"
         else
-            echo -e "${YELLOW}[!] config.xml não encontrado — será criado pelo ZAP${NC}"
+            echo -e "  ${YELLOW}[!] config.xml não encontrado — será criado pelo ZAP${NC}"
         fi
 
-        echo -e "${BLUE}[*] Iniciando OWASP ZAP...${NC}"
+        echo -e "  ${BLUE}[…] Iniciando OWASP ZAP...${NC}"
         export JAVA_OPTS="-Xmx512m -Djava.awt.headless=true"
 
         zaproxy -daemon \
@@ -932,8 +976,8 @@ PYFIX
         ZAP_STARTED_BY_SCRIPT=1
 
         if ! wait_for_zap; then
-            echo -e "${RED}[✗] ZAP não iniciou em 180s${NC}"
-            echo -e "${YELLOW}[!] Últimas linhas do log:${NC}"
+            echo -e "  ${RED}[✗] ZAP não iniciou em 180s${NC}"
+            echo -e "  ${YELLOW}[!] Últimas linhas do log:${NC}"
             tail -5 "$OUTDIR/raw/zap_daemon.log" 2>/dev/null | sed 's/^/    /'
             [ -f "${ZAP_CONFIG}.swarm_backup" ] && \
                 mv "${ZAP_CONFIG}.swarm_backup" "$ZAP_CONFIG" 2>/dev/null
@@ -942,11 +986,11 @@ PYFIX
     fi
 
     if zap_api_call "core/view/version" "" | grep -q "version"; then
-        echo -e "${GREEN}[✓] API do ZAP respondendo${NC}"
+        echo -e "  ${GREEN}[✓] API do ZAP respondendo${NC}"
 
         # Configurar evasão no ZAP quando WAF detectado
         if [ "${WAF_DETECTED}" = "1" ]; then
-            echo -e "${BLUE}[*] Configurando ZAP para evasão passiva de WAF...${NC}"
+            echo -e "  ${BLUE}[…] Configurando ZAP para evasão passiva de WAF...${NC}"
             # Definir User-Agent de browser real
             _ua_encoded=$(python3 -c \
                 "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
@@ -970,14 +1014,14 @@ PYFIX
             done
             # Reduzir thread count do ZAP para imitar tráfego humano
             zap_api_call "ascan/action/setOptionThreadPerHost" "Integer=2" > /dev/null 2>&1
-            echo -e "${GREEN}[✓] ZAP: UA rotation + headers de evasão configurados${NC}"
+            echo -e "  ${GREEN}[✓] ZAP: UA rotation + headers de evasão configurados${NC}"
         fi
 
         ENCODED_URL=$(python3 -c \
             "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$TARGET")
 
         # ── OpenAPI/Swagger: detectar spec e importar no ZAP ────────────
-        echo -e "${BLUE}[*] Verificando OpenAPI/Swagger...${NC}"
+        echo -e "  ${BLUE}[…] Verificando OpenAPI/Swagger...${NC}"
         OPENAPI_FOUND=0
         OPENAPI_PATHS=("/swagger.json" "/swagger/v1/swagger.json" "/openapi.json"
                        "/api/swagger.json" "/api/openapi.json" "/api-docs"
@@ -988,40 +1032,40 @@ PYFIX
             _oa_resp=$(curl -s --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/swarm_oa_check.tmp" "$_oa_url" 2>/dev/null)
             if echo "$_oa_resp" | grep -q "^2"; then
                 if grep -qE '"swagger"|"openapi"|"paths"' "$OUTDIR/raw/swarm_oa_check.tmp" 2>/dev/null; then
-                    echo -e "${GREEN}[✓] OpenAPI spec encontrado: $_oapath${NC}"
+                    echo -e "  ${GREEN}[✓] OpenAPI spec encontrado: $_oapath${NC}"
                     cp "$OUTDIR/raw/swarm_oa_check.tmp" "$OUTDIR/raw/openapi_spec.json"
                     # Importar spec no ZAP via API
                     _oa_encoded=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" "$_oa_url")
                     _oa_result=$(zap_api_call "openapi/action/importUrl" "url=${_oa_encoded}&targetUrl=${ENCODED_URL}")
                     if echo "$_oa_result" | grep -q "OK\|Result"; then
-                        echo -e "${GREEN}[✓] OpenAPI importado no ZAP — endpoints adicionados ao scan${NC}"
+                        echo -e "  ${GREEN}[✓] OpenAPI importado no ZAP — endpoints adicionados ao scan${NC}"
                         OPENAPI_FOUND=1
                     else
-                        echo -e "${YELLOW}[!] Import ZAP: $_oa_result${NC}"
+                        echo -e "  ${YELLOW}[!] Import ZAP: $_oa_result${NC}"
                     fi
                     break
                 fi
             fi
         done
         rm -f "$OUTDIR/raw/swarm_oa_check.tmp"
-        [ "$OPENAPI_FOUND" -eq 0 ] && echo -e "${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
+        [ "$OPENAPI_FOUND" -eq 0 ] && echo -e "  ${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
 
         # ── Katana: crawl JavaScript-rendered pages ────────────────────
         KATANA_URLS=0
         if command -v katana &>/dev/null; then
-            echo -e "${BLUE}[*] Katana: crawling com suporte a JavaScript...${NC}"
+            echo -e "  ${BLUE}[…] Katana: crawling com suporte a JavaScript...${NC}"
 
             # Detectar se chromium/chrome disponível para modo headless
             KATANA_JS_FLAGS=""
             for _br in chromium chromium-browser google-chrome; do
                 if command -v "$_br" &>/dev/null; then
                     KATANA_JS_FLAGS="-jc -jsl"
-                    echo -e "${GREEN}[✓] Modo JS headless ativado ($_br)${NC}"
+                    echo -e "  ${GREEN}[✓] Modo JS headless ativado ($_br)${NC}"
                     break
                 fi
             done
             [ -z "$KATANA_JS_FLAGS" ] && \
-                echo -e "${YELLOW}[!] Chromium não encontrado — katana em modo HTTP apenas (sem JS rendering)${NC}"
+                echo -e "  ${YELLOW}[!] Chromium não encontrado — katana em modo HTTP apenas (sem JS rendering)${NC}"
 
             katana -u "$TARGET" \
                 $KATANA_JS_FLAGS \
@@ -1035,10 +1079,10 @@ PYFIX
 
             if [ -s "$OUTDIR/raw/katana_urls.txt" ]; then
                 KATANA_URLS=$(wc -l < "$OUTDIR/raw/katana_urls.txt" | tr -d " ")
-                echo -e "${GREEN}[✓] Katana descobriu ${KATANA_URLS} URL(s)${NC}"
+                echo -e "  ${GREEN}[✓] Katana descobriu ${KATANA_URLS} URL(s)${NC}"
 
                 # Filtrar apenas URLs do mesmo domínio e injetar no contexto ZAP
-                echo -e "${BLUE}[*] Injetando URLs do Katana no contexto ZAP...${NC}"
+                echo -e "  ${BLUE}[…] Injetando URLs do Katana no contexto ZAP...${NC}"
                 _injected=0
                 while IFS= read -r _k_url; do
                     [ -z "$_k_url" ] && continue
@@ -1050,18 +1094,18 @@ PYFIX
                     zap_api_call "core/action/accessUrl" "url=${_k_enc}" > /dev/null 2>&1
                     _injected=$((_injected + 1))
                 done < "$OUTDIR/raw/katana_urls.txt"
-                echo -e "${GREEN}[✓] $_injected URL(s) injetadas no contexto ZAP${NC}"
+                echo -e "  ${GREEN}[✓] $_injected URL(s) injetadas no contexto ZAP${NC}"
                 sleep 2  # ZAP processar URLs antes do spider
             else
-                echo -e "${YELLOW}[!] Katana não encontrou URLs — continuando com ZAP spider${NC}"
+                echo -e "  ${YELLOW}[!] Katana não encontrou URLs — continuando com ZAP spider${NC}"
             fi
         else
-            echo -e "${YELLOW}[○] Katana não instalado — usando apenas ZAP spider${NC}"
+            echo -e "  ${YELLOW}[○] Katana não instalado — usando apenas ZAP spider${NC}"
             echo -e "${YELLOW}    Instale: go install github.com/projectdiscovery/katana/cmd/katana@latest${NC}"
         fi
 
         # ── ZAP Spider: complementa o Katana ou age sozinho ────────────
-        echo -e "${BLUE}[*] Iniciando ZAP Spider (complementa crawl)...${NC}"
+        echo -e "  ${BLUE}[…] Iniciando ZAP Spider (complementa crawl)...${NC}"
         SPIDER_ID=$(zap_api_call "spider/action/scan" "url=${ENCODED_URL}" \
                     | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan','0'))" 2>/dev/null)
         wait_for_zap_progress "spider/view/status" "${SPIDER_ID:-0}" "$ZAP_SPIDER_TIMEOUT" "Spider"
@@ -1070,24 +1114,24 @@ PYFIX
         SPIDER_URLS=$(zap_api_call "spider/view/results" "scanId=${SPIDER_ID:-0}" \
                       | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('results',[])))" 2>/dev/null || echo 0)
         TOTAL_URLS=$(( KATANA_URLS + SPIDER_URLS ))
-        echo -e "${BLUE}[*] Total no contexto ZAP: Katana=${KATANA_URLS} + Spider=${SPIDER_URLS} = ${TOTAL_URLS} URL(s)${NC}"
+        echo -e "  ${BLUE}[…] Total no contexto ZAP: Katana=${KATANA_URLS} + Spider=${SPIDER_URLS} = ${TOTAL_URLS} URL(s)${NC}"
 
         if [ "${TOTAL_URLS:-0}" -eq 0 ]; then
-            echo -e "${YELLOW}[!] Nenhuma URL descoberta — adicionando target manualmente${NC}"
+            echo -e "  ${YELLOW}[!] Nenhuma URL descoberta — adicionando target manualmente${NC}"
             zap_api_call "core/action/accessUrl" "url=${ENCODED_URL}" > /dev/null 2>&1
             sleep 3
         fi
 
         # ── Iniciar Active Scan com validação ────────────────────────────
-        echo -e "${BLUE}[*] Iniciando Active Scan...${NC}"
+        echo -e "  ${BLUE}[…] Iniciando Active Scan...${NC}"
         SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${ENCODED_URL}&recurse=true" 2>/dev/null)
         SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
 
         if [ -z "$SCAN_ID" ] || [ "$SCAN_ID" = "0" ] || ! [[ "$SCAN_ID" =~ ^[0-9]+$ ]]; then
-            echo -e "${YELLOW}[!] Active scan não iniciou (SCAN_ID='${SCAN_ID}') — resposta: ${SCAN_RESPONSE:0:200}${NC}"
-            echo -e "${YELLOW}[!] Coletando alertas do spider e pulando active scan${NC}"
+            echo -e "  ${YELLOW}[!] Active scan não iniciou (SCAN_ID='${SCAN_ID}') — resposta: ${SCAN_RESPONSE:0:200}${NC}"
+            echo -e "  ${YELLOW}[!] Coletando alertas do spider e pulando active scan${NC}"
         else
-            echo -e "${GREEN}[✓] Active Scan iniciado (ID: $SCAN_ID)${NC}"
+            echo -e "  ${GREEN}[✓] Active Scan iniciado (ID: $SCAN_ID)${NC}"
 
             # Aguardar até 90s para scan sair de 0% — detecta scan travado
             _stuck_elapsed=0
@@ -1107,18 +1151,18 @@ PYFIX
             echo ""
 
             if [ "$_stuck" -eq 1 ]; then
-                echo -e "${YELLOW}[!] Active scan travado em 0% por ${_stuck_limit}s — possíveis causas:${NC}"
+                echo -e "  ${YELLOW}[!] Active scan travado em 0% por ${_stuck_limit}s — possíveis causas:${NC}"
                 echo -e "${YELLOW}    • Alvo bloqueou conexões do scanner${NC}"
                 echo -e "${YELLOW}    • ZAP sem URLs no contexto para escanear${NC}"
                 echo -e "${YELLOW}    • Alvo exige autenticação para todas as rotas${NC}"
-                echo -e "${YELLOW}[!] Abortando active scan e coletando alertas disponíveis${NC}"
+                echo -e "  ${YELLOW}[!] Abortando active scan e coletando alertas disponíveis${NC}"
                 zap_api_call "ascan/action/stop" "scanId=${SCAN_ID}" > /dev/null 2>&1
             else
                 wait_for_zap_progress "ascan/view/status" "${SCAN_ID}" "$ZAP_SCAN_TIMEOUT" "Active Scan"
             fi
         fi
 
-        echo -e "${BLUE}[*] Coletando alertas...${NC}"
+        echo -e "  ${BLUE}[…] Coletando alertas...${NC}"
         curl -s "http://${ZAP_HOST}:${ZAP_PORT}/JSON/core/view/alerts/" \
              -o "$OUTDIR/raw/zap_alerts.json" 2>/dev/null
         curl -s "http://${ZAP_HOST}:${ZAP_PORT}/OTHER/core/other/xmlreport/" \
@@ -1130,7 +1174,7 @@ try:
     data = json.load(open('$OUTDIR/raw/zap_alerts.json'))
     print(len(data.get('alerts',[])))
 except: print(0)" 2>/dev/null)
-        echo -e "${GREEN}[✓] ZAP encontrou ${ALERT_COUNT} alerta(s)${NC}"
+        echo -e "  ${GREEN}[✓] ZAP encontrou ${ALERT_COUNT} alerta(s)${NC}"
         # Atualizar metadata com resultado ZAP
         python3 -c "
 import json,os
@@ -1140,18 +1184,21 @@ if os.path.exists(mf):
     json.dump(d,open(mf,'w'),indent=2)
 " 2>/dev/null || true
     else
-        echo -e "${RED}[✗] API do ZAP não respondeu — pulando coleta${NC}"
+        echo -e "  ${RED}[✗] API do ZAP não respondeu — pulando coleta${NC}"
     fi
 else
-    echo -e "${YELLOW}[○] ZAP não instalado — pulando fase 4${NC}"
+    echo -e "  ${YELLOW}[○] ZAP não instalado — pulando fase 4${NC}"
 fi
 
 export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES
 
 # ====================== FASE 10: JS ANALYSIS ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 JS_SECRETS=0
 JS_ENDPOINTS=0
@@ -1345,16 +1392,19 @@ if [ -f "$OUTDIR/raw/js_analysis.json" ]; then
     JS_ENDPOINTS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('endpoints',[])))" 2>/dev/null || echo 0)
     JS_FRAMEWORKS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('frameworks',[])))" 2>/dev/null || echo 0)
     JS_FILES=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('js_files',[])))" 2>/dev/null || echo 0)
-    echo -e "${GREEN}[✓] JS: $JS_FILES arquivo(s) | $JS_SECRETS secret(s) | $JS_ENDPOINTS endpoint(s) | $JS_FRAMEWORKS framework(s)${NC}"
+    echo -e "  ${GREEN}[✓] JS: $JS_FILES arquivo(s) | $JS_SECRETS secret(s) | $JS_ENDPOINTS endpoint(s) | $JS_FRAMEWORKS framework(s)${NC}"
 fi
 
 export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 
 # ====================== FASE 11: RELATÓRIO ======================
-echo -e "\n${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 11/11: GERAÇÃO DE RELATÓRIO${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  FASE 11/11: GERAÇÃO DE RELATÓRIO${NC}"
+echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo ""
 
 export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES
 
