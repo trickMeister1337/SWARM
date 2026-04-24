@@ -475,11 +475,35 @@ echo -e "${CYAN}═════════════════════�
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
     echo -e "${BLUE}[*] Consultando NVD e EPSS para CVEs encontrados...${NC}"
     python3 - "$OUTDIR" << 'PYCVE'
-import json, sys, os, urllib.request, urllib.parse, time
+import json, sys, os, urllib.request, urllib.parse, time, csv, io
 
 outdir = sys.argv[1]
 nuclei_file = os.path.join(outdir, "raw", "nuclei.json")
 cve_db_file = os.path.join(outdir, "raw", "cve_enrichment.json")
+
+# ── Baixar catálogo KEV (CISA Known Exploited Vulnerabilities) ──
+kev_set = set()
+kev_meta = {}  # cve_id -> {date_added, due_date, vendor, product, notes}
+try:
+    kev_url = "https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv"
+    req_kev = urllib.request.Request(kev_url, headers={"User-Agent": "SWARM/1.0"})
+    with urllib.request.urlopen(req_kev, timeout=15) as r:
+        raw = r.read().decode("utf-8")
+    reader = csv.DictReader(io.StringIO(raw))
+    for row in reader:
+        cid = row.get("cveID","").strip().upper()
+        if cid:
+            kev_set.add(cid)
+            kev_meta[cid] = {
+                "date_added": row.get("dateAdded",""),
+                "due_date":   row.get("dueDate",""),
+                "vendor":     row.get("vendorProject",""),
+                "product":    row.get("product",""),
+                "notes":      row.get("notes","")[:200]
+            }
+    print(f"  [✓] KEV: {len(kev_set)} vulnerabilidades exploradas ativamente carregadas")
+except Exception as e:
+    print(f"  [!] KEV: não foi possível baixar catálogo ({e}) — continuando sem KEV")
 
 # Coletar CVEs únicos dos achados Nuclei
 cves = set()
@@ -504,9 +528,14 @@ print(f"  [*] Consultando {len(cves)} CVE(s)...")
 enriched = {}
 
 for cve_id in sorted(cves):
+    in_kev = cve_id in kev_set
+    kev_info = kev_meta.get(cve_id, {})
     entry = {"cve_id": cve_id, "cvss_v3": None, "cvss_v2": None,
              "description": "", "epss_score": None, "epss_percentile": None,
-             "severity": ""}
+             "severity": "", "in_kev": in_kev, "kev": kev_info}
+    if in_kev:
+        print(f"  [🔴] KEV: {cve_id} está no catálogo de explorações ativas! "
+              f"(adicionado: {kev_info.get('date_added','?')} | prazo CISA: {kev_info.get('due_date','?')})")
     # NVD API v2 — com retry e backoff exponencial
     def nvd_fetch(cve_id, max_retries=3):
         url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={urllib.parse.quote(cve_id)}"
@@ -565,6 +594,26 @@ for cve_id in sorted(cves):
     time.sleep(0.3)
 
     enriched[cve_id] = entry
+
+# Adicionar entradas KEV para CVEs que não passaram pelo NVD mas estão no KEV
+for cve_id in cves:
+    if cve_id not in enriched and cve_id in kev_set:
+        kev_info = kev_meta.get(cve_id, {})
+        enriched[cve_id] = {
+            "cve_id": cve_id, "cvss_v3": None, "cvss_v2": None,
+            "description": f"Exploração ativa confirmada ({kev_info.get('vendor','')} {kev_info.get('product','')})",
+            "epss_score": None, "epss_percentile": None,
+            "severity": "", "in_kev": True, "kev": kev_info
+        }
+        print(f"  [🔴] KEV sem NVD: {cve_id} — adicionado pelo catálogo CISA")
+
+# Salvar também CVEs do KEV que não foram encontrados pelo Nuclei mas podem estar em templates
+kev_file = os.path.join(outdir, "raw", "kev_matches.json")
+kev_hits = {cid: kev_meta[cid] for cid in cves if cid in kev_set}
+with open(kev_file, "w", encoding="utf-8") as f:
+    json.dump(kev_hits, f, ensure_ascii=False, indent=2)
+if kev_hits:
+    print(f"  [🔴] {len(kev_hits)} CVE(s) encontrado(s) no catálogo KEV — exploração ativa confirmada!")
 
 with open(cve_db_file, "w", encoding="utf-8") as f:
     json.dump(enriched, f, ensure_ascii=False, indent=2)
@@ -1684,6 +1733,14 @@ if os.path.exists(cve_db_file) and os.path.getsize(cve_db_file) > 0:
     try: cve_enrichment = json.load(open(cve_db_file,"r",encoding="utf-8"))
     except Exception as e: errors.append(f"cve_enrichment: {e}")
 
+# KEV matches — CVEs encontrados no catálogo CISA
+kev_matches = {}
+_kev_f = os.path.join(OUTDIR,"raw","kev_matches.json")
+if os.path.exists(_kev_f):
+    try: kev_matches = json.load(open(_kev_f,"r",encoding="utf-8"))
+    except Exception as e: errors.append(f"kev_matches: {e}")
+kev_count = len(kev_matches)
+
 # Reclassificar achados Nuclei usando CVSS real do NVD quando disponível
 for f in findings:
     cve_field = f.get('cve','')
@@ -1730,22 +1787,31 @@ for grp in zap_dedup.values():
     sev = grp["sev"]
     if sev in occurrences: occurrences[sev] += (grp["count"] - 1)
 
-# Risk score usa ocorrências reais (não cards únicos)
+# ── Risk score: KEV > EPSS > CVSS (metodologia 2026) ───────────
+# Base: ocorrências ponderadas por severidade CVSS
 base_risk = (occurrences["critical"]*10) + (occurrences["high"]*5) + (occurrences["medium"]*2) + occurrences["low"]
-# Bônus EPSS
+
+# Camada 1 — KEV: exploração ativa confirmada (peso máximo)
+# Um CVE no KEV é automaticamente urgente independente do CVSS
+kev_bonus = 0
+kev_count = sum(1 for ev in cve_enrichment.values() if ev.get("in_kev"))
+if kev_count > 0:
+    kev_bonus = min(kev_count * 25, 50)  # +25 por CVE no KEV, cap 50
+
+# Camada 2 — EPSS: probabilidade de exploração nos próximos 30 dias
 epss_bonus = 0
 for ev in cve_enrichment.values():
     epss = ev.get("epss_score") or 0
-    if epss >= 0.5:   epss_bonus += 15   # exploit muito provável
-    elif epss >= 0.1: epss_bonus += 7    # exploit provável
-    elif epss >= 0.01: epss_bonus += 2   # exploit possível
+    if epss >= 0.5:    epss_bonus += 15   # exploit muito provável (>50%)
+    elif epss >= 0.1:  epss_bonus += 7    # exploit provável (>10%)
+    elif epss >= 0.01: epss_bonus += 2    # exploit possível (>1%)
 # Bônus JS: secrets e frameworks vulneráveis agravam o risco
 HIGH_JS_TYPES = {"AWS Access Key","AWS Secret","Private Key","Stripe Live Key","GitHub Token","GitLab PAT","OpenAI Key","Anthropic Key","Hardcoded Password","DB Connection String"}
 js_high   = [s for s in js_secrets if s.get("type","") in HIGH_JS_TYPES]
 js_medium = [s for s in js_secrets if s.get("type","") not in HIGH_JS_TYPES]
 js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
 js_bonus = min(len(js_high)*15 + len(js_medium)*5 + len(js_vuln_fw)*8, 30)
-risk = min(base_risk + epss_bonus + js_bonus, 100)
+risk = min(base_risk + kev_bonus + epss_bonus + js_bonus, 100)
 stxt,scol = ("CRÍTICO — Ação Imediata","#7a2e2e") if stats["critical"] else \
             ("ALTO — Atenção Urgente","#b34e4e") if stats["high"] else \
             ("MÉDIO — Correção Planejada","#d4833a") if stats["medium"] else \
@@ -1783,6 +1849,19 @@ def render_finding(f):
             enrich_rows += f'<tr><th>{html.escape(cve_id)}</th><td>'
             _SEV_PT = {"CRITICAL":"CRÍTICO","HIGH":"ALTO","MEDIUM":"MÉDIO","LOW":"BAIXO"}
             sev_pt = _SEV_PT.get(str(sev).upper(), sev)
+            # KEV badge — máxima prioridade, exibido antes de CVSS/EPSS
+            in_kev = ev.get("in_kev", False)
+            kev_info = ev.get("kev", {})
+            if in_kev:
+                kev_due = kev_info.get("due_date","")
+                kev_added = kev_info.get("date_added","")
+                kev_prod = f"{kev_info.get('vendor','')} {kev_info.get('product','')}".strip()
+                enrich_rows += (f'<span style="background:#7a0000;color:white;padding:2px 10px;'
+                    f'border-radius:4px;font-size:12px;font-weight:bold;'
+                    f'border:2px solid #ff4444;letter-spacing:.3px">'
+                    f'🔴 EXPLORAÇÃO ATIVA — CISA KEV</span> ')
+                if kev_due: enrich_rows += f'<span style="background:#b34e4e;color:white;padding:1px 6px;border-radius:3px;font-size:11px">Prazo CISA: {html.escape(kev_due)}</span> '
+                if kev_prod: enrich_rows += f'<br><small style="color:#7a0000;font-weight:bold">Adicionado ao KEV em {html.escape(kev_added)} — {html.escape(kev_prod)}</small> '
             if cvss: enrich_rows += f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS {cvss} {html.escape(sev_pt)}</span> '
             if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}° percentil)</span> '
             if desc_nvd: enrich_rows += f'<br><small style="color:#555">{html.escape(desc_nvd)}</small>'
@@ -2251,13 +2330,15 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <div class="content">
 <h2>1. Sumário Executivo</h2>
 <div class="stats">
+{f'<div class="stat-card" style="background:#7a0000;border:2px solid #ff4444"><div class="number">{kev_count}</div><div>🔴 KEV</div></div>' if kev_count > 0 else ""}
 <div class="stat-card critical"><div class="number">{stats['critical']}</div><div>CRÍTICO</div></div>
 <div class="stat-card high"><div class="number">{stats['high']}</div><div>ALTO</div></div>
 <div class="stat-card medium"><div class="number">{stats['medium']}</div><div>MÉDIO</div></div>
 <div class="stat-card low"><div class="number">{stats['low']}</div><div>BAIXO</div></div>
 <div class="stat-card info"><div class="number">{stats['info']}</div><div>INFO</div></div></div>
+{f'<div style="background:#7a0000;color:white;padding:14px 18px;border-radius:6px;margin:12px 0;border-left:6px solid #ff4444"><strong style="font-size:14px">🔴 {kev_count} CVE(S) COM EXPLORAÇÃO ATIVA CONFIRMADA — CISA KEV</strong><br><span style="font-size:12px;opacity:.9">Estes CVEs estão no catálogo Known Exploited Vulnerabilities da CISA. Independente do score CVSS, exigem ação imediata: ' + ", ".join(f"<code style=\'background:rgba(255,255,255,.15);padding:1px 4px;border-radius:3px\'>{html.escape(cid)}</code>" for cid in list(kev_matches.keys())[:10]) + (f" e mais {len(kev_matches)-10}" if len(kev_matches)>10 else "") + "</span></div>" if kev_count > 0 else ""}
 <div class="info-box">
-<p><strong>Índice de Risco (0–100):</strong> {risk}</p>
+<p><strong>Índice de Risco (0–100):</strong> {risk} <small style="color:#888;font-size:11px">(metodologia: KEV + EPSS + CVSS + JS)</small></p>
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
 <p><strong>Total de Achados:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
 <p><strong>Duração total do scan:</strong> {duration_str}</p>
@@ -2304,6 +2385,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 <li><code>raw/zap_alerts.json</code> — Alertas do OWASP ZAP (JSON bruto)</li>
 <li><code>raw/zap_evidencias.xml</code> — Relatório completo do ZAP (XML)</li>
 {"<li><code>raw/testssl.json</code> — Análise TLS/SSL (testssl)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}
+{"<li><code>raw/kev_matches.json</code> — CVEs com exploração ativa confirmada (CISA KEV)</li>" if kev_matches else ""}
 {"<li><code>raw/cve_enrichment.json</code> — Dados CVE (CVSS + EPSS) do NVD/FIRST</li>" if cve_enrichment else ""}
 {"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
 {"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}

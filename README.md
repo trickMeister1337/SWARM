@@ -1,11 +1,11 @@
-# SWARM
+# 🕷️ SWARM
 
 > Scanner de segurança web automatizado — pipeline de 11 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads e gestores de segurança.
 
 [![Shell](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash&logoColor=white)](https://www.gnu.org/software/bash/)
 [![Python](https://img.shields.io/badge/Python-3.8+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Kali%20%7C%20Ubuntu%20%7C%20WSL-557C94?logo=linux&logoColor=white)](#instalação)
-[![Tests](https://img.shields.io/badge/Tests-158%20passing-brightgreen)](#uso)
+[![Tests](https://img.shields.io/badge/Tests-157%20passing-brightgreen)](#uso)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
@@ -27,7 +27,7 @@ flowchart TD
     end
 
     subgraph INTEL["Inteligência"]
-        F --> G[FASE 6 · CVE/EPSS\nNVD + FIRST.org]
+        F --> G[FASE 6 · CVE/EPSS/KEV\nNVD + FIRST.org + CISA KEV]
         G --> H[FASE 7 · WAF Detection\nwafw00f + evasão passiva automática]
         H --> I[FASE 8 · Email Security\nSPF · DMARC · DKIM]
     end
@@ -87,8 +87,8 @@ FASE 4   Nuclei ────────────────┘
          + takeover + cors
 FASE 5   Confirmação ativa (apenas C/A/M)
          Re-executa curl de cada achado Nuclei
-FASE 6   Enriquecimento CVE / EPSS (NVD + FIRST.org)
-         CVSS v3 · probabilidade de exploit · retry backoff
+FASE 6   Enriquecimento CVE / EPSS / KEV (NVD + FIRST.org + CISA)
+         CVSS v3 · EPSS · exploração ativa confirmada (KEV) · retry backoff
 FASE 7   Detecção de WAF (wafw00f)
          + evasão passiva automática quando detectado
 FASE 8   Segurança de Email (SPF / DMARC / DKIM)
@@ -126,11 +126,12 @@ FASE 11  Relatório HTML
 - **CORS misconfiguration** — reflexão de origin, null origin, wildcard
 - **Confirmação ativa** — re-executa o curl do Nuclei (só C/A/M) para verificar se ainda é explorável
 
-### Inteligência CVE
+### Inteligência CVE — Metodologia KEV > EPSS > CVSS
+- **CISA KEV** — catálogo *Known Exploited Vulnerabilities* baixado a cada scan. Um CVE no KEV é tratado como urgente independente do score CVSS — exploração ativa em ambiente real pesa mais que severidade teórica
 - **NVD** — CVSS v3, descrição oficial por CVE
 - **EPSS** — probabilidade de exploração nos próximos 30 dias (FIRST.org)
 - **Retry com backoff exponencial** — trata rate limiting do NVD (6s → 12s → 24s)
-- **Ponderação no risk score** — EPSS alto eleva o índice de risco
+- **Risk score 2026: KEV (+25/CVE) > EPSS (+15/+7/+2) > CVSS (base ponderada) > JS secrets**
 
 ### WAF Detection & Evasão Passiva
 - **wafw00f** — detecta 140+ WAFs (Cloudflare, AWS WAF, Imperva, Akamai, F5, Sucuri, etc.)
@@ -257,7 +258,7 @@ source ~/.bashrc
 ## Uso
 
 ```bash
-# Validar instalação (158 testes)
+# Validar instalação (157 testes)
 bash test_swarm.sh
 
 # Scan único
@@ -288,7 +289,8 @@ scan_target.com_20260418_143022/
     ├── testssl.json                ← análise TLS/SSL
     ├── nuclei.json                 ← achados Nuclei (JSONL)
     ├── exploit_confirmations.json  ← confirmações ativas de exploits
-    ├── cve_enrichment.json         ← CVSS + EPSS do NVD/FIRST
+    ├── kev_matches.json            ← CVEs com exploração ativa (CISA KEV)
+    ├── cve_enrichment.json         ← CVSS + EPSS + KEV flag do NVD/FIRST/CISA
     ├── waf.json                    ← resultado wafw00f
     ├── email_security.json         ← SPF/DMARC/DKIM
     ├── scan_metadata.json          ← comportamento do scan + evasão
@@ -318,9 +320,9 @@ scan_batch_20260418_143022/
 
 | # | Seção | Conteúdo |
 |---|---|---|
-| 1 | Sumário Executivo | Índice de risco 0–100, contadores por severidade (cards únicos), duração |
+| 1 | Sumário Executivo | Índice de risco 0–100, **card 🔴 KEV** (exploração ativa), contadores por severidade, duração |
 | 2 | Superfície de Ataque | Subdomínios, hosts ativos, portas, URLs Katana |
-| 3 | Vulnerabilidades Identificadas | Cards C/A/M com CVE, CVSS, EPSS, impacto, como corrigir, evidência completa |
+| 3 | Vulnerabilidades Identificadas | Cards C/A/M com **badge 🔴 KEV**, CVE, CVSS, EPSS, prazo CISA, impacto, como corrigir, evidência completa |
 | 4 | 🔬 Comportamento do Scan | WAF detectado, técnicas de evasão aplicadas, resultados com evasão ativa |
 | 5 | Infraestrutura & DNS | WAF detectado + análise SPF/DMARC/DKIM |
 | 6 | TLS / SSL | Achados testssl com severidade e CVE |
@@ -400,7 +402,7 @@ Sem Katana ou chromium instalados, o SWARM usa apenas o ZAP spider com aviso.
 
 1. Fork do repositório
 2. Criar branch (`git checkout -b feature/sua-feature`)
-3. Garantir que todos os 158 testes passam: `bash test_swarm.sh`
+3. Garantir que todos os 157 testes passam: `bash test_swarm.sh`
 4. Abrir pull request com descrição clara
 
 ---
