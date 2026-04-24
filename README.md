@@ -1,4 +1,4 @@
-# 🕷️ SWARM
+# SWARM
 
 > Scanner de segurança web automatizado — pipeline de 11 fases desde a descoberta de subdomínios até análise de secrets em JavaScript, entregando um relatório HTML completo em Português orientado a tech leads e gestores de segurança.
 
