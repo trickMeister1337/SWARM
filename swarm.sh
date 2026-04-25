@@ -156,6 +156,16 @@ if [ "$1" = "-f" ] || [ "$1" = "--file" ] || [ "$1" = "--f" ]; then
     fi
 fi
 
+# ── Sem argumento: mostrar uso ──────────────────────────────────────
+if [ -z "$TARGET" ]; then
+    echo -e "${RED}Uso:${NC}"
+    echo -e "  ${YELLOW}bash swarm.sh https://target.com${NC}         — scan único"
+    echo -e "  ${YELLOW}bash swarm.sh -f targets.txt${NC}             — múltiplos alvos (via swarm_batch.sh)"
+    echo ""
+    echo -e "  ${YELLOW}Exemplo: bash swarm.sh https://api.bee2pay.com${NC}"
+    exit 1
+fi
+
 # ── Modo single-target: continua normalmente ─────────────────────
 DOMAIN=$(echo "$TARGET" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
