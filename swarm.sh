@@ -302,16 +302,36 @@ echo ""
 # ====================== FASE 1: DESCOBERTA ======================
 
 # ── Detectar se alvo já é subdomínio ou API ───────────────────────
+# TLDs compostos: confidencecambio.com.br tem 3 partes mas é raiz (não subdomínio)
+_compound_tlds="com.br org.br net.br edu.br gov.br mil.br co.uk org.uk me.uk net.uk co.nz com.au com.ar com.mx com.pt com.co co.za"
+_last2=$(echo "$DOMAIN" | awk -F. '{print $(NF-1)"."$NF}')
+_is_compound=0
+for _tld in $_compound_tlds; do
+    [ "$_last2" = "$_tld" ] && _is_compound=1 && break
+done
+
 DOMAIN_PARTS=$(echo "$DOMAIN" | tr "." " " | wc -w)
 IS_SUBDOMAIN=0
-if [ "$DOMAIN_PARTS" -ge 3 ]; then
-    IS_SUBDOMAIN=1
+
+if [ "$_is_compound" -eq 1 ]; then
+    # TLD composto (.com.br, .co.uk): subdomínio tem 4+ partes
+    # confidencecambio.com.br = 3 → raiz → rodar subfinder
+    # api.confidencecambio.com.br = 4 → subdomínio → pular
+    [ "$DOMAIN_PARTS" -ge 4 ] && IS_SUBDOMAIN=1
+else
+    # TLD simples (.com, .io): subdomínio tem 3+ partes
+    # bee2pay.com = 2 → raiz → rodar subfinder
+    # api.bee2pay.com = 3 → subdomínio → pular
+    [ "$DOMAIN_PARTS" -ge 3 ] && IS_SUBDOMAIN=1
 fi
+
+# Prefixos explícitos de API/serviço (independente do TLD)
 _prefix=$(echo "$DOMAIN" | cut -d. -f1 | tr "[:upper:]" "[:lower:]")
 for _p in api apis app apps admin portal staging dev hml hml2 prod beta test qa sandbox cdn static; do
     [ "$_prefix" = "$_p" ] && IS_SUBDOMAIN=1 && break
 done
-unset _prefix _p
+unset _prefix _p _last2 _is_compound _tld _compound_tlds
+
 
 phase_banner "FASE 1/11: DESCOBERTA DE SUBDOMÍNIOS"
 
