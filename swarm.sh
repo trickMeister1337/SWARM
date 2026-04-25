@@ -54,6 +54,24 @@ RANDOM_UA="${USER_AGENTS[$((RANDOM % ${#USER_AGENTS[@]}))]}"
 
 # ====================== FUNÇÕES ======================
 
+# ── Função de banner de fase (auto-padding) ──────────────────────
+phase_banner() {
+    local label="$1"
+    local width=65  # largura interna da caixa
+    # Truncar se necessário para não ultrapassar a largura
+    if [ ${#label} -gt $width ]; then
+        label="${label:0:$((width-3))}..."
+    fi
+    local pad=$(( width - ${#label} ))
+    local spaces=""
+    for ((i=0; i<pad; i++)); do spaces+=" "; done
+    echo ""
+    echo -e "  ${CYAN}┌───────────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "  ${CYAN}│${NC}  ${BOLD}${label}${NC}${spaces}  ${CYAN}│${NC}"
+    echo -e "  ${CYAN}└───────────────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+}
+
 validate_tool() {
     local tool=$1 required=${2:-optional}
     if ! command -v "$tool" &>/dev/null; then
@@ -213,9 +231,9 @@ echo -e "\r  ${GREEN}[✓]${NC} Alvo acessível ${GREEN}(HTTP ${HTTP_CODE})${NC}
 echo ""
 
 # ====================== VALIDAÇÃO DE FERRAMENTAS ======================
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  VALIDAÇÃO DE FERRAMENTAS                                   │${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
+echo -e "  ${CYAN}┌───────────────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${CYAN}│  VALIDAÇÃO DE FERRAMENTAS                                         │${NC}"
+echo -e "  ${CYAN}└───────────────────────────────────────────────────────────────────┘${NC}"
 echo ""
 
 validate_tool "curl"      "required"
@@ -258,27 +276,44 @@ unset _missing_go _t _loc
 echo ""
 
 # ====================== FASE 1: DESCOBERTA ======================
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  FASE 1/11: DESCOBERTA DE SUBDOMÍNIOS${NC}"
-echo -e "${CYAN}════════════════════════════════════════════════════════════════${NC}"
 
-command -v subfinder &>/dev/null && \
+# ── Detectar se alvo já é subdomínio ou API ───────────────────────
+DOMAIN_PARTS=$(echo "$DOMAIN" | tr "." " " | wc -w)
+IS_SUBDOMAIN=0
+if [ "$DOMAIN_PARTS" -ge 3 ]; then
+    IS_SUBDOMAIN=1
+fi
+_prefix=$(echo "$DOMAIN" | cut -d. -f1 | tr "[:upper:]" "[:lower:]")
+for _p in api apis app apps admin portal staging dev hml hml2 prod beta test qa sandbox cdn static; do
+    [ "$_prefix" = "$_p" ] && IS_SUBDOMAIN=1 && break
+done
+unset _prefix _p
+
+phase_banner "FASE 1/11: DESCOBERTA DE SUBDOMÍNIOS"
+
+SUB_COUNT=0
+if [ "$IS_SUBDOMAIN" -eq 1 ]; then
+    echo -e "  ${YELLOW}[○] Alvo é um subdomínio/API específico — descoberta ignorada${NC}"
+    echo -e "  ${BLUE}[…] Usando ${DOMAIN} diretamente nas próximas fases${NC}"
+    echo "$DOMAIN" > "$OUTDIR/raw/subdomains.txt"
+    SUB_COUNT=1
+elif command -v subfinder &>/dev/null; then
+    echo -e "  ${BLUE}[…] Descobrindo subdomínios de ${DOMAIN}...${NC}"
     subfinder -d "$DOMAIN" -silent -o "$OUTDIR/raw/subdomains.txt" 2>/dev/null
-
-[ ! -s "$OUTDIR/raw/subdomains.txt" ] && \
-    echo "$DOMAIN" > "$OUTDIR/raw/subdomains.txt" && \
-    echo -e "  ${YELLOW}[!] Subfinder sem resultados — usando domínio principal${NC}"
-
-SUB_COUNT=$(wc -l < "$OUTDIR/raw/subdomains.txt" | tr -d ' ')
-echo -e "  ${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
+    [ ! -s "$OUTDIR/raw/subdomains.txt" ] && \
+        echo "$DOMAIN" > "$OUTDIR/raw/subdomains.txt"
+    SUB_COUNT=$(wc -l < "$OUTDIR/raw/subdomains.txt" | tr -d ' ')
+    echo -e "  ${GREEN}[✓] $SUB_COUNT subdomínio(s) descoberto(s)${NC}"
+else
+    echo -e "  ${YELLOW}[○] subfinder não disponível — usando domínio principal${NC}"
+    echo "$DOMAIN" > "$OUTDIR/raw/subdomains.txt"
+    SUB_COUNT=1
+fi
+echo -e "  ${GREEN}[✓] Fase 1 concluída — $SUB_COUNT alvo(s) para análise${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 2/11: MAPEAMENTO DE SUPERFÍCIE${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 2/11: MAPEAMENTO DE SUPERFÍCIE"
 
 ACTIVE_COUNT=0
 if command -v httpx &>/dev/null; then
@@ -307,11 +342,7 @@ fi
 
 # ====================== FASES 3+4: TESTSSL + NUCLEI (paralelo) ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei"
 
 TLS_ISSUES=0
 TLS_PID=""
@@ -329,11 +360,7 @@ fi
 
 # ====================== FASE 4: NUCLEI ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 4/11: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 4/11: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl"
 
 NUCLEI_COUNT=0
 if command -v nuclei &>/dev/null; then
@@ -407,11 +434,7 @@ fi
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)"
 
 CONFIRMED_COUNT=0
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
@@ -511,11 +534,7 @@ fi
 
 # ====================== FASE 10: ENRIQUECIMENTO CVE/EPSS ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 6/11: ENRIQUECIMENTO CVE / EPSS (NVD + FIRST.org)${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 6/11: ENRIQUECIMENTO CVE / EPSS (NVD + FIRST.org)"
 
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
     echo -e "  ${BLUE}[…] Consultando NVD e EPSS para CVEs encontrados...${NC}"
@@ -671,11 +690,7 @@ fi
 
 # ====================== FASE 7: WAF DETECTION ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 7/11: DETECÇÃO DE WAF${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 7/11: DETECÇÃO DE WAF"
 
 WAF_DETECTED=""
 WAF_NAME=""
@@ -785,11 +800,7 @@ PYMETADATA
 
 # ====================== FASE 7: EMAIL SECURITY ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)"
 
 EMAIL_ISSUES=0
 if command -v dig &>/dev/null; then
@@ -903,11 +914,7 @@ export EMAIL_ISSUES
 
 # ====================== FASE 9: ZAP ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 9/11: COLETA DE EVIDÊNCIAS (OWASP ZAP)${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 9/11: COLETA DE EVIDÊNCIAS (OWASP ZAP)"
 
 ALERT_COUNT=0
 KATANA_URLS=0
@@ -1204,11 +1211,7 @@ export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS WAF_DETECTED WAF_NAM
 
 # ====================== FASE 10: JS ANALYSIS ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS"
 
 JS_SECRETS=0
 JS_ENDPOINTS=0
@@ -1410,13 +1413,9 @@ export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 # ====================== FASE 11: RELATÓRIO ======================
 
-echo ""
-echo -e "  ${CYAN}┌─────────────────────────────────────────────────────────────┐${NC}"
-echo -e "  ${CYAN}│  FASE 11/11: GERAÇÃO DE RELATÓRIO${NC}"
-echo -e "  ${CYAN}└─────────────────────────────────────────────────────────────┘${NC}"
-echo ""
+phase_banner "FASE 11/11: GERAÇÃO DE RELATÓRIO"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES
 
 python3 << 'PYEOF'
 import json, os, html, re
