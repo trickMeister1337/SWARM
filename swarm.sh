@@ -216,14 +216,38 @@ echo ""
 
 # ── Verificação de acesso ao alvo ─────────────────────────────────────────────
 echo -ne "  ${BLUE}[…]${NC} Verificando acesso ao alvo..."
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$TARGET" 2>/dev/null)
-if ! echo "$HTTP_CODE" | grep -qE "^(200|301|302|303|307|308|401|403|404)$"; then
-    echo -e "\r  ${RED}[✗]${NC} Site não acessível ${RED}(HTTP ${HTTP_CODE:-timeout})${NC}"
+
+# Tentar com https e http, seguindo redirects, com timeout maior
+HTTP_CODE=""
+for _try_url in "$TARGET" "${TARGET/https:\/\//http://}" "${TARGET/http:\/\//https://}"; do
+    [ -z "$_try_url" ] && continue
+    _code=$(curl -s -o /dev/null -w "%{http_code}" \
+        --max-time 20 --connect-timeout 10 \
+        -L --max-redirs 5 \
+        -k \
+        "$_try_url" 2>/dev/null)
+    if echo "$_code" | grep -qE "^(200|201|301|302|303|307|308|400|401|403|404|405|500|503)$"; then
+        HTTP_CODE="$_code"
+        TARGET="$_try_url"
+        break
+    fi
+done
+unset _try_url _code
+
+if [ -z "$HTTP_CODE" ] || ! echo "$HTTP_CODE" | grep -qE "^[2345][0-9][0-9]$"; then
+    echo -e "\r  ${RED}[✗]${NC} Site não acessível ${RED}(HTTP ${HTTP_CODE:-000 — sem resposta})${NC}"
     echo ""
-    echo -e "  ${YELLOW}Possíveis causas:${NC}"
-    echo -e "  ${YELLOW}  • URL incorreta — verifique o protocolo (https://)${NC}"
-    echo -e "  ${YELLOW}  • Alvo offline ou firewall bloqueando${NC}"
-    echo -e "  ${YELLOW}  • Timeout de rede (>10s)${NC}"
+    echo -e "  ${YELLOW}Diagnóstico para: $TARGET${NC}"
+    # Check DNS
+    _dns=$(python3 -c "import socket; print(socket.gethostbyname('$DOMAIN'))" 2>/dev/null)
+    if [ -n "$_dns" ]; then
+        echo -e "  ${BLUE}[…]${NC} DNS resolve → ${_dns} ${GREEN}(OK)${NC}"
+        echo -e "  ${YELLOW}    O servidor existe mas não responde HTTP — pode estar em porta não-padrão${NC}"
+        echo -e "  ${YELLOW}    Tente especificar a porta: bash swarm.sh https://$DOMAIN:8080${NC}"
+    else
+        echo -e "  ${RED}[✗]${NC} DNS não resolve — verifique o domínio"
+    fi
+    unset _dns
     [ "${SWARM_BATCH:-0}" = "1" ] && exit 1
     exit 1
 fi
@@ -1871,10 +1895,16 @@ js_medium = [s for s in js_secrets if s.get("type","") not in HIGH_JS_TYPES]
 js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
 js_bonus = min(len(js_high)*15 + len(js_medium)*5 + len(js_vuln_fw)*8, 30)
 risk = min(base_risk + kev_bonus + epss_bonus + js_bonus, 100)
-stxt,scol = ("CRÍTICO — Ação Imediata","#7a2e2e") if stats["critical"] else \
-            ("ALTO — Atenção Urgente","#b34e4e") if stats["high"] else \
-            ("MÉDIO — Correção Planejada","#d4833a") if stats["medium"] else \
-            ("BAIXO — Monitoramento","#4a7c8c")
+# Classificação baseada no risk score (KEV+EPSS+CVSS) — não apenas contagem
+# Faixas: 70-100=CRÍTICO, 40-69=ALTO, 15-39=MÉDIO, 0-14=BAIXO
+if risk >= 70:
+    stxt, scol = "CRÍTICO — Ação Imediata",     "#7a2e2e"
+elif risk >= 40:
+    stxt, scol = "ALTO — Atenção Urgente",       "#b34e4e"
+elif risk >= 15:
+    stxt, scol = "MÉDIO — Correção Planejada",   "#d4833a"
+else:
+    stxt, scol = "BAIXO — Monitoramento",        "#4a7c8c"
 rdate = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 import time as _time
 duration_secs = int(_time.time()) - SCAN_START_TS if SCAN_START_TS else 0
