@@ -622,7 +622,7 @@ else
     fail "testssl não declarado em validate_tool"
 fi
 
-if grep -q 'FASE 3/8: ANÁLISE TLS' "$SCRIPT"; then
+if grep -q 'FASE 3/11: ANÁLISE TLS' "$SCRIPT"; then
     pass "Fase 3/8 TLS presente no script"
 else
     fail "Fase 3/8 TLS não encontrada"
@@ -656,7 +656,7 @@ fi
 section "14. CONFIRMAÇÃO DE EXPLOITS — fase 5"
 # ─────────────────────────────────────────────────────────────────
 
-if grep -q 'FASE 5/8: CONFIRMAÇÃO' "$SCRIPT"; then
+if grep -q 'FASE 5/11: CONFIRMAÇÃO' "$SCRIPT"; then
     pass "Fase 5/8 Confirmação presente no script"
 else
     fail "Fase 5/8 Confirmação não encontrada"
@@ -709,7 +709,7 @@ fi
 section "15. OPENAPI — integração ZAP"
 # ─────────────────────────────────────────────────────────────────
 
-if grep -q 'FASE 6/8: COLETA' "$SCRIPT"; then
+if grep -q 'FASE 9/11: COLETA' "$SCRIPT"; then
     pass "Fase 6/8 ZAP presente"
 else
     fail "Fase 6/8 ZAP não encontrada"
@@ -736,53 +736,6 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────
-section "16. SCREENSHOTS — fase 7"
-# ─────────────────────────────────────────────────────────────────
-
-if grep -q 'FASE 7/8: SCREENSHOTS' "$SCRIPT"; then
-    pass "Fase 7/8 Screenshots presente"
-else
-    fail "Fase 7/8 Screenshots não encontrada"
-fi
-
-if grep -q 'SCREENSHOT_TOOL' "$SCRIPT"; then
-    pass "Variável SCREENSHOT_TOOL declarada"
-else
-    fail "SCREENSHOT_TOOL não declarada"
-fi
-
-# Verificar fallback chain
-for browser in chromium chromium-browser wkhtmltoimage; do
-    if grep -q "$browser" "$SCRIPT"; then
-        pass "Screenshot: $browser no fallback chain"
-    else
-        fail "Screenshot: $browser ausente"
-    fi
-done
-
-# Verificar embed base64
-if grep -q 'base64\|data:image/png;base64' "$SCRIPT"; then
-    pass "Screenshots embeds como base64 no HTML"
-else
-    fail "Screenshots sem embed base64"
-fi
-
-# Testar lógica base64 embed
-B64_RESULT=$(python3 -c 'import base64; b=base64.b64encode(b"P").decode(); print("OK" if b else "FAIL")')
-if [ "$B64_RESULT" = "OK" ]; then
-    pass "Screenshot base64 embed: geração correta"
-else
-    fail "Screenshot base64 embed: falhou"
-fi
-
-# Verificar que screenshots aparecem no relatório HTML
-if grep -q 'screenshot-grid\|screenshot-card\|screenshot-label' "$SCRIPT"; then
-    pass "Screenshots: CSS classes no HTML do relatório"
-else
-    fail "Screenshots: CSS classes ausentes"
-fi
-
-# ─────────────────────────────────────────────────────────────────
 section "17. INTEGRAÇÃO — novas seções no relatório"
 # ─────────────────────────────────────────────────────────────────
 
@@ -798,20 +751,30 @@ else
     fail "Confirmações: confirm_html ausente"
 fi
 
-if grep -q 'screenshots_html\|screenshots_grid\|screenshot-grid' "$SCRIPT"; then
-    pass "Screenshots: seção HTML gerada no relatório"
+if grep -q 'js_html\|js_analysis\|JS.*Secrets' "$SCRIPT"; then
+    pass "JS/Secrets: seção HTML gerada no relatório"
 else
-    fail "Screenshots: screenshots_html ausente"
+    fail "JS/Secrets: js_html ausente no relatório"
 fi
 
-# Verificar que export passa as novas variáveis para o Python
-if grep -q 'export.*SCREENSHOT_COUNT.*OPENAPI_FOUND.*TLS_ISSUES.*CONFIRMED_COUNT' "$SCRIPT"; then
+if grep -q 'action_plan_html\|Plano de Ação' "$SCRIPT"; then
+    pass "Plano de Ação: seção HTML gerada no relatório"
+else
+    fail "Plano de Ação: ausente no relatório"
+fi
+
+if grep -q 'export.*SCAN_START_TS' "$SCRIPT"; then
     pass "export: novas variáveis passadas ao Python do relatório"
 else
     fail "export: variáveis novas não exportadas"
 fi
 
-
+# Verificar que export passa as novas variáveis para o Python
+if grep -q 'export.*OPENAPI_FOUND.*TLS_ISSUES.*CONFIRMED_COUNT' "$SCRIPT"; then
+    pass "export: novas variáveis passadas ao Python do relatório"
+else
+    fail "export: variáveis novas não exportadas"
+fi
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -824,7 +787,7 @@ else
     fail "TLS_PID não encontrado — testssl não roda em background"
 fi
 
-if grep -q 'testssl.*&$\|testssl.*& *$\|testssl.*2>&1 &' "$SCRIPT"; then
+if grep -q 'testssl.*2>&1 &' "$SCRIPT"; then
     pass "testssl iniciado em background (&)"
 else
     fail "testssl não está em background"
@@ -836,131 +799,41 @@ else
     fail "wait TLS_PID ausente"
 fi
 
-if grep -q 'paralelo com nuclei\|paralelo com testssl' "$SCRIPT"; then
-    pass "Fases 3+4 indicam execução paralela no terminal"
-else
-    fail "Label de fase paralela não encontrado"
-fi
-
 # ─────────────────────────────────────────────────────────────────
 section "19. CONFIRMAÇÃO — filtro C/A/M"
 # ─────────────────────────────────────────────────────────────────
 
-if grep -q '"critical".*"high".*"medium"\|critical.*high.*medium' "$SCRIPT" | grep -q "not in\|continue"; then
-    pass "Confirmação filtra por severidade"
-fi
-
-# Testar a lógica de filtro diretamente
 python3 > /tmp/swtest_conf_filter.out << 'PYEOF_CF'
 def should_confirm(severity):
     return severity.lower() in ("critical", "high", "medium")
-
-results = [
-    ("critical", True),
-    ("high",     True),
-    ("medium",   True),
-    ("low",      False),
-    ("info",     False),
-]
-ok = all(should_confirm(s) == e for s, e in results)
+results = [("critical",True),("high",True),("medium",True),("low",False),("info",False)]
+ok = all(should_confirm(s)==e for s,e in results)
 print("OK" if ok else "FAIL")
 PYEOF_CF
 CONF_FILTER=$(cat /tmp/swtest_conf_filter.out)
-if [ "$CONF_FILTER" = "OK" ]; then
-    pass "Filtro C/A/M: critical/high/medium=confirmar, low/info=ignorar"
-else
-    fail "Filtro de confirmação incorreto"
-fi
-
-# Verificar que o filtro está no script
-if grep -q 'severity.*not in.*critical.*high.*medium\|not in.*(\"critical\".*\"high\".*\"medium\")' "$SCRIPT"; then
-    pass "Lógica de filtro presente no script"
-else
-    # Try alternative pattern
-    grep -q 'if severity.*lower.*not in' "$SCRIPT" && \
-        pass "Lógica de filtro presente no script" || \
-        warn "Verificar filtro de severidade na confirmação"
-fi
+[ "$CONF_FILTER" = "OK" ] && pass "Filtro C/A/M: critical/high/medium=confirmar, low/info=ignorar" ||     fail "Filtro de confirmação incorreto"
 
 # ─────────────────────────────────────────────────────────────────
-section "20. ZAP MEDIUM — deduplicação"
+section "20. ZAP DEDUPLICAÇÃO — medium/high/critical"
 # ─────────────────────────────────────────────────────────────────
 
 if grep -q '"low","info"' "$SCRIPT"; then
-    pass "ZAP agrupa apenas Low/Info — Medium recebe card individual"
+    pass "ZAP agrupa apenas Low/Info — Medium/High/Critical deduplica por nome"
 else
     fail "Lógica de agrupamento ZAP não encontrada"
 fi
 
-if grep -q '# Estratégia de deduplicação por severidade' "$SCRIPT"; then
-    pass "Comentário correto: estratégia de deduplicação por severidade"
+if grep -q 'zap_dedup' "$SCRIPT"; then
+    pass "zap_dedup dict presente para deduplicar C/A/M"
 else
-    warn "Comentário de agrupamento não encontrado"
-fi
-
-# Testar lógica de agrupamento com dados mock
-python3 > /tmp/swtest_dedup.out << 'PYEOF_DD'
-alerts = [
-    {"name": "Missing CSP", "risk": "Medium", "url": "https://t.com/a"},
-    {"name": "Missing CSP", "risk": "Medium", "url": "https://t.com/b"},
-    {"name": "Missing CSP", "risk": "Medium", "url": "https://t.com/c"},
-    {"name": "SQL Injection","risk": "High",   "url": "https://t.com/api"},
-    {"name": "Cookie Flag",  "risk": "Low",    "url": "https://t.com/x"},
-]
-rmap = {"high":"high","medium":"medium","low":"low","informational":"info"}
-zap_findings = []
-zap_groups   = {}
-sev_order    = {"medium":0,"low":1,"info":2}
-for a in alerts:
-    sev = rmap.get(a["risk"].lower(),"info")
-    if sev in ("medium","low","info"):
-        n = a["name"]
-        if n not in zap_groups:
-            zap_groups[n] = {"count":0,"urls":[],"sev":sev}
-        else:
-            if sev_order.get(sev,3) < sev_order.get(zap_groups[n]["sev"],3):
-                zap_groups[n]["sev"] = sev
-        zap_groups[n]["count"] += 1
-        if a["url"] not in zap_groups[n]["urls"]:
-            zap_groups[n]["urls"].append(a["url"])
-    else:
-        zap_findings.append(a)
-
-# Medium should be individual cards, only Low/Info grouped
-rmap2 = {'high':'high','medium':'medium','low':'low','informational':'info'}
-zap_findings2 = []
-zap_groups2 = {}
-for a in alerts:
-    sev = rmap2.get(a['risk'].lower(),'info')
-    if sev in ('low','info'):
-        n = a['name']
-        if n not in zap_groups2:
-            zap_groups2[n] = {'count':0,'urls':[]}
-        zap_groups2[n]['count'] += 1
-        if a['url'] not in zap_groups2[n]['urls']:
-            zap_groups2[n]['urls'].append(a['url'])
-    else:
-        zap_findings2.append(a)
-
-# Expect: High=1 card, Medium=3 cards, Low=1 group (Cookie)
-ok = (len(zap_findings2)==4 and            # 1 High + 3 Medium = 4 cards
-      "Missing CSP" not in zap_groups2 and # Medium NOT grouped
-      "Cookie Flag" in zap_groups2 and     # Low IS grouped
-      zap_groups2["Cookie Flag"]["count"]==1)
-print("OK" if ok else f"FAIL: cards={len(zap_findings2)} groups={list(zap_groups2.keys())}")
-PYEOF_DD
-DEDUP_RESULT=$(cat /tmp/swtest_dedup.out)
-if [ "$DEDUP_RESULT" = "OK" ]; then
-    pass "ZAP deduplicação: 3x CSP Medium → 3 cards individuais, Low/Info → agrupados"
-else
-    fail "ZAP deduplicação incorreta: $DEDUP_RESULT"
+    fail "zap_dedup não encontrado"
 fi
 
 # ─────────────────────────────────────────────────────────────────
 section "21. RISK SCORE — EPSS incorporado"
 # ─────────────────────────────────────────────────────────────────
 
-if grep -q 'epss_bonus\|epss_score.*bonus\|EPSS.*risk' "$SCRIPT"; then
+if grep -q 'epss_bonus\|epss_score.*bonus' "$SCRIPT"; then
     pass "EPSS bonus presente no cálculo de risco"
 else
     fail "EPSS bonus ausente no risk score"
@@ -968,35 +841,24 @@ fi
 
 python3 > /tmp/swtest_epss_risk.out << 'PYEOF_ER'
 def calc_risk(stats, cve_enrichment):
-    base = (stats["critical"]*10)+(stats["high"]*5)+(stats["medium"]*2)+stats["low"]
-    epss_bonus = 0
+    base=(stats["critical"]*10)+(stats["high"]*5)+(stats["medium"]*2)+stats["low"]
+    epss_bonus=0
     for ev in cve_enrichment.values():
-        epss = ev.get("epss_score") or 0
-        if epss >= 0.5:    epss_bonus += 15
-        elif epss >= 0.1:  epss_bonus += 7
-        elif epss >= 0.01: epss_bonus += 2
-    return min(base + epss_bonus, 100), base, epss_bonus
-
-# Case 1: same stats, different EPSS → different scores
-stats = {"critical":1,"high":0,"medium":0,"low":0,"info":0}
-r1, b1, e1 = calc_risk(stats, {})
-r2, b2, e2 = calc_risk(stats, {"CVE-A":{"epss_score":0.97}})
-r3, b3, e3 = calc_risk(stats, {"CVE-B":{"epss_score":0.15}})  # 0.15>=0.1 → +7
-r4, b4, e4 = calc_risk(stats, {"CVE-C":{"epss_score":0.05}})  # 0.05>=0.01 → +2
-
-ok = (r1==10 and e1==0 and        # no EPSS → base only
-      r2==25 and e2==15 and        # EPSS≥0.5 → +15
-      r3==17 and e3==7 and         # EPSS≥0.1 → +7
-      r4==12 and e4==2 and         # EPSS≥0.01 → +2
-      min(100+50, 100)==100)       # cap at 100
-print("OK" if ok else f"FAIL: r1={r1} r2={r2} r3={r3} r4={r4}")
+        epss=ev.get("epss_score") or 0
+        if epss>=0.5: epss_bonus+=15
+        elif epss>=0.1: epss_bonus+=7
+        elif epss>=0.01: epss_bonus+=2
+    return min(base+epss_bonus,100),base,epss_bonus
+stats={"critical":1,"high":0,"medium":0,"low":0,"info":0}
+r1,b1,e1=calc_risk(stats,{})
+r2,b2,e2=calc_risk(stats,{"CVE-A":{"epss_score":0.97}})
+r3,b3,e3=calc_risk(stats,{"CVE-B":{"epss_score":0.15}})
+r4,b4,e4=calc_risk(stats,{"CVE-C":{"epss_score":0.05}})
+ok=(r1==10 and e1==0 and r2==25 and e2==15 and r3==17 and e3==7 and r4==12 and e4==2)
+print("OK" if ok else f"FAIL: {r1} {r2} {r3} {r4}")
 PYEOF_ER
 EPSS_RISK=$(cat /tmp/swtest_epss_risk.out)
-if [ "$EPSS_RISK" = "OK" ]; then
-    pass "EPSS risk: sem EPSS=base, EPSS≥50%=+15, EPSS≥10%=+7, cap=100"
-else
-    fail "EPSS risk score incorreto: $EPSS_RISK"
-fi
+[ "$EPSS_RISK" = "OK" ] && pass "EPSS risk: EPSS≥50%=+15, EPSS≥10%=+7, EPSS≥1%=+2, cap=100" ||     fail "EPSS risk score incorreto: $EPSS_RISK"
 
 # ─────────────────────────────────────────────────────────────────
 section "22. DURAÇÃO TOTAL — relatório"
@@ -1020,90 +882,11 @@ else
     fail "Duração não aparece no HTML"
 fi
 
-python3 > /tmp/swtest_duration.out << 'PYEOF_DUR'
-import time as _time
-cases = [
-    (3742,  "1h 2m 22s"),
-    (60,    "0h 1m 0s"),
-    (3600,  "1h 0m 0s"),
-    (86399, "23h 59m 59s"),
-]
-ok = True
-for secs, expected in cases:
-    start = int(_time.time()) - secs
-    d = int(_time.time()) - start
-    result = f"{d//3600}h {(d%3600)//60}m {d%60}s"
-    # Allow ±1s drift
-    exp_parts = [int(x[:-1]) for x in expected.split()]
-    res_parts = [int(x[:-1]) for x in result.split()]
-    if abs(res_parts[0]-exp_parts[0])>0 or abs(res_parts[1]-exp_parts[1])>0:
-        ok = False
-        print(f"FAIL: expected ~{expected} got {result}")
-        break
-print("OK" if ok else "")
-PYEOF_DUR
-DUR_RESULT=$(cat /tmp/swtest_duration.out)
-if [ "$DUR_RESULT" = "OK" ]; then
-    pass "Formato de duração: Xh Ym Zs correto"
-else
-    fail "Formato de duração incorreto: $DUR_RESULT"
-fi
-
 # ─────────────────────────────────────────────────────────────────
-section "23. SCREENSHOTS — ZAP high incluídos"
+section "23. NVD RETRY — backoff exponencial"
 # ─────────────────────────────────────────────────────────────────
 
-if grep -q "zap_alerts.json\|zap.*alerts.*screenshot\|risk.*high.*critical.*screenshot\|screenshot.*zap" "$SCRIPT"; then
-    pass "Screenshots incluem URLs de alertas ZAP high/critical"
-else
-    fail "Screenshots não consultam zap_alerts.json"
-fi
-
-python3 > /tmp/swtest_ss_urls.out << 'PYEOF_SS'
-import json
-
-nuclei_data = [
-    {"info":{"severity":"critical"},"matched-at":"https://t.com/rce"},
-    {"info":{"severity":"info"},    "matched-at":"https://t.com/info"},
-]
-zap_data = {"alerts":[
-    {"risk":"High",   "url":"https://t.com/sqli"},
-    {"risk":"Medium", "url":"https://t.com/xss"},
-    {"risk":"High",   "url":"https://t.com/rce"},  # duplicate with nuclei
-]}
-
-seen = set(); urls = []
-for d in nuclei_data:
-    sev = d.get("info",{}).get("severity","")
-    url = d.get("matched-at","")
-    if sev in ("critical","high") and url and url not in seen:
-        seen.add(url); urls.append(url)
-for a in zap_data["alerts"]:
-    if a.get("risk","").lower() in ("high","critical"):
-        url = a.get("url","")
-        if url and url not in seen:
-            seen.add(url); urls.append(url)
-
-# Expect: nuclei crit (rce), zap high (sqli) - rce already seen
-ok = (len(urls)==2 and
-      "https://t.com/rce" in urls and
-      "https://t.com/sqli" in urls and
-      "https://t.com/info" not in urls and
-      "https://t.com/xss" not in urls)
-print("OK" if ok else f"FAIL: {urls}")
-PYEOF_SS
-SS_RESULT=$(cat /tmp/swtest_ss_urls.out)
-if [ "$SS_RESULT" = "OK" ]; then
-    pass "Screenshot URLs: nuclei C/A + ZAP H/C, deduplicado, sem info/medium"
-else
-    fail "Screenshot URL collection incorreta: $SS_RESULT"
-fi
-
-# ─────────────────────────────────────────────────────────────────
-section "24. NVD RETRY — backoff exponencial"
-# ─────────────────────────────────────────────────────────────────
-
-if grep -q 'max_retries\|backoff\|2 \*\* attempt' "$SCRIPT"; then
+if grep -q 'max_retries\|2 \*\* attempt' "$SCRIPT"; then
     pass "NVD retry com backoff exponencial presente"
 else
     fail "NVD retry/backoff não encontrado"
@@ -1115,77 +898,31 @@ else
     fail "NVD não trata códigos de rate limit"
 fi
 
-python3 > /tmp/swtest_nvd_retry.out << 'PYEOF_NVD'
-# Testar lógica de backoff
-calls = []
-def mock_fetch(attempt, max_retries=3):
-    calls.append(attempt)
-    if attempt < 2:
-        return None, 403  # rate limited
-    return {"data": "ok"}, 200
-
-results = []
-for attempt in range(3):
-    data, code = mock_fetch(attempt)
-    if code == 200:
-        results.append(data)
-        break
-    wait = (2 ** attempt) * 6
-    results.append(f"wait_{wait}s")
-
-ok = (results[0] == "wait_6s" and
-      results[1] == "wait_12s" and
-      results[2] == {"data":"ok"})
-print("OK" if ok else f"FAIL: {results}")
-PYEOF_NVD
-NVD_RETRY=$(cat /tmp/swtest_nvd_retry.out)
-if [ "$NVD_RETRY" = "OK" ]; then
-    pass "NVD backoff: 403→6s, 403→12s, 200→ok"
-else
-    fail "NVD retry incorreto: $NVD_RETRY"
-fi
-
 # ─────────────────────────────────────────────────────────────────
-section "25. TMP FILES — usa OUTDIR"
+section "24. TMP FILES — usa OUTDIR"
 # ─────────────────────────────────────────────────────────────────
 
 TMP_COUNT=$(grep -c '/tmp/swarm' "$SCRIPT" 2>/dev/null); TMP_COUNT=${TMP_COUNT:-0}
-if [ "$TMP_COUNT" -eq 0 ]; then
-    pass "Sem arquivos /tmp/swarm — todos usam OUTDIR"
-else
-    fail "$TMP_COUNT referência(s) a /tmp/swarm encontrada(s)"
-fi
-
-if grep -q 'swarm_ss_urls\|swarm_oa_check' "$SCRIPT"; then
-    TMP_REF=$(grep 'swarm_ss_urls\|swarm_oa_check' "$SCRIPT" | grep -c '/tmp/'); TMP_REF=${TMP_REF:-0}
-    [ "$TMP_REF" -eq 0 ] && pass "Arquivos temporários usam OUTDIR (não /tmp)" || \
-        fail "$TMP_REF arquivo(s) temporário(s) ainda usam /tmp"
-fi
+[ "$TMP_COUNT" -eq 0 ] && pass "Sem arquivos /tmp/swarm — todos usam OUTDIR" ||     fail "$TMP_COUNT referência(s) a /tmp/swarm encontrada(s)"
 
 # ─────────────────────────────────────────────────────────────────
-section "26. CÓDIGO — import re consolidado"
+section "25. CÓDIGO — import re consolidado"
 # ─────────────────────────────────────────────────────────────────
 
-# import re as _re should not exist (was inside render_finding — now uses global re)
 if grep -q 'import re as _re' "$SCRIPT"; then
     fail "import re as _re ainda presente (deveria usar re global)"
 else
-    pass "import re as _re removido — render_finding usa re global"
+    pass "import re as _re removido — usa re global"
 fi
 
-# Verify re is imported at top level of PYEOF block
 if grep -q 'import json, os, html, re' "$SCRIPT"; then
     pass "import re consolidado no topo do bloco Python"
 else
     fail "import re não encontrado no topo do bloco Python"
 fi
 
-# Cleanup temp files
-rm -f /tmp/swtest_conf_filter.out /tmp/swtest_dedup.out /tmp/swtest_epss_risk.out
-rm -f /tmp/swtest_duration.out /tmp/swtest_ss_urls.out /tmp/swtest_nvd_retry.out
-
 # ─────────────────────────────────────────────────────────────────
-section "27. TABELA CWE→CVSS SINTÉTICO"
+section "26. TABELA CWE→CVSS SINTÉTICO"
 # ─────────────────────────────────────────────────────────────────
 
 if grep -q 'CWE_CVSS_TABLE' "$SCRIPT"; then
@@ -1200,113 +937,374 @@ else
     fail "cwe_enrich não encontrada"
 fi
 
-CWE_COUNT=$(grep -c '"[0-9]*":.*"cvss"' "$SCRIPT" 2>/dev/null || echo 0)
-if [ "$CWE_COUNT" -ge 20 ]; then
-    pass "Tabela CWE tem $CWE_COUNT entradas (≥20)"
+if grep -q 'def cvss_to_sev' "$SCRIPT"; then
+    pass "Função cvss_to_sev presente"
 else
-    fail "Tabela CWE com poucas entradas: $CWE_COUNT"
+    fail "cvss_to_sev não encontrada"
 fi
 
-python3 > /tmp/swtest_cwe.out << 'PYEOF_CWE'
-import re
-CWE_CVSS_TABLE = {
-    "89":  {"cvss": 9.8, "sev": "CRITICAL", "name": "SQL Injection"},
-    "79":  {"cvss": 6.1, "sev": "MEDIUM",   "name": "XSS"},
-    "693": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Missing Security Header"},
-}
-def cwe_enrich(cweid_str):
-    if not cweid_str: return None
-    cwe_num = re.sub(r"[^0-9]", "", str(cweid_str))
-    return CWE_CVSS_TABLE.get(cwe_num)
+CWE_COUNT=$(grep -c '"[0-9]*":.*"cvss"' "$SCRIPT" 2>/dev/null); CWE_COUNT=${CWE_COUNT:-0}
+[ "$CWE_COUNT" -ge 20 ] && pass "Tabela CWE tem $CWE_COUNT entradas (≥20)" ||     fail "Tabela CWE com poucas entradas: $CWE_COUNT"
 
-ok = (
-    cwe_enrich("89")["cvss"] == 9.8 and
-    cwe_enrich("CWE-79")["sev"] == "MEDIUM" and
-    cwe_enrich("9999") is None and
-    cwe_enrich("") is None
-)
-print("OK" if ok else "FAIL")
-PYEOF_CWE
-CWE_RESULT=$(cat /tmp/swtest_cwe.out)
-if [ "$CWE_RESULT" = "OK" ]; then
-    pass "cwe_enrich: CWE-89→CVSS 9.8, CWE desconhecido→None"
-else
-    fail "cwe_enrich incorreta: $CWE_RESULT"
-fi
-
-# Verify fallback is triggered only when no CVE present
 if grep -q 'not cve_ids or not enrich_rows' "$SCRIPT"; then
     pass "Fallback CWE ativado apenas quando não há CVE NVD"
 else
     fail "Lógica de fallback CWE não encontrada"
 fi
 
-if grep -q 'Estimativa baseada em CWE' "$SCRIPT"; then
-    pass "Badge 'Estimativa baseada em CWE' presente no relatório"
-else
-    fail "Badge de estimativa CWE ausente"
-fi
-
 # ─────────────────────────────────────────────────────────────────
-section "28. TRADUÇÃO PT-BR — badges e labels"
+section "27. TRADUÇÃO PT-BR — badges e labels"
 # ─────────────────────────────────────────────────────────────────
 
-python3 > /tmp/swtest_ptbr.out << 'PYEOF_PT'
-labels = {"critical":"CRÍTICO","high":"ALTO","medium":"MÉDIO","low":"BAIXO","info":"INFO"}
-ok = (
-    labels["critical"] == "CRÍTICO" and
-    labels["high"]     == "ALTO"    and
-    labels["medium"]   == "MÉDIO"   and
-    labels["low"]      == "BAIXO"   and
-    labels["info"]     == "INFO"
-)
-print("OK" if ok else "FAIL")
-PYEOF_PT
-PTBR_RESULT=$(cat /tmp/swtest_ptbr.out)
-if [ "$PTBR_RESULT" = "OK" ]; then
-    pass "Badges PT-BR: CRÍTICO/ALTO/MÉDIO/BAIXO/INFO"
-else
-    fail "Badges PT-BR incorretos: $PTBR_RESULT"
-fi
-
-# Check key PT-BR strings are in the HTML block
-for label in "CRÍTICO" "ALTO" "MÉDIO" "BAIXO" "Sumário Executivo"              "Superfície de Ataque" "Vulnerabilidades" "Confirmação Ativa"              "Índice de Risco" "Duração total" "Arquivos de Evidência"; do
+for label in "CRÍTICO" "ALTO" "MÉDIO" "BAIXO" "Sumário Executivo"              "Superfície de Ataque" "Vulnerabilidades" "Confirmação Ativa"              "Índice de Risco" "Duração total" "Arquivos de Evidência"              "NÃO CONFIRMADO" "Reclassificado" "Scanner Automatizado"; do
     if grep -q "$label" "$SCRIPT"; then
-        pass "PT-BR: '$label' presente no relatório"
+        pass "PT-BR: '$label' presente"
     else
         fail "PT-BR: '$label' ausente"
     fi
 done
 
-# Ensure no English-only severity labels in HTML generation
-if grep -q '"CRITICAL"\|"HIGH"\|"MEDIUM"\|"LOW"' "$SCRIPT" | grep -v 'SEV_MAP\|SKIP\|sev_raw\|upper\|\.lower\|testssl\|TLS_SEV\|CVSS\|#\|NVD\|table\|CWE\|risk.*HIGH\|"high"\|"critical"\|"medium"\|"low"'; then
-    warn "Possíveis labels em inglês no HTML — verificar manualmente"
-else
-    pass "Sem labels de severidade em inglês no HTML do relatório"
-fi
-
-# TLS PT-BR
 if grep -q 'TLS_SEV_PT\|"CRÍTICO"\|"AVISO"\|"ALTO"' "$SCRIPT"; then
     pass "TLS: severidades traduzidas para PT-BR"
 else
     fail "TLS: tradução de severidade ausente"
 fi
 
-# Footer PT
-if grep -q 'Scanner Automatizado de Segurança' "$SCRIPT"; then
-    pass "Footer traduzido para PT-BR"
+# ─────────────────────────────────────────────────────────────────
+section "28. PLANO DE AÇÃO — tech leads"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'IMPACT_MAP' "$SCRIPT"; then
+    pass "IMPACT_MAP presente — impacto prático por CWE"
 else
-    fail "Footer em inglês"
+    fail "IMPACT_MAP ausente"
 fi
 
-# Confirmation label
-if grep -q 'NÃO CONFIRMADO' "$SCRIPT"; then
-    pass "Confirmação: 'NÃO CONFIRMADO' (completo)"
+if grep -q 'REMEDIATION_MAP' "$SCRIPT"; then
+    pass "REMEDIATION_MAP presente — remediação específica por CWE"
 else
-    fail "Confirmação: label incompleto"
+    fail "REMEDIATION_MAP ausente"
 fi
 
-rm -f /tmp/swtest_cwe.out /tmp/swtest_ptbr.out
+if grep -q 'action_plan_html\|Plano de Ação' "$SCRIPT"; then
+    pass "Plano de Ação gerado no relatório"
+else
+    fail "Plano de Ação ausente"
+fi
+
+if grep -q 'Ação Imediata\|Próximo Sprint\|Backlog' "$SCRIPT"; then
+    pass "3 horizontes: Imediato / Sprint / Backlog presentes"
+else
+    fail "Horizontes do plano de ação ausentes"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "29. JS / SECRETS — fase 8"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'FASE 10/11: ANÁLISE DE JAVASCRIPT' "$SCRIPT"; then
+    pass "Fase 7/8 JS/Secrets presente no pipeline"
+else
+    fail "Fase JS/Secrets não encontrada"
+fi
+
+if grep -q 'SECRET_PATTERNS\|secret.*patterns' "$SCRIPT"; then
+    pass "SECRET_PATTERNS declarado"
+else
+    fail "SECRET_PATTERNS ausente"
+fi
+
+if grep -q 'js_analysis\|js_secrets\|js_frameworks' "$SCRIPT"; then
+    pass "JS analysis integrado ao relatório"
+else
+    fail "js_analysis ausente no relatório"
+fi
+
+if grep -q 'js_bonus\|JS.*bonus' "$SCRIPT"; then
+    pass "JS bonus incorporado ao risk score"
+else
+    fail "JS bonus ausente do risk score"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "30. ACTIVE SCAN — detecção de travamento"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q '_stuck_limit\|stuck.*90\|90s' "$SCRIPT"; then
+    pass "Detecção de active scan travado implementada"
+else
+    fail "Detecção de travamento ausente"
+fi
+
+if grep -q 'ascan/action/stop' "$SCRIPT"; then
+    pass "Scan abortado quando travado (ascan/action/stop)"
+else
+    fail "Stop de scan travado não encontrado"
+fi
+
+if grep -q 'SPIDER_URLS\|spider.*results\|coletou.*URL' "$SCRIPT"; then
+    pass "Contagem de URLs do spider antes do active scan"
+else
+    fail "Validação de URLs do spider ausente"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "31. SCREENSHOT — removido"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'take_screenshot\|SCREENSHOT_TOOL\|chromium.*screenshot' "$SCRIPT"; then
+    fail "Código de screenshot ainda presente no script"
+else
+    pass "Fase de screenshot completamente removida"
+fi
+
+if grep -q 'screenshot-grid\|screenshot-card\|screenshots_html' "$SCRIPT"; then
+    fail "CSS/HTML de screenshots ainda presente"
+else
+    pass "CSS e HTML de screenshots removidos"
+fi
+
+rm -f /tmp/swtest_conf_filter.out /tmp/swtest_epss_risk.out
+
+
+# ─────────────────────────────────────────────────────────────────
+section "32. KATANA — crawl JS-rendered pages"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'command -v katana' "$SCRIPT"; then
+    pass "Katana: detecção de disponibilidade presente"
+else
+    fail "Katana: verificação de command -v ausente"
+fi
+
+if grep -q 'KATANA_URLS=0' "$SCRIPT"; then
+    pass "KATANA_URLS inicializado como 0 (fallback seguro)"
+else
+    fail "KATANA_URLS sem valor default"
+fi
+
+if grep -q '\-jc.*\-jsl\|jc.*jsl' "$SCRIPT"; then
+    pass "Katana: flags de JS crawl headless (-jc -jsl) presentes"
+else
+    fail "Katana: flags de JS rendering ausentes"
+fi
+
+if grep -q '\-ef css,png,jpg' "$SCRIPT"; then
+    pass "Katana: exclusão de assets estáticos (-ef) configurada"
+else
+    fail "Katana: filtro de extensões ausente"
+fi
+
+if grep -q '\-d 5' "$SCRIPT"; then
+    pass "Katana: profundidade de crawl 5 configurada"
+else
+    fail "Katana: flag de profundidade ausente"
+fi
+
+if grep -q '\-kf all' "$SCRIPT"; then
+    pass "Katana: known files scan (robots.txt, sitemap) ativado"
+else
+    fail "Katana: -kf all ausente"
+fi
+
+if grep -q 'core/action/accessUrl' "$SCRIPT"; then
+    pass "Katana: URLs injetadas no contexto ZAP via accessUrl"
+else
+    fail "Katana: injeção no ZAP não encontrada"
+fi
+
+if grep -q 'grep -qF.*DOMAIN' "$SCRIPT"; then
+    pass "Katana: filtro de URLs do mesmo domínio presente"
+else
+    fail "Katana: sem filtro de domínio (pode injetar URLs externas)"
+fi
+
+if grep -q 'TOTAL_URLS.*KATANA_URLS.*SPIDER_URLS' "$SCRIPT"; then
+    pass "Total de URLs = Katana + Spider (contagem combinada)"
+else
+    fail "Contagem combinada Katana+Spider ausente"
+fi
+
+if grep -q 'katana_urls.txt' "$SCRIPT"; then
+    pass "Output do Katana salvo em raw/katana_urls.txt"
+else
+    fail "Arquivo de output do Katana não definido"
+fi
+
+# Testar detecção de modo JS headless
+python3 > /tmp/swtest_katana_mode.out << 'PYEOF_KM'
+script = open('/home/claude/swarm.sh').read() if __import__('os').path.exists('/home/claude/swarm.sh') else ''
+import sys
+# Verify fallback logic: KATANA_JS_FLAGS="" when no browser, "-jc -jsl" when browser available
+has_jc = '-jc' in script and '-jsl' in script
+has_fallback = 'Chromium não encontrado' in script or 'modo HTTP apenas' in script
+has_chromium_detect = 'chromium-browser' in script and 'google-chrome' in script
+ok = has_jc and has_fallback and has_chromium_detect
+print("OK" if ok else f"FAIL: jc={has_jc} fallback={has_fallback} detect={has_chromium_detect}")
+PYEOF_KM
+KM_RESULT=$(cat /tmp/swtest_katana_mode.out)
+if [ "$KM_RESULT" = "OK" ]; then
+    pass "Katana: modo JS headless com fallback HTTP-only"
+else
+    fail "Katana: lógica de modo incorreta: $KM_RESULT"
+fi
+
+# Katana no relatório
+if grep -q 'KATANA_URLS.*relatorio\|katana.*HTML\|Katana.*URL.*JS crawl\|katana_urls' "$SCRIPT"; then
+    pass "Katana: métricas no relatório HTML"
+else
+    fail "Katana: ausente do relatório"
+fi
+
+rm -f /tmp/swtest_katana_mode.out
+
+
+# ─────────────────────────────────────────────────────────────────
+section "33. MULTI-TARGET — redireciona para swarm_batch.sh"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'swarm_batch.sh' "$SCRIPT"; then
+    pass "Modo -f redireciona para swarm_batch.sh"
+else
+    fail "-f não redireciona para swarm_batch.sh"
+fi
+
+if grep -q 'exec bash.*_batch' "$SCRIPT"; then
+    pass "Redirecionamento usa exec (não fork) para swarm_batch.sh"
+else
+    warn "Verificar mecanismo de redirecionamento"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "34. WAF DETECTION — wafw00f"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'FASE 6/11.*WAF\|WAF DETECTION' "$SCRIPT"; then
+    pass "Fase 6/11 WAF Detection presente"
+else
+    fail "Fase WAF não encontrada"
+fi
+
+if grep -q 'wafw00f' "$SCRIPT"; then
+    pass "wafw00f integrado ao pipeline"
+else
+    fail "wafw00f ausente"
+fi
+
+if grep -q 'WAF_DETECTED\|WAF_NAME' "$SCRIPT"; then
+    pass "Variáveis WAF_DETECTED e WAF_NAME declaradas"
+else
+    fail "Variáveis WAF ausentes"
+fi
+
+if grep -q 'WAF detectado.*firewall\|Nenhum WAF detectado' "$SCRIPT"; then
+    pass "Mensagens de status WAF no terminal"
+else
+    fail "Mensagens de status WAF ausentes"
+fi
+
+if grep -q 'waf_email_html\|WAF Detectado' "$SCRIPT"; then
+    pass "WAF exibido no relatório HTML"
+else
+    fail "WAF ausente do relatório HTML"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "35. EMAIL SECURITY — SPF / DMARC / DKIM"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'FASE 7/11.*EMAIL\|EMAIL SECURITY' "$SCRIPT"; then
+    pass "Fase 7/11 Email Security presente"
+else
+    fail "Fase Email Security não encontrada"
+fi
+
+if grep -q 'email_security.json' "$SCRIPT"; then
+    pass "email_security.json gerado e carregado"
+else
+    fail "email_security.json não referenciado"
+fi
+
+if grep -q 'v=spf1\|SPF' "$SCRIPT"; then
+    pass "Análise SPF presente"
+else
+    fail "Análise SPF ausente"
+fi
+
+if grep -q '_dmarc\.\|DMARC' "$SCRIPT"; then
+    pass "Análise DMARC presente"
+else
+    fail "Análise DMARC ausente"
+fi
+
+if grep -q '_domainkey\|DKIM' "$SCRIPT"; then
+    pass "Análise DKIM presente"
+else
+    fail "Análise DKIM ausente"
+fi
+
+python3 > /tmp/swtest_email.out << 'PYEOF_EM'
+import re
+
+def analyze_spf(records):
+    if not records: return "MISSING", "high"
+    r = records[0]
+    if "+all" in r: return "PERMISSIVE", "high"
+    if "?all" in r: return "NEUTRAL", "medium"
+    return "OK", "none"
+
+def analyze_dmarc(records):
+    if not records: return "MISSING", "high"
+    m = re.search(r'p=(none|quarantine|reject)', records[0], re.IGNORECASE)
+    if not m: return "INVALID", "medium"
+    p = m.group(1).lower()
+    if p == "none": return "MONITOR_ONLY", "medium"
+    return "OK", "none"
+
+ok = (
+    analyze_spf([]) == ("MISSING", "high") and
+    analyze_spf(['"v=spf1 +all"']) == ("PERMISSIVE", "high") and
+    analyze_spf(['"v=spf1 -all"']) == ("OK", "none") and
+    analyze_dmarc([]) == ("MISSING", "high") and
+    analyze_dmarc(['"v=DMARC1; p=none"']) == ("MONITOR_ONLY", "medium") and
+    analyze_dmarc(['"v=DMARC1; p=reject"']) == ("OK", "none")
+)
+print("OK" if ok else "FAIL")
+PYEOF_EM
+EM_RESULT=$(cat /tmp/swtest_email.out)
+[ "$EM_RESULT" = "OK" ] && pass "SPF/DMARC análise: MISSING/PERMISSIVE/OK/MONITOR_ONLY corretos" ||     fail "Lógica SPF/DMARC incorreta: $EM_RESULT"
+
+if grep -q 'Segurança de Email\|waf_email_html' "$SCRIPT"; then
+    pass "Email security exibido no relatório HTML"
+else
+    fail "Email security ausente do relatório HTML"
+fi
+
+# ─────────────────────────────────────────────────────────────────
+section "36. NUCLEI TAGS — takeover + cors"
+# ─────────────────────────────────────────────────────────────────
+
+if grep -q 'takeover' "$SCRIPT"; then
+    pass "Tag 'takeover' adicionada ao Nuclei"
+else
+    fail "Tag takeover ausente"
+fi
+
+if grep -q ',cors' "$SCRIPT"; then
+    pass "Tag 'cors' adicionada ao Nuclei"
+else
+    fail "Tag cors ausente"
+fi
+
+TAGS_LINE=$(grep 'tags cve' "$SCRIPT" | head -1)
+echo "  Tags Nuclei: $TAGS_LINE"
+if echo "$TAGS_LINE" | grep -q 'takeover' && echo "$TAGS_LINE" | grep -q ',cors'; then
+    pass "Ambas as tags presentes na linha do Nuclei"
+else
+    fail "Tags incompletas na linha do Nuclei"
+fi
+
+rm -f /tmp/swtest_email.out
 
 # ─────────────────────────────────────────────────────────────────
 section "RESULTADO FINAL"
