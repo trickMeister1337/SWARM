@@ -35,9 +35,10 @@ flowchart TD
     subgraph DYNAMIC["Análise Dinâmica"]
         I --> J[FASE 9 · OWASP ZAP\nKatana JS crawl → Spider → Active Scan]
         J --> K[FASE 10 · JS / Secrets\n20 padrões · endpoints · frameworks]
+        K --> K2[FASE 10.5 · Testes Complementares\nsmuggler · ffuf · trufflehog]
     end
 
-    K --> L[FASE 11 · Relatório HTML\nPT-BR · self-contained · abre offline]
+    K2 --> L[FASE 11 · Relatório HTML\nPT-BR · self-contained · abre offline]
     L --> M([📄 relatorio_swarm.html])
 
     style A fill:#1a3a4f,color:#fff
@@ -98,6 +99,8 @@ FASE 9   OWASP ZAP
          OpenAPI/Swagger auto-import
 FASE 10  JS / Secrets
          20 padrões · endpoints · frameworks vulneráveis
+FASE 10.5 Testes Complementares
+         HTTP Smuggling · Fuzzing de endpoints (ffuf) · Trufflehog
 FASE 11  Relatório HTML
          PT-BR · self-contained · abre offline
 ```
@@ -185,6 +188,12 @@ risk       = min(base_risk + kev_bonus + epss_bonus + js_bonus, 100)
 - **DMARC** — detecta ausente, `p=none` (monitor only), `p=quarantine/reject`
 - **DKIM** — verifica seletores comuns (`default`, `google`, `mail`, `s1`, `s2`, etc.)
 - Tabela no relatório com status, severidade e recomendação específica por protocolo
+
+### Testes Complementares (Fase 10.5)
+- **HTTP Request Smuggling** (`smuggler.py`) — testa variantes CL.TE, TE.CL e CL.0 contra proxies reversos
+- **Fuzzing de endpoints** (`ffuf`) — descobre rotas ocultas (`/admin`, `/backup`, `.env`, `/api/v2/internal`) com wordlist seclists
+- **Secrets de alta confiança** (`trufflehog`) — analisa os arquivos JS coletados em busca de credenciais com verificação ativa
+- Todas as ferramentas são **opcionais** — o scan continua normalmente se não estiverem instaladas
 
 ### Análise Dinâmica (Katana + OWASP ZAP)
 - **Katana** — crawl com rendering JavaScript headless via chromium (`-jc -jsl`)
@@ -336,7 +345,10 @@ scan_target.com_20260418_143022/
     ├── openapi_spec.json           ← spec OpenAPI importada (se encontrada)
     ├── js_urls.txt                 ← arquivos JS descobertos
     ├── js_analysis.json            ← secrets, endpoints, frameworks
-    └── js_files/                   ← arquivos JS para análise forense
+    ├── js_files/                   ← arquivos JS para análise forense
+    ├── ffuf.json                   ← endpoints descobertos por fuzzing
+    ├── smuggler.txt                ← resultados HTTP Request Smuggling
+    └── trufflehog.json             ← secrets de alta confiança (trufflehog)
 ```
 
 ### Estrutura de output — scan em lote
@@ -407,6 +419,9 @@ NUCLEI_CONCURRENCY=10   # templates em paralelo
 | `zaproxy` | 9 | Scan dinâmico de aplicação | Opcional |
 | `chromium` | 9 | Rendering JS headless para Katana | Opcional |
 | `dig` | 8 | Análise DNS (SPF/DMARC/DKIM) | Padrão do sistema |
+| `ffuf` | 10.5 | Fuzzing de endpoints ocultos | Opcional |
+| `smuggler.py` | 10.5 | HTTP Request Smuggling | Opcional |
+| `trufflehog` | 10.5 | Secrets de alta confiança em JS | Opcional |
 | `jq` | Misc | Processamento JSON | Opcional |
 
 > SWARM adiciona `~/go/bin` e `~/.local/bin` ao PATH automaticamente no startup.
@@ -426,6 +441,28 @@ Sem Katana ou chromium instalados, o SWARM usa apenas o ZAP spider com aviso.
 
 ---
 
+## Comparação entre Scans (`swarm_diff.py`)
+
+Compara dois diretórios de scan e identifica o que mudou:
+
+```bash
+# Saída no terminal
+python3 swarm_diff.py scan_anterior/ scan_novo/
+
+# Gerar relatório HTML com diff visual
+python3 swarm_diff.py scan_anterior/ scan_novo/ --html
+```
+
+| Categoria | Significado |
+|---|---|
+| **✗ Novas** | Apareceram neste scan — ação imediata |
+| **✓ Corrigidas** | Resolvidas desde o scan anterior |
+| **~ Persistentes** | Continuam abertas — escalar se prazo vencido |
+
+Inclui comparação de risk score entre os dois scans e relatório HTML com tabelas por categoria.
+
+---
+
 ## Aviso Legal
 
 > **O SWARM destina-se exclusivamente a testes de segurança autorizados.**
@@ -438,7 +475,7 @@ Sem Katana ou chromium instalados, o SWARM usa apenas o ZAP spider com aviso.
 
 1. Fork do repositório
 2. Criar branch (`git checkout -b feature/sua-feature`)
-3. Garantir que todos os 157 testes passam: `bash test_swarm.sh`
+3. Garantir que todos os 158 testes passam: `bash test_swarm.sh`
 4. Abrir pull request com descrição clara
 
 ---

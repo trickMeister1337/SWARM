@@ -427,7 +427,7 @@ if command -v nuclei &>/dev/null; then
     fi
 
     eval nuclei -u "$TARGET" \
-           -tags cve,tech,exposure,default-login,misconfig,takeover,cors \
+           -tags cve,tech,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
            -timeout 10 -no-interactsh \
@@ -1455,11 +1455,109 @@ fi
 export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 
+# ====================== FASE 10.5: SMUGGLER + FFUF + TRUFFLEHOG ======================
+phase_banner "FASE 10.5/11: TESTES COMPLEMENTARES"
+
+# ── HTTP Request Smuggling (smuggler.py) ─────────────────────────
+SMUGGLER_FOUND=0
+_smuggler=""
+for _s in smuggler smuggler.py; do
+    command -v "$_s" &>/dev/null && _smuggler="$_s" && break
+done
+# Fallback: verificar em locais comuns
+[ -z "$_smuggler" ] && [ -f "$HOME/tools/smuggler/smuggler.py" ] && \
+    _smuggler="python3 $HOME/tools/smuggler/smuggler.py"
+[ -z "$_smuggler" ] && [ -f "$HOME/smuggler/smuggler.py" ] && \
+    _smuggler="python3 $HOME/smuggler/smuggler.py"
+
+if [ -n "$_smuggler" ]; then
+    echo -e "  ${BLUE}[…]${NC} Testando HTTP Request Smuggling..."
+    timeout 120 $_smuggler -u "$TARGET" \
+        -o "$OUTDIR/raw/smuggler.txt" 2>/dev/null || true
+    if [ -s "$OUTDIR/raw/smuggler.txt" ]; then
+        _smug_hits=$(grep -ciE "vulnerable|CL.TE|TE.CL|CL.0" \
+            "$OUTDIR/raw/smuggler.txt" 2>/dev/null || echo 0)
+        if [ "$_smug_hits" -gt 0 ]; then
+            SMUGGLER_FOUND=1
+            echo -e "  ${RED}[✗]${NC} HTTP Request Smuggling: ${_smug_hits} vetor(es) detectado(s)!"
+        else
+            echo -e "  ${GREEN}[✓]${NC} HTTP Request Smuggling: nenhuma vulnerabilidade detectada"
+        fi
+    fi
+else
+    echo -e "  ${YELLOW}[○]${NC} smuggler.py não instalado — pulando"
+    echo -e "  ${YELLOW}    Instale: git clone https://github.com/defparam/smuggler ~/tools/smuggler${NC}"
+fi
+unset _smuggler _smug_hits _s
+
+# ── ffuf: fuzzing de endpoints ocultos ───────────────────────────
+FFUF_FOUND=0
+if command -v ffuf &>/dev/null; then
+    echo -e "  ${BLUE}[…]${NC} Fuzzing de endpoints com ffuf..."
+    # Wordlist: usar a do seclists se disponível, senão usar lista compacta interna
+    _wordlist=""
+    for _wl in \
+        /usr/share/seclists/Discovery/Web-Content/common.txt \
+        /usr/share/wordlists/dirb/common.txt \
+        /usr/share/dirbuster/wordlists/directory-list-2.3-small.txt; do
+        [ -f "$_wl" ] && _wordlist="$_wl" && break
+    done
+
+    if [ -n "$_wordlist" ]; then
+        timeout 120 ffuf \
+            -u "${TARGET}/FUZZ" \
+            -w "$_wordlist" \
+            -mc 200,201,204,301,302,307,401,403 \
+            -t 20 -rate 30 \
+            -o "$OUTDIR/raw/ffuf.json" -of json \
+            -s 2>/dev/null || true
+
+        if [ -s "$OUTDIR/raw/ffuf.json" ]; then
+            FFUF_FOUND=$(python3 -c "
+import json
+try:
+    d=json.load(open('$OUTDIR/raw/ffuf.json'))
+    print(len(d.get('results',[])))
+except: print(0)" 2>/dev/null || echo 0)
+            echo -e "  ${GREEN}[✓]${NC} ffuf: ${FFUF_FOUND} endpoint(s) descoberto(s)"
+        fi
+    else
+        echo -e "  ${YELLOW}[!]${NC} ffuf instalado mas sem wordlist"
+        echo -e "  ${YELLOW}    Instale: sudo apt install seclists${NC}"
+    fi
+    unset _wordlist _wl
+else
+    echo -e "  ${YELLOW}[○]${NC} ffuf não instalado — pulando"
+    echo -e "  ${YELLOW}    Instale: go install github.com/ffuf/ffuf/v2@latest${NC}"
+fi
+
+# ── trufflehog: secrets em repos expostos ────────────────────────
+TRUFFLEHOG_FOUND=0
+if command -v trufflehog &>/dev/null; then
+    echo -e "  ${BLUE}[…]${NC} Verificando secrets expostos (trufflehog)..."
+    timeout 60 trufflehog filesystem "$OUTDIR/raw/js_files" \
+        --json --no-update 2>/dev/null \
+        > "$OUTDIR/raw/trufflehog.json" || true
+    if [ -s "$OUTDIR/raw/trufflehog.json" ]; then
+        TRUFFLEHOG_FOUND=$(wc -l < "$OUTDIR/raw/trufflehog.json" | tr -d ' ')
+        [ "$TRUFFLEHOG_FOUND" -gt 0 ] && \
+            echo -e "  ${RED}[!]${NC} trufflehog: ${TRUFFLEHOG_FOUND} secret(s) de alta confiança"
+    fi
+    if [ "$TRUFFLEHOG_FOUND" -eq 0 ]; then
+        echo -e "  ${GREEN}[✓]${NC} trufflehog: sem secrets de alta confiança nos JS coletados"
+    fi
+else
+    echo -e "  ${YELLOW}[○]${NC} trufflehog não instalado — pulando"
+    echo -e "  ${YELLOW}    Instale: go install github.com/trufflesecurity/trufflehog/v3@latest${NC}"
+fi
+
+export SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND
+
 # ====================== FASE 11: RELATÓRIO ======================
 
 phase_banner "FASE 11/11: GERAÇÃO DE RELATÓRIO"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND
 
 python3 << 'PYEOF'
 import json, os, html, re
@@ -1590,7 +1688,10 @@ JS_SECRETS      = int(os.environ.get('JS_SECRETS','0'))
 JS_ENDPOINTS    = int(os.environ.get('JS_ENDPOINTS','0'))
 JS_FRAMEWORKS   = int(os.environ.get('JS_FRAMEWORKS','0'))
 JS_FILES        = int(os.environ.get('JS_FILES','0'))
-KATANA_URLS     = int(os.environ.get('KATANA_URLS','0'))
+KATANA_URLS      = int(os.environ.get('KATANA_URLS','0'))
+SMUGGLER_FOUND   = int(os.environ.get('SMUGGLER_FOUND','0'))
+FFUF_FOUND       = int(os.environ.get('FFUF_FOUND','0'))
+TRUFFLEHOG_FOUND = int(os.environ.get('TRUFFLEHOG_FOUND','0'))
 WAF_DETECTED    = os.environ.get('WAF_DETECTED','') == '1'
 WAF_NAME        = os.environ.get('WAF_NAME','')
 EMAIL_ISSUES    = int(os.environ.get('EMAIL_ISSUES','0'))
@@ -2502,6 +2603,9 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {"<li><code>raw/waf.json</code> — Detecção de WAF (wafw00f)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}
 {"<li><code>raw/email_security.json</code> — SPF/DMARC/DKIM</li>" if email_security else ""}
 {"<li><code>raw/katana_urls.txt</code> — URLs descobertas pelo Katana (JS crawl)</li>" if KATANA_URLS > 0 else ""}
+{"<li><code>raw/ffuf.json</code> — Endpoints descobertos por fuzzing (ffuf)</li>" if FFUF_FOUND > 0 else ""}
+{"<li><code>raw/smuggler.txt</code> — Análise HTTP Request Smuggling</li>" if SMUGGLER_FOUND else ""}
+{"<li><code>raw/trufflehog.json</code> — Secrets de alta confiança (trufflehog)</li>" if TRUFFLEHOG_FOUND > 0 else ""}
 {"<li><code>raw/js_analysis.json</code> — Análise JS/Secrets completa</li>" if js_analysis else ""}
 {"<li><code>raw/js_files/</code> — Arquivos JS para análise forense</li>" if js_files_list else ""}
 </ul>
