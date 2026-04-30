@@ -152,12 +152,24 @@ trap cleanup EXIT
 TARGETS_FILE=""
 TARGET=""
 
-PARALLEL_JOBS=1  # default: sequencial
+PARALLEL_JOBS=1
+AUTH_TOKEN=""      # Bearer token para scan autenticado
+AUTH_HEADER=""     # Header customizado (ex: "Cookie: session=abc")
+
+# Parse args: suporta --token e --header além de -f/--file
+_args=("$@")
+for _i in "${!_args[@]}"; do
+    case "${_args[$_i]}" in
+        --token|-t)  AUTH_TOKEN="${_args[$((${_i}+1))]}" ;;
+        --header|-H) AUTH_HEADER="${_args[$((${_i}+1))]}" ;;
+    esac
+done
 
 # Atribuir alvo se não for flag
 if [ -n "$1" ] && ! echo "$1" | grep -q '^-'; then
     TARGET="$1"
 fi
+unset _args _i
 
 if [ "$1" = "-f" ] || [ "$1" = "--file" ] || [ "$1" = "--f" ]; then
     echo -e "${CYAN}[*] Modo multi-target — use swarm_batch.sh para múltiplos alvos:${NC}"
@@ -190,6 +202,26 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SCAN_START_TS=$(date +%s)
 OUTDIR="scan_${DOMAIN}_${TIMESTAMP}"
 mkdir -p "$OUTDIR/raw"
+
+# ── Checkpoint: salvar/verificar estado de cada fase ─────────────
+SWARM_STATE="$OUTDIR/raw/.swarm_state"
+touch "$SWARM_STATE" 2>/dev/null
+if [ -s "$SWARM_STATE" ]; then
+    _done_phases=$(grep "=done:" "$SWARM_STATE" | cut -d= -f1 | tr "\n" " ")
+    echo -e "  ${YELLOW}[!] Retomando scan — fases já concluídas: ${_done_phases}${NC}"
+    echo -e "  ${YELLOW}    Para reiniciar do zero: rm -rf $OUTDIR${NC}"
+    unset _done_phases
+fi
+
+phase_done() {
+    # Marca fase como concluída: phase_done "FASE_1"
+    echo "$1=done:$(date +%s)" >> "$SWARM_STATE"
+}
+
+phase_skip() {
+    # Retorna 0 (skip) se fase já concluída, 1 (run) se não
+    grep -q "^$1=done:" "$SWARM_STATE" 2>/dev/null
+}
 
 # ── Banner ASCII ──────────────────────────────────────────────────────────────
 clear 2>/dev/null || true
@@ -411,6 +443,15 @@ if command -v nuclei &>/dev/null; then
     echo -e "  ${YELLOW}[!] Scan pode levar 5-10 minutos (rate-limit: ${NUCLEI_RATE_LIMIT} req/s)...${NC}"
     # Construir flags de evasão baseado em WAF detectado
     NUCLEI_EVASION_FLAGS=""
+    # Injetar token de autenticação no Nuclei se fornecido
+    if [ -n "$AUTH_TOKEN" ]; then
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"Authorization: Bearer ${AUTH_TOKEN}\""
+        echo -e "  ${GREEN}[✓]${NC} Nuclei: Authorization header configurado"
+    fi
+    if [ -n "$AUTH_HEADER" ]; then
+        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"${AUTH_HEADER}\""
+        echo -e "  ${GREEN}[✓]${NC} Nuclei: header customizado configurado"
+    fi
     if [ "${WAF_DETECTED}" = "1" ]; then
         # User-Agent de browser real + headers que imitam tráfego legítimo
         NUCLEI_EVASION_FLAGS="-H \"User-Agent: ${RANDOM_UA}\""
@@ -571,7 +612,8 @@ try:
     data = json.load(open('$OUTDIR/raw/exploit_confirmations.json'))
     print(sum(1 for c in data if c['confirmed']))
 except: print(0)" 2>/dev/null)
-    echo -e "  ${GREEN}[✓] $CONFIRMED_COUNT exploit(s) confirmado(s) ativamente${NC}"
+    echo -e "  ${GREEN}[✓] $CONFIRMED_COUNT exploit(s) confirmado(s)
+phase_done "FASE_5" ativamente${NC}"
 else
     echo -e "  ${YELLOW}[○] Nenhum achado Nuclei para confirmar${NC}"
 fi
@@ -1183,6 +1225,51 @@ PYFIX
             sleep 3
         fi
 
+        # ── Pre-warm: garantir contexto mínimo antes do active scan ───────
+        echo -e "  ${BLUE}[…] Pre-warming contexto ZAP...${NC}"
+        # Adicionar URLs críticas do alvo manualmente
+        for _pw_path in "" "/" "/api" "/api/v1" "/api/v2" "/graphql" \
+                        "/swagger" "/docs" "/health" "/login" "/admin"; do
+            _pw_url="${TARGET%/}${_pw_path}"
+            _pw_enc=$(python3 -c \
+                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
+                "$_pw_url" 2>/dev/null)
+            zap_api_call "core/action/accessUrl" "url=${_pw_enc}" > /dev/null 2>&1
+        done
+        # Importar robots.txt se disponível
+        _robots=$(curl -sk --max-time 5 "${TARGET%/}/robots.txt" 2>/dev/null)
+        if echo "$_robots" | grep -q "Disallow\|Allow"; then
+            echo "$_robots" | grep -oE "/(\S+)" | while read -r _rpath; do
+                _renc=$(python3 -c \
+                    "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
+                    "${TARGET%/}${_rpath}" 2>/dev/null)
+                zap_api_call "core/action/accessUrl" "url=${_renc}" > /dev/null 2>&1
+            done
+            echo -e "  ${GREEN}[✓] robots.txt importado para contexto ZAP${NC}"
+        fi
+        # Injetar token de autenticação no ZAP se fornecido
+        if [ -n "$AUTH_TOKEN" ]; then
+            _auth_enc=$(python3 -c \
+                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
+                "Bearer ${AUTH_TOKEN}" 2>/dev/null)
+            zap_api_call "replacer/action/addRule" \
+                "description=AuthToken&enabled=true&matchType=REQ_HEADER&matchString=Authorization&replacement=${_auth_enc}" \
+                > /dev/null 2>&1
+            echo -e "  ${GREEN}[✓] Authorization header injetado no ZAP${NC}"
+        fi
+        if [ -n "$AUTH_HEADER" ]; then
+            _hname="${AUTH_HEADER%%:*}"; _hval="${AUTH_HEADER#*:}"
+            _hval_enc=$(python3 -c \
+                "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1].strip(),safe=''))" \
+                "$_hval" 2>/dev/null)
+            zap_api_call "replacer/action/addRule" \
+                "description=CustomHeader&enabled=true&matchType=REQ_HEADER&matchString=${_hname}&replacement=${_hval_enc}" \
+                > /dev/null 2>&1
+            echo -e "  ${GREEN}[✓] Header customizado injetado no ZAP${NC}"
+        fi
+        sleep 3
+        unset _pw_path _pw_url _pw_enc _robots _rpath _renc _hname _hval _hval_enc _auth_enc
+
         # ── Iniciar Active Scan com validação ────────────────────────────
         echo -e "  ${BLUE}[…] Iniciando Active Scan...${NC}"
         SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${ENCODED_URL}&recurse=true" 2>/dev/null)
@@ -1196,7 +1283,7 @@ PYFIX
 
             # Aguardar até 90s para scan sair de 0% — detecta scan travado
             _stuck_elapsed=0
-            _stuck_limit=90
+            _stuck_limit=120  # 2 min para sair de 0% antes de abortar
             _stuck=0
             echo -ne "${YELLOW}[*] Verificando se active scan progrediu...${NC}"
             while [ $_stuck_elapsed -lt $_stuck_limit ]; do
@@ -1236,6 +1323,7 @@ try:
     print(len(data.get('alerts',[])))
 except: print(0)" 2>/dev/null)
         echo -e "  ${GREEN}[✓] ZAP encontrou ${ALERT_COUNT} alerta(s)${NC}"
+phase_done "FASE_9"
         # Atualizar metadata com resultado ZAP
         python3 -c "
 import json,os
@@ -1449,7 +1537,8 @@ if [ -f "$OUTDIR/raw/js_analysis.json" ]; then
     JS_ENDPOINTS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('endpoints',[])))" 2>/dev/null || echo 0)
     JS_FRAMEWORKS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('frameworks',[])))" 2>/dev/null || echo 0)
     JS_FILES=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('js_files',[])))" 2>/dev/null || echo 0)
-    echo -e "  ${GREEN}[✓] JS: $JS_FILES arquivo(s) | $JS_SECRETS secret(s) | $JS_ENDPOINTS endpoint(s) | $JS_FRAMEWORKS framework(s)${NC}"
+    echo -e "  ${GREEN}[✓] JS: $JS_FILES arquivo(s)
+phase_done "FASE_10" | $JS_SECRETS secret(s) | $JS_ENDPOINTS endpoint(s) | $JS_FRAMEWORKS framework(s)${NC}"
 fi
 
 export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
@@ -1475,7 +1564,7 @@ if [ -n "$_smuggler" ]; then
     timeout 120 $_smuggler -u "$TARGET" \
         -o "$OUTDIR/raw/smuggler.txt" 2>/dev/null || true
     if [ -s "$OUTDIR/raw/smuggler.txt" ]; then
-        _smug_hits=$(grep -ciE "vulnerable|CL.TE|TE.CL|CL.0" \
+        _smug_hits=$(grep -ciE "vulnerable|CL\.TE|TE\.CL|CL\.0|desync" \
             "$OUTDIR/raw/smuggler.txt" 2>/dev/null || echo 0)
         if [ "$_smug_hits" -gt 0 ]; then
             SMUGGLER_FOUND=1
@@ -1494,8 +1583,100 @@ unset _smuggler _smug_hits _s
 FFUF_FOUND=0
 if command -v ffuf &>/dev/null; then
     echo -e "  ${BLUE}[…]${NC} Fuzzing de endpoints com ffuf..."
-    # Wordlist: usar a do seclists se disponível, senão usar lista compacta interna
-    _wordlist=""
+
+    # Wordlist customizada para hotelaria/pagamentos (sempre gerada)
+    _custom_wl="$OUTDIR/raw/ffuf_wordlist.txt"
+    cat > "$_custom_wl" << 'WORDLIST'
+api
+api/v1
+api/v2
+api/v3
+api/graphql
+graphql
+swagger
+swagger/v1
+swagger.json
+openapi.json
+docs
+health
+status
+ping
+metrics
+admin
+admin/login
+login
+auth
+auth/login
+auth/token
+token
+refresh
+logout
+register
+reset-password
+forgot-password
+change-password
+user
+users
+profile
+account
+accounts
+payment
+payments
+checkout
+booking
+bookings
+reservation
+reservations
+order
+orders
+invoice
+report
+reports
+export
+import
+upload
+download
+backup
+config
+configuration
+settings
+env
+.env
+.git
+.git/config
+requirements.txt
+package.json
+composer.json
+web.config
+appsettings.json
+wordpress/wp-login.php
+wp-admin
+wp-json
+phpmyadmin
+adminer
+panel
+dashboard
+console
+manager
+management
+cms
+backoffice
+staff
+internal
+test
+debug
+info
+server-status
+server-info
+static
+assets
+media
+uploads
+files
+WORDLIST
+
+    # Wordlist prioritária: custom + seclists se disponível
+    _wordlist="$_custom_wl"
     for _wl in \
         /usr/share/seclists/Discovery/Web-Content/common.txt \
         /usr/share/wordlists/dirb/common.txt \
@@ -1535,9 +1716,14 @@ fi
 TRUFFLEHOG_FOUND=0
 if command -v trufflehog &>/dev/null; then
     echo -e "  ${BLUE}[…]${NC} Verificando secrets expostos (trufflehog)..."
-    timeout 60 trufflehog filesystem "$OUTDIR/raw/js_files" \
-        --json --no-update 2>/dev/null \
-        > "$OUTDIR/raw/trufflehog.json" || true
+    if [ -d "$OUTDIR/raw/js_files" ] && \
+       [ "$(find "$OUTDIR/raw/js_files" -name "*.js" 2>/dev/null | wc -l)" -gt 0 ]; then
+        timeout 60 trufflehog filesystem "$OUTDIR/raw/js_files" \
+            --json --no-update 2>/dev/null \
+            > "$OUTDIR/raw/trufflehog.json" || true
+    else
+        echo -e "  ${YELLOW}[○]${NC} Sem arquivos JS para analisar com trufflehog"
+    fi
     if [ -s "$OUTDIR/raw/trufflehog.json" ]; then
         TRUFFLEHOG_FOUND=$(wc -l < "$OUTDIR/raw/trufflehog.json" | tr -d ' ')
         [ "$TRUFFLEHOG_FOUND" -gt 0 ] && \
@@ -1551,13 +1737,13 @@ else
     echo -e "  ${YELLOW}    Instale: go install github.com/trufflesecurity/trufflehog/v3@latest${NC}"
 fi
 
-export SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND
+export SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
 
 # ====================== FASE 11: RELATÓRIO ======================
 
 phase_banner "FASE 11/11: GERAÇÃO DE RELATÓRIO"
 
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
 
 python3 << 'PYEOF'
 import json, os, html, re
