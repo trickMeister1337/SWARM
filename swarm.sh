@@ -1272,8 +1272,43 @@ PYFIX
 
         # ── Iniciar Active Scan com validação ────────────────────────────
         echo -e "  ${BLUE}[…] Iniciando Active Scan...${NC}"
-        SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${ENCODED_URL}&recurse=true" 2>/dev/null)
+
+        # Buscar URL exata do site tree do ZAP (não o target original)
+        # "URL Not Found in Scan Tree" ocorre quando se usa a URL do target
+        # mas o ZAP registrou uma variação (com/sem trailing slash, redirect, etc.)
+        _zap_site_url=$(zap_api_call "core/view/sites" "" 2>/dev/null \
+            | python3 -c "
+import sys, json, urllib.parse
+try:
+    d = json.load(sys.stdin)
+    sites = d.get('sites', [])
+    target = '$TARGET'.rstrip('/')
+    # Preferir site que bata com o domínio
+    domain = '$DOMAIN'
+    for s in sites:
+        if domain in s:
+            print(urllib.parse.quote(s, safe=''))
+            break
+    else:
+        # Fallback: primeiro site disponível
+        if sites:
+            print(urllib.parse.quote(sites[0], safe=''))
+except: pass
+" 2>/dev/null)
+
+        # Usar URL do site tree se encontrada, senão ENCODED_URL
+        _scan_url="${_zap_site_url:-$ENCODED_URL}"
+
+        SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${_scan_url}&recurse=true" 2>/dev/null)
         SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
+
+        # Se ainda falhar, tentar sem URL (scan de tudo no contexto)
+        if [ -z "$SCAN_ID" ] || [ "$SCAN_ID" = "0" ] || ! [[ "$SCAN_ID" =~ ^[0-9]+$ ]]; then
+            echo -e "  ${YELLOW}[!] Tentando active scan sem URL específica (contexto completo)...${NC}"
+            SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "recurse=true" 2>/dev/null)
+            SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
+        fi
+        unset _zap_site_url _scan_url
 
         if [ -z "$SCAN_ID" ] || [ "$SCAN_ID" = "0" ] || ! [[ "$SCAN_ID" =~ ^[0-9]+$ ]]; then
             echo -e "  ${YELLOW}[!] Active scan não iniciou (SCAN_ID='${SCAN_ID}') — resposta: ${SCAN_RESPONSE:0:200}${NC}"
