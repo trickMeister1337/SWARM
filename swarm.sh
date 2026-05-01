@@ -136,15 +136,23 @@ wait_for_zap_progress() {
 }
 
 cleanup() {
-    [ "$ZAP_STARTED_BY_SCRIPT" -eq 1 ] || return 0
-    echo -e "\n${BLUE}[*] Encerrando ZAP...${NC}"
-    zap_api_call "core/action/shutdown" "" > /dev/null 2>&1
-    sleep 2
-    pkill -f "zaproxy.*-port ${ZAP_PORT}" 2>/dev/null
-    echo -e "  ${GREEN}[✓] ZAP encerrado${NC}"
+    local _exit_code=$?
+    # Matar processos filhos em background (ffuf, smuggler, etc)
+    jobs -p | xargs -r kill 2>/dev/null || true
+    # Encerrar ZAP se foi iniciado por este script
+    if [ "${ZAP_STARTED_BY_SCRIPT:-0}" -eq 1 ]; then
+        echo -e "\n  ${BLUE}[…] Encerrando ZAP...${NC}"
+        zap_api_call "core/action/shutdown" "" > /dev/null 2>&1
+        sleep 2
+        pkill -f "zaproxy.*-port ${ZAP_PORT}" 2>/dev/null || true
+        echo -e "  ${GREEN}[✓] ZAP encerrado${NC}"
+    fi
+    [ "$_exit_code" -eq 130 ] && echo -e "\n  ${YELLOW}[!] Scan interrompido pelo usuário${NC}"
+    exit "$_exit_code"
 }
 
-trap cleanup EXIT
+trap 'cleanup' EXIT
+trap 'exit 130' INT TERM
 
 # ====================== VALIDAÇÃO INICIAL ======================
 
@@ -1302,11 +1310,21 @@ except: pass
         SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${_scan_url}&recurse=true" 2>/dev/null)
         SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
 
-        # Se ainda falhar, tentar sem URL (scan de tudo no contexto)
+        # Se ainda falhar, buscar URL do site tree e tentar novamente
         if [ -z "$SCAN_ID" ] || [ "$SCAN_ID" = "0" ] || ! [[ "$SCAN_ID" =~ ^[0-9]+$ ]]; then
-            echo -e "  ${YELLOW}[!] Tentando active scan sem URL específica (contexto completo)...${NC}"
-            SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "recurse=true" 2>/dev/null)
-            SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
+            echo -e "  ${YELLOW}[!] Tentando active scan com URL do site tree...${NC}"
+            _first_site=$(zap_api_call "core/view/sites" "" 2>/dev/null \
+                | python3 -c "
+import sys,json,urllib.parse
+try:
+    sites=json.load(sys.stdin).get('sites',[])
+    print(urllib.parse.quote(sites[0],safe='')) if sites else print('')
+except: print('')" 2>/dev/null)
+            if [ -n "$_first_site" ]; then
+                SCAN_RESPONSE=$(zap_api_call "ascan/action/scan" "url=${_first_site}&recurse=true" 2>/dev/null)
+                SCAN_ID=$(echo "$SCAN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('scan',''))" 2>/dev/null)
+            fi
+            unset _first_site
         fi
         unset _zap_site_url _scan_url
 
@@ -1720,12 +1738,15 @@ WORDLIST
     done
 
     if [ -n "$_wordlist" ]; then
-        timeout 120 ffuf \
+        echo -e "  ${BLUE}[…]${NC} ffuf: testando $(wc -l < "$_wordlist") endpoints (timeout 90s)..."
+        timeout 90 ffuf \
             -u "${TARGET}/FUZZ" \
             -w "$_wordlist" \
             -mc 200,201,204,301,302,307,401,403 \
-            -t 20 -rate 30 \
+            -t 10 -rate 20 \
+            -timeout 10 \
             -o "$OUTDIR/raw/ffuf.json" -of json \
+            -noninteractive \
             -s 2>/dev/null || true
 
         if [ -s "$OUTDIR/raw/ffuf.json" ]; then
@@ -1982,14 +2003,47 @@ if os.path.exists(zap_file) and os.path.getsize(zap_file) > 0:
     try:
         zap_data = json.load(open(zap_file,"r",encoding="utf-8"))
         rmap = {"high":"high","medium":"medium","low":"low","informational":"info"}
-        # Filtrar alertas de confiança "False Positive" ou "Low" confidence para Low/Info
         SKIP_CONFIDENCE = {"false positive"}
+
+        # ── Padrões de URLs geradas pelo spider que não representam recursos reais ──
+        # Redirects de autenticação (Jenkins, Jira, Confluence, etc.)
+        # e URLs com parâmetros de redirect injetados pelo scanner
+        URL_SKIP_PATTERNS = [
+            r'/securityRealm/',          # Jenkins auth redirect
+            r'moLogin\?from=',           # Jenkins login redirect
+            r'j_spring_security',        # Spring Security login
+            r'login\?from=%2F',          # Generic auth redirect
+            r'login\?next=%2F',          # Django/Flask auth redirect
+            r'signin\?returnUrl=',       # Generic signin redirect
+            r'auth\?redirect=',          # Generic auth redirect
+            r'\?from=%2F',              # ZAP-injected redirect param
+            r'\?from=%2Fsitemap',        # sitemap redirect artifact
+            r'\?from=%2Fstatic',         # static asset redirect artifact
+            r'/j_acegi_security',        # Legacy Spring Security
+            r'oauth/authorize\?',        # OAuth artifacts
+            r'saml/login\?',             # SAML redirect artifacts
+        ]
+
+        def url_is_real(url):
+            """Retorna False se a URL é claramente um artefato de redirect/scanner."""
+            if not url:
+                return True
+            for pattern in URL_SKIP_PATTERNS:
+                if re.search(pattern, url, re.IGNORECASE):
+                    return False
+            return True
+
         for i,a in enumerate(zap_data.get("alerts",[])):
             try:
                 sev_orig = rmap.get(a.get("risk","info").lower(),"info")
                 conf = a.get("confidence","").lower()
-                # Descartar apenas confirmados como falsos positivos
                 if conf in SKIP_CONFIDENCE:
+                    continue
+
+                # ── Filtrar URLs que não representam recursos reais ──────────
+                alert_url = a.get("url","")
+                if not url_is_real(alert_url):
+                    errors.append(f"ZAP URL filtrada (redirect artefato): {alert_url[:80]}")
                     continue
                 # Reclassificar severidade via CVSS do CWE (Opção C — tabela sintética)
                 _cweid = str(a.get("cweid","") or "")

@@ -58,7 +58,7 @@ for fn in validate_tool zap_api_call wait_for_zap wait_for_zap_progress cleanup;
 done
 
 # Verificar trap
-if grep -q "trap cleanup EXIT" "$SCRIPT"; then
+if grep -qE "trap ('cleanup'|cleanup) EXIT" "$SCRIPT"; then
     pass "trap cleanup EXIT registrado"
 else
     fail "trap cleanup EXIT não encontrado"
