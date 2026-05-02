@@ -147,6 +147,8 @@ cleanup() {
         pkill -f "zaproxy.*-port ${ZAP_PORT}" 2>/dev/null || true
         echo -e "  ${GREEN}[✓] ZAP encerrado${NC}"
     fi
+    # Remover lockfile
+    [ -n "${LOCKFILE:-}" ] && rm -f "$LOCKFILE" 2>/dev/null
     [ "$_exit_code" -eq 130 ] && echo -e "\n  ${YELLOW}[!] Scan interrompido pelo usuário${NC}"
     exit "$_exit_code"
 }
@@ -206,14 +208,74 @@ fi
 
 # ── Modo single-target: continua normalmente ─────────────────────
 DOMAIN=$(echo "$TARGET" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
+
+# ── Validação básica do domínio antes de continuar ───────────────
+if [ -z "$DOMAIN" ]; then
+    echo -e "${RED}[✗] Domínio não pôde ser extraído da URL: $TARGET${NC}"
+    exit 1
+fi
+# Verificar se é IP ou hostname válido
+_domain_valid=0
+# IP address
+echo "$DOMAIN" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' && _domain_valid=1
+# Hostname válido (letras, números, hífens, pontos)
+echo "$DOMAIN" | grep -qE '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$' \
+    && _domain_valid=1
+if [ "$_domain_valid" -eq 0 ]; then
+    echo -e "${RED}[✗] Domínio inválido: ${DOMAIN}${NC}"
+    echo -e "${YELLOW}    Exemplos válidos: example.com, api.example.com.br, 192.168.1.1${NC}"
+    exit 1
+fi
+# Verificar resolução DNS antes de continuar
+_dns_check=$(python3 -c "import socket; socket.gethostbyname('$DOMAIN'); print('ok')" 2>/dev/null)
+if [ "$_dns_check" != "ok" ]; then
+    echo -e "${RED}[✗] DNS não resolve para: ${DOMAIN}${NC}"
+    echo -e "${YELLOW}    Verifique se o domínio existe e se há conectividade${NC}"
+    exit 1
+fi
+unset _domain_valid _dns_check
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SCAN_START_TS=$(date +%s)
 OUTDIR="scan_${DOMAIN}_${TIMESTAMP}"
 mkdir -p "$OUTDIR/raw"
 
+# ── Lockfile: evitar execuções simultâneas no mesmo diretório ────
+LOCKFILE="$OUTDIR/raw/.swarm.lock"
+if [ -f "$LOCKFILE" ]; then
+    _lock_pid=$(cat "$LOCKFILE" 2>/dev/null)
+    if kill -0 "$_lock_pid" 2>/dev/null; then
+        echo -e "${RED}[✗] Scan já em execução para $DOMAIN (PID: $_lock_pid)${NC}"
+        echo -e "${YELLOW}    Se o processo não está mais rodando, remova o lock:${NC}"
+        echo -e "${YELLOW}    rm $LOCKFILE${NC}"
+        exit 1
+    else
+        echo -e "${YELLOW}[!] Lock file órfão detectado — removendo e continuando${NC}"
+        rm -f "$LOCKFILE"
+    fi
+fi
+echo $$ > "$LOCKFILE"
+unset _lock_pid
+# Remover lock ao sair (adicionado ao cleanup)
+
 # ── Checkpoint: salvar/verificar estado de cada fase ─────────────
 SWARM_STATE="$OUTDIR/raw/.swarm_state"
 touch "$SWARM_STATE" 2>/dev/null
+
+# ── Timing por fase ─────────────────────────────────────────────
+PHASE_TIMES_FILE="$OUTDIR/raw/.phase_times"
+touch "$PHASE_TIMES_FILE"
+
+phase_start() {
+    echo "$1:start:$(date +%s)" >> "$PHASE_TIMES_FILE"
+}
+
+phase_end() {
+    local _s=$(grep "^$1:start:" "$PHASE_TIMES_FILE" 2>/dev/null | tail -1 | cut -d: -f3)
+    local _e=$(date +%s)
+    local _dur=$(( _e - ${_s:-_e} ))
+    echo "$1:end:$_e:dur:$_dur" >> "$PHASE_TIMES_FILE"
+    printf "  ${BLUE}[⏱] Duração da fase: %dm%02ds${NC}\n" $(( _dur/60 )) $(( _dur%60 ))
+}
 if [ -s "$SWARM_STATE" ]; then
     _done_phases=$(grep "=done:" "$SWARM_STATE" | cut -d= -f1 | tr "\n" " ")
     echo -e "  ${YELLOW}[!] Retomando scan — fases já concluídas: ${_done_phases}${NC}"
@@ -373,6 +435,7 @@ done
 unset _prefix _p _last2 _is_compound _tld _compound_tlds
 
 
+phase_start "P1"
 phase_banner "FASE 1/11: DESCOBERTA DE SUBDOMÍNIOS"
 
 SUB_COUNT=0
@@ -393,10 +456,12 @@ else
     echo "$DOMAIN" > "$OUTDIR/raw/subdomains.txt"
     SUB_COUNT=1
 fi
+phase_end "P1"
 echo -e "  ${GREEN}[✓] Fase 1 concluída — $SUB_COUNT alvo(s) para análise${NC}"
 
 # ====================== FASE 2: MAPEAMENTO ======================
 
+phase_start "P2"
 phase_banner "FASE 2/11: MAPEAMENTO DE SUPERFÍCIE"
 
 ACTIVE_COUNT=0
@@ -426,6 +491,64 @@ fi
 
 # ====================== FASES 3+4: TESTSSL + NUCLEI (paralelo) ======================
 
+phase_start "P3"
+# ── Verificação de headers de segurança ─────────────────────────
+echo -e "  ${BLUE}[…] Verificando headers de segurança HTTP...${NC}"
+python3 - "$OUTDIR" << 'PYSECHEADERS'
+import subprocess, json, sys, os
+outdir = sys.argv[1]
+httpx_file = os.path.join(outdir,"raw","httpx_results.txt")
+
+SECURITY_HEADERS = {
+    "content-security-policy":      ("critical","CSP ausente — XSS sem mitigação"),
+    "x-content-type-options":       ("medium","X-Content-Type-Options ausente — MIME sniffing possível"),
+    "x-frame-options":              ("medium","X-Frame-Options ausente — Clickjacking possível"),
+    "strict-transport-security":    ("high","HSTS ausente — downgrade HTTPS possível"),
+    "referrer-policy":              ("low","Referrer-Policy ausente — vazamento de URL em requests"),
+    "permissions-policy":           ("low","Permissions-Policy ausente — acesso irrestrito a APIs do browser"),
+    "x-xss-protection":             ("info","X-XSS-Protection legado — preferir CSP"),
+}
+
+results = []
+urls = []
+if os.path.exists(httpx_file):
+    with open(httpx_file) as f:
+        for line in f:
+            url = line.strip().split()[0] if line.strip() else ""
+            if url.startswith("http"): urls.append(url)
+
+for url in urls[:20]:  # testar as 20 primeiras URLs ativas
+    try:
+        r = subprocess.run(
+            ["curl","-sk","-I","--max-time","10","-L",url],
+            capture_output=True, text=True, timeout=15
+        )
+        headers_raw = r.stdout.lower()
+        missing = {}
+        present = {}
+        for h,(sev,desc) in SECURITY_HEADERS.items():
+            if h not in headers_raw:
+                missing[h] = {"severity":sev,"description":desc}
+            else:
+                # Extrair valor do header
+                for line in r.stdout.split("\n"):
+                    if h in line.lower():
+                        present[h] = line.split(":",1)[1].strip() if ":" in line else "present"
+                        break
+        results.append({"url":url,"missing":missing,"present":present})
+    except: pass
+
+out_file = os.path.join(outdir,"raw","security_headers.json")
+json.dump(results, open(out_file,"w"), indent=2)
+
+# Sumário
+total_issues = sum(len(r["missing"]) for r in results)
+critical_issues = sum(1 for r in results for s in r["missing"].values() if s["severity"]=="critical")
+print(f"  Verificados: {len(results)} URL(s) | {total_issues} header(s) ausente(s) | {critical_issues} crítico(s)")
+PYSECHEADERS
+echo -e "  ${GREEN}[✓] Headers de segurança verificados${NC}"
+export SECURITY_HEADERS_FILE="$OUTDIR/raw/security_headers.json"
+
 phase_banner "FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei"
 
 TLS_ISSUES=0
@@ -444,6 +567,7 @@ fi
 
 # ====================== FASE 4: NUCLEI ======================
 
+phase_start "P4"
 phase_banner "FASE 4/11: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl"
 
 NUCLEI_COUNT=0
@@ -475,7 +599,19 @@ if command -v nuclei &>/dev/null; then
         echo -e "  ${BLUE}[…] Evasão passiva ativada: UA rotation + origin spoofing + payload alterations${NC}"
     fi
 
-    eval nuclei -u "$TARGET" \
+    # Usar URLs do Katana se disponíveis para maior cobertura
+    _nuclei_input="-u $TARGET"
+    if [ -s "$OUTDIR/raw/katana_urls.txt" ]; then
+        _nuclei_list="$OUTDIR/raw/nuclei_urls.txt"
+        echo "$TARGET" > "$_nuclei_list"
+        cat "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list"
+        sort -u "$_nuclei_list" -o "$_nuclei_list"
+        _url_count=$(wc -l < "$_nuclei_list" | tr -d " ")
+        echo -e "  ${GREEN}[✓] Nuclei usando ${_url_count} URLs (domínio + Katana)${NC}"
+        _nuclei_input="-l $_nuclei_list"
+    fi
+
+    eval nuclei $_nuclei_input \
            -tags cve,tech,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
@@ -527,92 +663,23 @@ fi
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 
+phase_start "P5"
 phase_banner "FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)"
 
 CONFIRMED_COUNT=0
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
     echo -e "  ${BLUE}[…] Re-executando curl de cada achado para confirmar...${NC}"
-    python3 - "$OUTDIR" << 'PYCONFIRM'
-import json, subprocess, re, sys, os
-from datetime import datetime, timezone
-
-outdir = sys.argv[1]
-nuclei_file = os.path.join(outdir, "raw", "nuclei.json")
-confirm_file = os.path.join(outdir, "raw", "exploit_confirmations.json")
-
-confirmations = []
-with open(nuclei_file, "r", encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            curl_cmd = data.get("curl-command", "")
-            if not curl_cmd:
-                continue
-
-            template_id = data.get("template-id", "unknown")
-            url = data.get("matched-at", "")
-            severity = data.get("info", {}).get("severity", "info")
-
-            # Confirmar apenas critical/high/medium — info/low não agregam valor
-            if severity.lower() not in ("critical", "high", "medium"):
-                continue
-
-            # Re-executar com captura de status e resposta
-            safe_cmd = re.sub(
-                r"^curl\s+",
-                "curl -s --max-time 15 -w '\n---SWARM_STATUS:%{http_code}---' ",
-                curl_cmd
-            )
-            print(f"  [>] Confirmando {template_id} em {url[:60]}...")
-            try:
-                result = subprocess.run(
-                    safe_cmd, shell=True,
-                    capture_output=True, text=True, timeout=20
-                )
-                output = result.stdout
-                status_match = re.search(r'---SWARM_STATUS:(\d+)---', output)
-                status = status_match.group(1) if status_match else "???"
-                body = output.split('---SWARM_STATUS:')[0].strip()  # sem truncagem
-
-                # Confirmado = resposta 2xx ou 3xx (acesso bem-sucedido)
-                confirmed = status.startswith('2') or status.startswith('3')
-
-                entry = {
-                    "template_id": template_id,
-                    "url": url,
-                    "severity": severity,
-                    "confirmed": confirmed,
-                    "http_status": status,
-                    "response_snippet": body,
-                    "curl_command": curl_cmd,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                confirmations.append(entry)
-                state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
-                print(f"  [{'✓' if confirmed else '!'}] {state} (HTTP {status})")
-
-            except subprocess.TimeoutExpired:
-                confirmations.append({
-                    "template_id": template_id, "url": url,
-                    "severity": severity, "confirmed": False,
-                    "http_status": "TIMEOUT", "response_snippet": "",
-                    "curl_command": curl_cmd,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
-                print(f"  [!] TIMEOUT")
-
-        except Exception as e:
-            print(f"  [!] Erro ao processar linha: {e}")
-
-with open(confirm_file, "w", encoding="utf-8") as f:
-    json.dump(confirmations, f, ensure_ascii=False, indent=2)
-
-confirmed_n = sum(1 for c in confirmations if c["confirmed"])
-print(f"\n  Resultado: {confirmed_n}/{len(confirmations)} achados confirmados ativamente")
-PYCONFIRM
+    # Usar poc_validator.py se disponível no lib/
+    _poc_lib="$(dirname "$0")/lib/poc_validator.py"
+    if [ ! -f "$_poc_lib" ]; then
+        _poc_lib="$(cd "$(dirname "$0")" && pwd)/lib/poc_validator.py"
+    fi
+    if [ -f "$_poc_lib" ]; then
+        python3 "$_poc_lib" "$OUTDIR"
+    else
+        echo -e "  ${YELLOW}[!] lib/poc_validator.py não encontrado — validação básica${NC}"
+        echo "[]" > "$OUTDIR/raw/exploit_confirmations.json"
+    fi
 
     CONFIRMED_COUNT=$(python3 -c "
 import json
@@ -621,6 +688,7 @@ try:
     print(sum(1 for c in data if c['confirmed']))
 except: print(0)" 2>/dev/null)
     echo -e "  ${GREEN}[✓] $CONFIRMED_COUNT exploit(s) confirmado(s)
+phase_end "P5"
 phase_done "FASE_5" ativamente${NC}"
 else
     echo -e "  ${YELLOW}[○] Nenhum achado Nuclei para confirmar${NC}"
@@ -628,6 +696,7 @@ fi
 
 # ====================== FASE 10: ENRIQUECIMENTO CVE/EPSS ======================
 
+phase_start "P6"
 phase_banner "FASE 6/11: ENRIQUECIMENTO CVE / EPSS (NVD + FIRST.org)"
 
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
@@ -639,29 +708,54 @@ outdir = sys.argv[1]
 nuclei_file = os.path.join(outdir, "raw", "nuclei.json")
 cve_db_file = os.path.join(outdir, "raw", "cve_enrichment.json")
 
-# ── Baixar catálogo KEV (CISA Known Exploited Vulnerabilities) ──
+# ── Carregar catálogo KEV com cache diário ───────────────────────
 kev_set = set()
 kev_meta = {}  # cve_id -> {date_added, due_date, vendor, product, notes}
-try:
-    kev_url = "https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv"
-    req_kev = urllib.request.Request(kev_url, headers={"User-Agent": "SWARM/1.0"})
-    with urllib.request.urlopen(req_kev, timeout=15) as r:
-        raw = r.read().decode("utf-8")
-    reader = csv.DictReader(io.StringIO(raw))
-    for row in reader:
-        cid = row.get("cveID","").strip().upper()
-        if cid:
-            kev_set.add(cid)
-            kev_meta[cid] = {
-                "date_added": row.get("dateAdded",""),
-                "due_date":   row.get("dueDate",""),
-                "vendor":     row.get("vendorProject",""),
-                "product":    row.get("product",""),
-                "notes":      row.get("notes","")[:200]
-            }
-    print(f"  [✓] KEV: {len(kev_set)} vulnerabilidades exploradas ativamente carregadas")
-except Exception as e:
-    print(f"  [!] KEV: não foi possível baixar catálogo ({e}) — continuando sem KEV")
+import tempfile, time as _time
+_kev_cache = os.path.join(tempfile.gettempdir(), "swarm_kev_cache.json")
+_kev_max_age = 86400  # 24 horas em segundos
+_kev_cached = False
+
+# Verificar se cache existe e ainda é válido
+if os.path.exists(_kev_cache):
+    _cache_age = _time.time() - os.path.getmtime(_kev_cache)
+    if _cache_age < _kev_max_age:
+        try:
+            _cached = json.load(open(_kev_cache))
+            kev_set  = set(_cached.get("kev_set", []))
+            kev_meta = _cached.get("kev_meta", {})
+            _kev_cached = True
+            _cache_mins = int(_cache_age // 60)
+            print(f"  [✓] KEV: {len(kev_set)} CVEs carregados do cache "
+                  f"({_cache_mins}min atrás)")
+        except: pass
+
+if not _kev_cached:
+    try:
+        kev_url = "https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv"
+        req_kev = urllib.request.Request(kev_url, headers={"User-Agent": "SWARM/1.0"})
+        with urllib.request.urlopen(req_kev, timeout=15) as r:
+            raw = r.read().decode("utf-8")
+        reader = csv.DictReader(io.StringIO(raw))
+        for row in reader:
+            cid = row.get("cveID","").strip().upper()
+            if cid:
+                kev_set.add(cid)
+                kev_meta[cid] = {
+                    "date_added": row.get("dateAdded",""),
+                    "due_date":   row.get("dueDate",""),
+                    "vendor":     row.get("vendorProject",""),
+                    "product":    row.get("product",""),
+                    "notes":      row.get("notes","")[:200]
+                }
+        # Salvar cache
+        json.dump({"kev_set": list(kev_set), "kev_meta": kev_meta,
+                   "cached_at": _time.time()}, open(_kev_cache, "w"))
+        print(f"  [✓] KEV: {len(kev_set)} CVEs baixados e salvos em cache")
+    except Exception as e:
+        print(f"  [!] KEV: falha no download ({e}) — continuando sem KEV")
+
+unset _kev_cache _kev_max_age _kev_cached
 
 # Coletar CVEs únicos dos achados Nuclei
 cves = set()
@@ -784,6 +878,7 @@ fi
 
 # ====================== FASE 7: WAF DETECTION ======================
 
+phase_start "P7"
 phase_banner "FASE 7/11: DETECÇÃO DE WAF"
 
 WAF_DETECTED=""
@@ -894,6 +989,7 @@ PYMETADATA
 
 # ====================== FASE 7: EMAIL SECURITY ======================
 
+phase_start "P8"
 phase_banner "FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)"
 
 EMAIL_ISSUES=0
@@ -1008,6 +1104,7 @@ export EMAIL_ISSUES
 
 # ====================== FASE 9: ZAP ======================
 
+phase_start "P9"
 phase_banner "FASE 9/11: COLETA DE EVIDÊNCIAS (OWASP ZAP)"
 
 ALERT_COUNT=0
@@ -1376,6 +1473,7 @@ try:
     print(len(data.get('alerts',[])))
 except: print(0)" 2>/dev/null)
         echo -e "  ${GREEN}[✓] ZAP encontrou ${ALERT_COUNT} alerta(s)${NC}"
+phase_end "P9"
 phase_done "FASE_9"
         # Atualizar metadata com resultado ZAP
         python3 -c "
@@ -1396,6 +1494,7 @@ export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS WAF_DETECTED WAF_NAM
 
 # ====================== FASE 10: JS ANALYSIS ======================
 
+phase_start "P10"
 phase_banner "FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS"
 
 JS_SECRETS=0
@@ -1591,6 +1690,7 @@ if [ -f "$OUTDIR/raw/js_analysis.json" ]; then
     JS_FRAMEWORKS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('frameworks',[])))" 2>/dev/null || echo 0)
     JS_FILES=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('js_files',[])))" 2>/dev/null || echo 0)
     echo -e "  ${GREEN}[✓] JS: $JS_FILES arquivo(s)
+phase_end "P10"
 phase_done "FASE_10" | $JS_SECRETS secret(s) | $JS_ENDPOINTS endpoint(s) | $JS_FRAMEWORKS framework(s)${NC}"
 fi
 
@@ -1598,6 +1698,7 @@ export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 
 # ====================== FASE 10.5: SMUGGLER + FFUF + TRUFFLEHOG ======================
+phase_start "P10_5"
 phase_banner "FASE 10.5/11: TESTES COMPLEMENTARES"
 
 # ── HTTP Request Smuggling (smuggler.py) ─────────────────────────
@@ -1797,13 +1898,14 @@ export SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
 
 # ====================== FASE 11: RELATÓRIO ======================
 
+phase_start "P11"
 phase_banner "FASE 11/11: GERAÇÃO DE RELATÓRIO"
 
 export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
 
 python3 << 'PYEOF'
 import json, os, html, re
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ── Tabela CWE → CVSS sintético (baseado em médias históricas NVD) ──
 # Usada como fallback para alertas ZAP que não trazem CVE nas referências
@@ -1926,6 +2028,17 @@ OPENAPI_FOUND   = os.environ.get('OPENAPI_FOUND','0') == '1'
 TLS_ISSUES      = int(os.environ.get('TLS_ISSUES','0'))
 CONFIRMED_COUNT = int(os.environ.get('CONFIRMED_COUNT','0'))
 SCAN_START_TS   = int(os.environ.get('SCAN_START_TS','0'))
+
+# Carregar tempos por fase
+phase_times = {}
+_ptf = os.path.join(OUTDIR,'raw','.phase_times')
+if os.path.exists(_ptf):
+    try:
+        for _line in open(_ptf):
+            _parts = _line.strip().split(':')
+            if len(_parts) >= 5 and _parts[1] == 'end':
+                phase_times[_parts[0]] = int(_parts[4])
+    except: pass
 JS_SECRETS      = int(os.environ.get('JS_SECRETS','0'))
 JS_ENDPOINTS    = int(os.environ.get('JS_ENDPOINTS','0'))
 JS_FRAMEWORKS   = int(os.environ.get('JS_FRAMEWORKS','0'))
@@ -2192,6 +2305,13 @@ if os.path.exists(_smf):
     try: scan_meta = json.load(open(_smf))
     except Exception as e: errors.append(f'scan_metadata: {e}')
 
+# ── Security headers data ─────────────────────────────────────
+security_headers_data = []
+_shf = os.path.join(OUTDIR,'raw','security_headers.json')
+if os.path.exists(_shf):
+    try: security_headers_data = json.load(open(_shf))
+    except Exception as e: errors.append(f'security_headers: {e}')
+
 # ── JS Analysis ──────────────────────────────────────────────
 js_analysis = {}
 js_file = os.path.join(OUTDIR,"raw","js_analysis.json")
@@ -2349,6 +2469,10 @@ def render_finding(f):
                 if kev_prod: enrich_rows += f'<br><small style="color:#7a0000;font-weight:bold">Adicionado ao KEV em {html.escape(kev_added)} — {html.escape(kev_prod)}</small> '
             if cvss: enrich_rows += f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS {cvss} {html.escape(sev_pt)}</span> '
             if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}° percentil)</span> '
+            # Link direto para advisory NVD
+            enrich_rows += (f'<a href="https://nvd.nist.gov/vuln/detail/{html.escape(cve_id)}" '
+                f'target="_blank" style="font-size:11px;color:#388bfd;margin-left:6px">'
+                f'Ver no NVD ↗</a> ')
             if desc_nvd: enrich_rows += f'<br><small style="color:#555">{html.escape(desc_nvd)}</small>'
             enrich_rows += '</td></tr>'
     # Fallback CWE sintético — quando não há CVE NVD disponível
@@ -2707,26 +2831,89 @@ else:
 
 # ── Gerar HTML: Confirmações de Exploit ──────────────────────
 if confirmations:
-    conf_rows = "".join(
-        f'<tr>'
-        f'<td style="font-family:monospace;font-size:12px">{html.escape(c["template_id"])}</td>'
-        f'<td><code>{html.escape(c["url"])}</code></td>'
-        f'<td style="text-align:center"><span class="{"confirm-yes" if c["confirmed"] else "confirm-no"}">'
-        f'{"✓ CONFIRMADO" if c["confirmed"] else "✗ NÃO CONFIRMADO"}</span></td>'
-        f'<td style="text-align:center"><code>{html.escape(c["http_status"])}</code></td>'
-        f'<td><div class="evidence-box">{html.escape(c["response_snippet"]) if c["response_snippet"] else "—"}</div></td>'
-        f'</tr>'
-        for c in confirmations
-    )
+    conf_rows = ""
+    for c in confirmations:
+        status_color = "#27ae60" if c["confirmed"] else "#b34e4e"
+        status_label = "✓ CONFIRMADO" if c["confirmed"] else "✗ NÃO CONFIRMADO"
+        sev_colors = {"critical":"#7a2e2e","high":"#b34e4e","medium":"#d4833a","low":"#4a7c8c","info":"#888"}
+        sev_c = sev_colors.get(c["severity"],"#888")
+
+        # Evidência estruturada: headers + body separados
+        evidence_html = ""
+        if c.get("response_headers"):
+            evidence_html += (
+                f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Response Headers</div>'
+                f'<div class="evidence-box" style="margin-bottom:8px">{html.escape(c["response_headers"])}</div>'
+            )
+        if c.get("response_body"):
+            evidence_html += (
+                f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Response Body</div>'
+                f'<div class="evidence-box">{html.escape(c["response_body"])}</div>'
+            )
+        if not evidence_html:
+            evidence_html = '<span style="color:#888">—</span>'
+
+        # Curl reproduzível para copy-paste
+        curl_repr = c.get("curl_reproducible") or c.get("curl_command","")
+        curl_html = (
+            f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Reproduzir:</div>'
+            f'<div class="evidence-box" style="background:#1e3a4f;color:#a8d8ea;font-size:11px">'
+            f'{html.escape(curl_repr)}</div>'
+        ) if curl_repr else ""
+
+        conf_rows += (
+            f'<tr>'
+            f'<td style="vertical-align:top">'
+            f'  <code style="font-size:12px">{html.escape(c["template_id"])}</code><br>'
+            f'  <span style="background:{sev_c};color:white;padding:1px 6px;border-radius:3px;font-size:10px">'
+            f'  {c["severity"].upper()}</span>'
+            f'</td>'
+            f'<td style="vertical-align:top"><code style="font-size:11px;word-break:break-all">{html.escape(c["url"])}</code></td>'
+            f'<td style="text-align:center;vertical-align:top">'
+            f'  <span style="background:{status_color};color:white;padding:3px 8px;border-radius:4px;'
+            f'  font-size:11px;font-weight:bold;white-space:nowrap">{status_label}</span><br>'
+            f'  <code style="font-size:13px;font-weight:bold;color:{status_color}">{html.escape(c["http_status"])}</code>'
+            f'</td>'
+            f'<td style="text-align:center;vertical-align:top">'
+            + (lambda conf=c.get("confidence",0), vt=c.get("vuln_type",""):
+                f'<div style="font-size:24px;font-weight:bold;color:{"#27ae60" if conf>=80 else ("#d4833a" if conf>=50 else "#b34e4e")}">{conf}%</div>'
+                f'<div style="font-size:10px;color:#888;margin-top:2px">{html.escape(vt)}</div>'
+            )() +
+            f'</td>'
+            f'<td style="vertical-align:top">'
+            f'<div style="background:#f0f7ff;border-left:3px solid #388bfd;padding:6px 10px;border-radius:3px;font-size:12px;margin-bottom:8px">'
+            f'<strong>Nota:</strong> {html.escape(c.get("poc_note","—"))}</div>'
+            f'{evidence_html}{curl_html}'
+            f'</td>'
+            f'</tr>'
+        )
     n_conf = sum(1 for c in confirmations if c["confirmed"])
-    confirm_html = f'''<h2>Confirmação Ativa de Exploits ({n_conf} de {len(confirmations)} confirmados)</h2>
-    <p style="color:#666;font-size:13px">Cada achado do Nuclei foi re-executado com o curl original para verificar se a vulnerabilidade permanece ativa no momento do scan.</p>
-    <table>
-      <tr style="background:#f5f5f5"><th>Template</th><th>URL</th><th>Status</th><th>HTTP</th><th>Resposta Completa</th></tr>
-      {conf_rows}
-    </table>'''
+    confirm_html = (
+        f'<h2>Confirmação Ativa de Exploits ({n_conf}/{len(confirmations)} confirmados)</h2>'
+        f'<p style="color:#666;font-size:13px">Cada achado foi re-executado para verificar se permanece ativo. '
+        f'O comando <code>curl</code> reproduzível pode ser copiado e executado diretamente.</p>'
+        f'<table>'
+        f'<tr style="background:#f5f5f5">'
+        f'<th style="width:160px">Template</th>'
+        f'<th>URL</th>'
+        f'<th style="width:110px">Status</th>'
+        f'<th style="width:80px">Confiança</th>'
+        f'<th>Evidência & Nota PoC</th></tr>'
+        + conf_rows +
+        f'</table>'
+    )
 else:
-    confirm_html = ""
+    confirm_html = (
+        f'<h2>Confirmação Ativa de Exploits</h2>'
+        f'<div style="background:#f5f5f5;border-left:4px solid #888;padding:14px 16px;'
+        f'border-radius:4px;color:#666;font-size:13px">'
+        f'<strong>Nenhum achado elegível para confirmação ativa.</strong><br>'
+        f'A confirmação ativa roda apenas em achados Nuclei com severidade '
+        f'Crítica, Alta ou Média que incluam curl-command. '
+        f'Se o scan usou apenas o ZAP, os achados aparecem na seção de '
+        f'Vulnerabilidades Identificadas com evidência de request/response completo.'
+        f'</div>'
+    )
 
 
 # ── Gerar HTML: Plano de Ação Priorizado ─────────────────────────
@@ -2893,6 +3080,171 @@ open(out,"w",encoding="utf-8").write(page)
 print(f"[✓] Relatório: {out}")
 print(f"[✓] {total} vulnerabilidade(s) | C={stats['critical']} A={stats['high']} M={stats['medium']} B={stats['low']} I={stats['info']}")
 if errors: print(f"[!] {len(errors)} aviso(s) — ver relatório")
+
+# ── findings.json ─────────────────────────────────────────────────
+try:
+    risk_level = stxt.split(" — ")[0] if " — " in stxt else stxt
+    findings_out = {
+        "schema_version": "1.0",
+        "scan": {
+            "target": TARGET, "domain": DOMAIN,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "risk_score": risk, "risk_level": risk_level,
+            "waf_detected": WAF_DETECTED, "waf_name": WAF_NAME,
+            "phase_times": phase_times,
+        },
+        "summary": {
+            "total": total,
+            "critical": stats["critical"], "high": stats["high"],
+            "medium": stats["medium"], "low": stats["low"],
+            "info": stats["info"], "kev_count": kev_count,
+            "confirmed": sum(1 for c in confirmations if c.get("confirmed")),
+        },
+        "findings": [
+            {"id": f.get("id",""), "name": f.get("name",""),
+             "severity": f.get("severity",""), "source": f.get("source",""),
+             "url": f.get("url",""), "cve_ids": f.get("cve_ids",[]),
+             "cvss": f.get("cvss"), "epss": f.get("epss_score"),
+             "in_kev": f.get("in_kev",False),
+             "description": f.get("description",""),
+             "remediation": f.get("remediation",""),
+             "risk_score": f.get("risk_score",0)}
+            for f in all_f
+        ],
+        "confirmations": [
+            {"template_id": c.get("template_id",""), "url": c.get("url",""),
+             "severity": c.get("severity",""), "confirmed": c.get("confirmed",False),
+             "confidence": c.get("confidence",0), "poc_note": c.get("poc_note",""),
+             "http_status": c.get("http_status",""),
+             "curl_reproducible": c.get("curl_reproducible","")}
+            for c in confirmations
+        ],
+        "security_headers": security_headers_data,
+    }
+    fj = os.path.join(OUTDIR,"findings.json")
+    json.dump(findings_out, open(fj,"w",encoding="utf-8"), ensure_ascii=False, indent=2, default=str)
+    print(f"[✓] JSON estruturado: {fj}")
+except Exception as _e:
+    print(f"[!] findings.json: {_e}")
+
+# ── sumario_executivo.html ────────────────────────────────────────
+try:
+    rc = "#7a2e2e" if risk>=70 else ("#b34e4e" if risk>=40 else ("#d4833a" if risk>=15 else "#27ae60"))
+    kev_str = ", ".join(list(kev_matches.keys())[:5]) if kev_matches else "Nenhum"
+    risk_level = stxt.split(" — ")[0] if " — " in stxt else stxt
+
+    # Top findings table
+    sev_bg = {"critical":"#7a2e2e","high":"#b34e4e"}
+    sev_lb = {"critical":"CRÍTICO","high":"ALTO"}
+    top_f = [f for f in all_f if f.get("severity") in ("critical","high")][:8]
+    top_rows = ""
+    for f in top_f:
+        sc = sev_bg.get(f.get("severity",""), "#888")
+        sl = sev_lb.get(f.get("severity",""), "?")
+        name = html.escape(f.get("name",""))
+        impact = html.escape(f.get("impact","") or "Ver relatório técnico")
+        rem = html.escape((f.get("remediation","") or "")[:60])
+        top_rows += (f'<tr><td><span style="background:{sc};color:white;padding:2px 8px;'
+                     f'border-radius:4px;font-size:11px">{sl}</span></td>'
+                     f'<td style="font-weight:600">{name}</td>'
+                     f'<td style="color:#555;font-size:12px">{impact}</td>'
+                     f'<td style="font-size:11px">{rem}</td></tr>')
+    if not top_rows:
+        top_rows = '<tr><td colspan="4" style="text-align:center;color:#888">Sem achados críticos ou altos</td></tr>'
+
+    # Phase timing table
+    phase_map = {"P1":"Descoberta","P2":"Superfície","P3":"TLS","P4":"Nuclei",
+                 "P5":"Confirmação","P6":"CVE/EPSS","P7":"WAF","P8":"Email",
+                 "P9":"ZAP","P10":"JS/Secrets","P10_5":"Complementar","P11":"Relatório"}
+    phase_rows = ""
+    for pid, dur in phase_times.items():
+        pname = phase_map.get(pid, pid)
+        phase_rows += f'<tr><td>{pname}</td><td>{int(dur)//60}m {int(dur)%60:02d}s</td></tr>'
+    phase_section = ""
+    if phase_rows:
+        phase_section = (f'<h2>Tempo por Fase</h2>'
+                        f'<table><tr><th>Fase</th><th>Duração</th></tr>'
+                        f'{phase_rows}</table>')
+
+    # Recommendations
+    recs = []
+    if kev_count > 0:
+        recs.append(f"<li><strong>URGENTE:</strong> Remediar {kev_count} CVE(s) com exploração ativa: {html.escape(kev_str)}</li>")
+    if stats["critical"] > 0:
+        recs.append(f"<li>Corrigir {stats['critical']} achado(s) crítico(s) — prazo imediato</li>")
+    if stats["high"] > 0:
+        recs.append(f"<li>Planejar {stats['high']} achado(s) alto(s) — esta sprint</li>")
+    if stats["medium"] > 0:
+        recs.append(f"<li>Agendar {stats['medium']} achado(s) médio(s) — próxima sprint</li>")
+    recs.append("<li>Consultar relatório técnico para evidências detalhadas</li>")
+    recs_html = "\n".join(recs)
+
+    kev_alert = ""
+    if kev_count > 0:
+        kev_alert = (f'<p style="background:#fff0f0;padding:10px;border-radius:6px;'
+                    f'border-left:4px solid #7a0000;font-size:12px">'
+                    f'<strong>⚠ Exploração Ativa (CISA KEV):</strong> {html.escape(kev_str)}</p>')
+
+    kev_kpi = ""
+    if kev_count > 0:
+        kev_kpi = (f'<div class="kpi"><div class="n" style="color:#7a0000">{kev_count}</div>'
+                  f'<div class="l">🔴 KEV</div></div>')
+
+    target_esc = html.escape(TARGET)
+    domain_esc = html.escape(DOMAIN)
+    stxt_esc   = html.escape(stxt)
+    ts_str     = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    exec_html = f"""<!DOCTYPE html>
+<html lang="pt-br"><head><meta charset="UTF-8">
+<title>Sumário Executivo — {domain_esc}</title>
+<style>
+body{{font-family:"Segoe UI",sans-serif;max-width:850px;margin:0 auto;padding:30px;color:#333}}
+h1{{color:#1a3a4f;font-size:22px;border-bottom:3px solid #1a3a4f;padding-bottom:8px}}
+h2{{color:#1a3a4f;font-size:15px;margin-top:24px}}
+.kpi{{display:inline-block;text-align:center;margin:0 10px;padding:10px 18px;background:#f5f5f5;border-radius:8px}}
+.kpi .n{{font-size:26px;font-weight:bold}}
+.kpi .l{{font-size:11px;color:#888}}
+table{{width:100%;border-collapse:collapse;margin:8px 0}}
+th{{background:#1a3a4f;color:white;padding:8px;text-align:left;font-size:12px}}
+td{{border:1px solid #eee;padding:8px;font-size:12px}}
+.footer{{color:#aaa;font-size:10px;text-align:center;margin-top:32px;border-top:1px solid #eee;padding-top:8px}}
+@media print{{body{{padding:0}}}}
+</style></head><body>
+<div style="background:#1a3a4f;color:white;padding:18px;border-radius:8px;margin-bottom:20px">
+<h1 style="color:white;border:none;margin:0 0 4px">Sumário Executivo de Segurança</h1>
+<p style="margin:0;opacity:.8;font-size:13px">{target_esc} &nbsp;·&nbsp; {ts_str} &nbsp;·&nbsp; CONFIDENCIAL</p>
+</div>
+<h2>Índice de Risco</h2>
+<div style="margin:8px 0">
+<span style="background:{rc};color:white;font-size:32px;font-weight:bold;padding:10px 22px;border-radius:6px">{risk}/100</span>
+<span style="margin-left:14px;font-size:15px;font-weight:600;color:{rc}">{stxt_esc}</span>
+</div>
+<h2>Achados</h2>
+<div style="margin:8px 0">
+<div class="kpi"><div class="n" style="color:#7a2e2e">{stats["critical"]}</div><div class="l">CRÍTICO</div></div>
+<div class="kpi"><div class="n" style="color:#b34e4e">{stats["high"]}</div><div class="l">ALTO</div></div>
+<div class="kpi"><div class="n" style="color:#d4833a">{stats["medium"]}</div><div class="l">MÉDIO</div></div>
+<div class="kpi"><div class="n" style="color:#4a7c8c">{stats["low"]}</div><div class="l">BAIXO</div></div>
+{kev_kpi}
+</div>
+{kev_alert}
+<h2>Principais Vulnerabilidades</h2>
+<table><tr><th>Severidade</th><th>Vulnerabilidade</th><th>Impacto</th><th>Correção</th></tr>
+{top_rows}
+</table>
+<h2>Recomendações</h2>
+<ol style="font-size:13px;line-height:2">{recs_html}</ol>
+{phase_section}
+<div class="footer">Gerado por SWARM · Uso restrito a equipes de segurança autorizadas · CONFIDENCIAL</div>
+</body></html>"""
+
+    ef = os.path.join(OUTDIR,"sumario_executivo.html")
+    open(ef,"w",encoding="utf-8").write(exec_html)
+    print(f"[✓] Sumário executivo: {ef}")
+except Exception as _e:
+    print(f"[!] sumario_executivo: {_e}")
+
 PYEOF
 
 # ====================== RESUMO FINAL ======================
@@ -2901,6 +3253,8 @@ echo -e "${GREEN}  PROCESSO CONCLUÍDO — $(date '+%d/%m/%Y %H:%M:%S')${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}📁 Resultados  : ${OUTDIR}/${NC}"
 echo -e "${CYAN}📄 Relatório   : ${OUTDIR}/relatorio_swarm.html${NC}"
+echo -e "${CYAN}📊 Exec Summary: ${OUTDIR}/sumario_executivo.html${NC}"
+echo -e "${CYAN}📦 JSON Export : ${OUTDIR}/findings.json${NC}"
 echo -e "${CYAN}📦 Dados brutos: ${OUTDIR}/raw/${NC}"
 echo ""
 
