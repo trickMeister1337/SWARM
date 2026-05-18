@@ -1,0 +1,57 @@
+# SWARM outputs (resultados de scan — dados sensíveis)
+swarm_red_*/
+swarm_red_tmp_*/
+scan_*/
+osint_*/
+pci_scan_*/
+swarm_output/
+swarm_refactored/
+swarm_refactored.tar.gz
+
+# Scan results (sensitive)
+*.csv
+*.log
+*.json
+!package.json
+
+# Metasploit
+*.rc
+msf_output.log
+hosts.csv
+services.csv
+vulns.csv
+creds.csv
+
+# sqlmap
+sqlmap/
+
+# Hydra
+hydra/
+
+# Nikto
+nikto/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Windows alternate data streams
+*:Zone.Identifier
+*:Zone.Identifier:Zone.Identifier
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Faraday
+.faraday-cli.yml
+.faraday-cli_history
