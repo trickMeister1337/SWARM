@@ -202,7 +202,7 @@ if [ -z "$TARGET" ]; then
     echo -e "  ${YELLOW}bash swarm.sh https://target.com${NC}         — scan único"
     echo -e "  ${YELLOW}bash swarm.sh -f targets.txt${NC}             — múltiplos alvos (via swarm_batch.sh)"
     echo ""
-    echo -e "  ${YELLOW}Exemplo: bash swarm.sh https://api.bee2pay.com${NC}"
+    echo -e "  ${YELLOW}Exemplo: bash swarm.sh https://app.exemplo.com${NC}"
     exit 1
 fi
 
@@ -422,8 +422,8 @@ if [ "$_is_compound" -eq 1 ]; then
     [ "$DOMAIN_PARTS" -ge 4 ] && IS_SUBDOMAIN=1
 else
     # TLD simples (.com, .io): subdomínio tem 3+ partes
-    # bee2pay.com = 2 → raiz → rodar subfinder
-    # api.bee2pay.com = 3 → subdomínio → pular
+    # empresa.com = 2 → raiz → rodar subfinder
+    # api.empresa.com = 3 → subdomínio → pular
     [ "$DOMAIN_PARTS" -ge 3 ] && IS_SUBDOMAIN=1
 fi
 

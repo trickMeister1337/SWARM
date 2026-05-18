@@ -1,9 +1,10 @@
-# SWARM RED v7.0
+# SWARM
 
-> Motor de pentest blackbox modular — descobre, enumera e explora automaticamente aplicações web e serviços de rede. Funciona standalone ou integrado com output do SWARM.
+> Pipeline automatizado de pentest ofensivo — reconhecimento, varredura, exploração e relatório em um único comando.
 
 [![Shell](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash)](https://www.gnu.org/software/bash/)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python)](https://python.org)
+[![CI](https://github.com/trickMeister1337/SWARM/actions/workflows/ci.yml/badge.svg)](https://github.com/trickMeister1337/SWARM/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Author](https://img.shields.io/badge/Author-trickMeister1337-red)](https://github.com/trickMeister1337)
 
@@ -13,131 +14,292 @@
 
 **Uso exclusivo em ambientes com autorização formal documentada (Rules of Engagement).**
 
-O script exige confirmação `EU AUTORIZO` antes de qualquer execução ativa.
-Use apenas em sistemas que você possui ou tem permissão explícita por escrito para testar.
+Todos os scripts exigem confirmação explícita antes de qualquer execução ativa.
 Uso não autorizado é crime (Art. 154-A CP / CFAA / Computer Misuse Act).
 
 ---
 
 ## Visão Geral
 
-O SWARM RED opera em dois modos:
+O SWARM é uma suite completa de segurança ofensiva composta por quatro scripts principais que se integram em pipeline:
 
-| Modo | Comando | Quando usar |
+```
+[osint.sh] → [swarm.sh] → [swarm_red.sh] → relatório HTML
+  OSINT        Recon/Scan    Exploração
+```
+
+| Script | Função | Quando usar |
 |---|---|---|
-| **Blackbox** | `bash swarm_red.sh -t https://alvo.com` | Pentest standalone a partir de uma URL |
-| **Integração SWARM** | `bash swarm_red.sh -d scan_alvo_YYYYMMDD/` | Exploração dirigida por scan SWARM existente |
-
-Em modo Blackbox, o SWARM RED executa todas as 8 fases autonomamente — do recon até o relatório.
-Em modo Integração, consome os findings do SWARM (nuclei, nmap, ZAP) e direciona a exploração com maior precisão.
+| `osint.sh` | Inteligência passiva pré-engajamento | Antes de qualquer scan |
+| `swarm.sh` | Reconhecimento e varredura (11 fases) | Mapeamento da superfície |
+| `swarm_red.sh` | Exploração automatizada (8 fases) | Após recon ou standalone |
+| `pci_scan.sh` | Conformidade PCI DSS 4.0.1 | Ambientes de pagamento |
+| `swarm_batch.sh` | Wrapper multi-alvo para `swarm.sh` | Múltiplos alvos em série |
+| `swarm_diff.py` | Comparação entre dois scans | Rastreamento de remediação |
 
 ---
 
-## Pipeline de 8 Fases
+## Últimas Atualizações
+
+### v7.0 — Blackbox Engine + CI/CD (Mai 2026)
+
+- **`swarm_red.sh` refatorado em arquitetura modular** — orquestrador thin de 845 linhas delegando para 7 módulos independentes em `lib/` (recon, crawl, sqli, xss, brute, msf, web)
+- **Notificações ao finalizar scan** — suporte a Telegram, Slack e Microsoft Teams via variáveis de ambiente; disparadas ao término de `swarm.sh` e `swarm_red.sh`
+- **`swarm_diff.py` integrado ao pipeline** — ao finalizar cada scan, `swarm_red.sh` detecta automaticamente o scan anterior do mesmo domínio e gera relatório de diff (novos/corrigidos/persistentes)
+- **CI/CD com GitHub Actions** — syntax check (`bash -n`) em todos os scripts + 42 testes unitários Python em cada push/PR
+- **Testes expandidos de 18 para 42** — adicionadas classes `TestIngest` (11 testes) e `TestPocGenerator` (10 testes); bug real corrigido em `evidence.py` (falso-positivo de tabela sqlmap)
+- **`osint.sh` e `pci_scan.sh` publicados** no repositório principal
+- **`swarm_batch.sh` e `swarm_diff.py`** incorporados da branch de desenvolvimento
+- **`lib/evidence.py`** — adicionadas funções `is_valid_url` e `strip_ansi`; filtro de timestamps falsos na extração de tabelas
+
+---
+
+## `osint.sh` — Inteligência Pré-Engajamento
+
+Coleta passiva/semi-ativa executada **antes** do `swarm.sh`. Produz um mapa de superfície completo sem disparar alertas no alvo.
+
+### Pipeline de 10 Fases
+
+| Fase | Módulo | O que faz |
+|---|---|---|
+| 1 | Domain Intelligence | WHOIS, DNS, crt.sh, SPF/DMARC/DKIM, ASN |
+| 2 | Subdomain Discovery | subfinder + amass + crt.sh + dnsx |
+| 3 | Email & Employee Harvesting | theHarvester + Hunter.io |
+| 4 | Historical URLs | waybackurls + gau + endpoints dinâmicos |
+| 5 | GitHub Dorking | trufflehog + GitHub Search API |
+| 6 | Leaked Credentials | HaveIBeenPwned API v3 |
+| 7 | Shodan Intelligence | hostname search + CVEs por IP |
+| 8 | Cloud Surface | S3/Azure buckets + subdomain takeover |
+| 9 | Build outputs | targets_enriched.txt + osint_summary.json |
+| 10 | Relatório HTML | osint_report.html |
+
+```bash
+# Básico
+bash osint.sh alvo.com
+
+# Com APIs externas
+bash osint.sh alvo.com \
+    --shodan-key $SHODAN_KEY \
+    --hibp-key $HIBP_KEY \
+    --github-token $GITHUB_TOKEN
+
+# Pular confirmação RoE (CI/CD)
+bash osint.sh alvo.com --no-roe
+```
+
+**Arquivos gerados:**
+
+| Arquivo | Uso |
+|---|---|
+| `targets_enriched.txt` | Subdomínios + IPs para `--osint-dir` no swarm.sh |
+| `leaked_creds.csv` | Contas vazadas para hydra no swarm_red.sh |
+| `osint_summary.json` | Metadados legíveis por máquina |
+| `osint_report.html` | Relatório completo |
+
+---
+
+## `swarm.sh` — Reconhecimento e Varredura
+
+Pipeline de 11 fases que mapeia a superfície de ataque completa, valida vulnerabilidades e gera relatório HTML.
+
+### Pipeline de 11 Fases
 
 ```
-  ┌─────────────────────────────────────────────────────────────┐
-  │                   SWARM RED v7.0                            │
-  │                                                             │
-  │  [1] RECON       subfinder → subdomínios                    │
-  │       ↓          httpx    → hosts ativos                    │
-  │  [2] SURFACE     nmap     → portas/serviços/versões         │
-  │       ↓                                                     │
-  │  [3] CRAWL       katana   → endpoints + JS                  │
-  │       ↓          ffuf     → directory fuzzing               │
-  │  [4] INGEST      Scorer   → priorização por parâmetros      │
-  │       ↓          CVEs     → extração de nuclei/ZAP          │
-  │  [5] SQLi        sqlmap   → testes com tamper adaptativo    │
-  │       ↓                                                     │
-  │  [6] XSS         dalfox   → XSS paralelo por URL            │
-  │       ↓                                                     │
-  │  [7] BRUTE       hydra    → SSH/FTP/MySQL/RDP/SMB           │
-  │       ↓                                                     │
-  │  [8] SERVICES    nikto    → web vuln scanner                │
-  │       ↓          msfconsole → exploits por CVE              │
-  │       ↓          searchsploit → lookup local                │
-  │       ↓                                                     │
-  │  [REL] RELATÓRIO → HTML Big4-style + MITRE ATT&CK           │
-  └─────────────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────┐
+  │                    SWARM — Consultant Edition                │
+  │                                                              │
+  │  [1]  Subdomain Discovery   subfinder                        │
+  │  [2]  Surface Mapping       httpx + nmap                     │
+  │  [3]  TLS Analysis          testssl (paralelo com nuclei)    │
+  │  [4]  Vulnerability Scan    nuclei (CVE + exposure + tech)   │
+  │  [5]  PoC Confirmation      poc_validator.py (min 60%)       │
+  │  [6]  CVE Enrichment        NVD API v2 + EPSS + CISA KEV     │
+  │  [7]  WAF Detection         wafw00f + evasão passiva         │
+  │  [8]  Email Security        SPF / DMARC / DKIM               │
+  │  [9]  ZAP Active Scan       Spider + Ajax + Active Scan      │
+  │  [10] JS Analysis           katana + trufflehog + ffuf       │
+  │  [11] Relatório             HTML + sumário executivo + JSON  │
+  └──────────────────────────────────────────────────────────────┘
 ```
 
-### Fase 1 — Recon (somente Blackbox)
-Subfinder enumera subdomínios. httpx filtra hosts ativos com detecção de tecnologia e status code. Popula `recon/subdomains.txt` e `data/live_hosts.txt`.
+```bash
+# Básico
+bash swarm.sh https://alvo.com
 
-### Fase 2 — Surface
-Nmap (`-sV -O --open -T4`) em todos os hosts ativos. Em modo Integração, reutiliza `nmap.txt` existente do SWARM.
+# Com output OSINT
+bash swarm.sh https://alvo.com --osint-dir osint_alvo.com_*/
 
-### Fase 3 — Crawl (somente Blackbox)
-katana com crawling JavaScript (`-jc -kf all -fx`). ffuf com wordlist SecLists ou fallback interno. Consolida todas as URLs em `crawl/all_urls.txt`.
+# Multi-alvo
+bash swarm_batch.sh -f targets.txt -p staging
 
-### Fase 4 — Ingestão e Priorização
-Scorer inline em Python. URLs pontuadas por: parâmetros sensíveis (`id`, `user`, `token`, `cmd`, `redirect`...) +5, path crítico (`/api`, `/admin`, `/auth`...) +4, múltiplos parâmetros +3, presença de `?` +2, em escopo +1. Arquivos de mídia filtrados.
+# Scan autenticado
+bash swarm.sh https://alvo.com --token "eyJ..."
 
-### Fase 5 — SQL Injection
-sqlmap com tamper scripts (`space2comment`, `between`, `charencode`). Confirmação real via parsing de `identified the following injection point`. Salva evidências completas (DBMS, usuário, tabelas, dados dumpados) no CSV.
+# Docker
+docker run --rm -v $(pwd)/output:/swarm/output \
+    trickmeister1337/swarm https://alvo.com
+```
 
-### Fase 6 — XSS
-dalfox em paralelo com workers configuráveis. Output JSON consolidado. Confirma via `--silence --no-color --format json`. Mapeia parâmetro + payload confirmado.
+**Output gerado:**
 
-### Fase 7 — Brute Force
-Hydra em todos os serviços open (SSH, FTP, MySQL, PostgreSQL, RDP, SMB). Duas rodadas: senhas comuns primeiro, depois rockyou/fasttrack no perfil lab/staging.
+| Arquivo | Conteúdo |
+|---|---|
+| `relatorio_swarm.html` | Relatório técnico completo com evidências e curl reproduzível |
+| `sumario_executivo.html` | Página única de risco para gestão |
+| `findings.json` | Export estruturado para SIEM/Jira |
+| `raw/` | nuclei JSONL, ZAP alerts, TLS issues, JS analysis |
 
-### Fase 8 — Services + Relatório
-Nikto filtrado por severidade. Metasploit com resource script auto-gerado por CVE. SearchSploit para lookup local. Relatório HTML Big4-style com seções MITRE ATT&CK.
+---
+
+## `swarm_red.sh` — Exploração Automatizada
+
+Motor de exploração que opera em dois modos: **Blackbox** (standalone a partir de uma URL) ou **Integração** (consumindo output do `swarm.sh`).
+
+### Pipeline de 8 Fases
+
+```
+  ┌──────────────────────────────────────────────────────────────┐
+  │                    SWARM RED v7.0                            │
+  │                                                              │
+  │  [1] RECON       subfinder → subdomínios                     │
+  │       ↓          httpx    → hosts ativos                     │
+  │  [2] SURFACE     nmap     → portas/serviços/versões          │
+  │       ↓                                                      │
+  │  [3] CRAWL       katana   → endpoints + JS                   │
+  │       ↓          ffuf     → directory fuzzing                │
+  │  [4] INGEST      Scorer   → priorização por parâmetros       │
+  │       ↓          CVEs     → extração de nuclei/ZAP           │
+  │  [5] SQLi        sqlmap   → testes com tamper adaptativo     │
+  │       ↓                                                      │
+  │  [6] XSS         dalfox   → paralelo por URL                 │
+  │       ↓                                                      │
+  │  [7] BRUTE       hydra    → SSH/FTP/MySQL/RDP/SMB            │
+  │       ↓                                                      │
+  │  [8] SERVICES    nikto + msfconsole + searchsploit           │
+  │       ↓                                                      │
+  │  [REL] RELATÓRIO HTML Big4-style + auto-diff com scan anterior│
+  └──────────────────────────────────────────────────────────────┘
+```
+
+```bash
+# Blackbox standalone
+bash swarm_red.sh -t https://alvo.com -p staging
+
+# Integração com output do swarm.sh
+bash swarm_red.sh -d scan_alvo.com_20260514_120000/
+
+# Com escopo e autenticação
+bash swarm_red.sh -t https://alvo.com \
+    --scope-file escopo.txt \
+    --auth-cookie "session=abc123" \
+    --auth-header "Authorization: Bearer <token>"
+
+# Apenas SQLi e XSS, sem brute force
+bash swarm_red.sh -t https://alvo.com --only sqli,xss
+
+# Simulação sem executar
+bash swarm_red.sh -t https://alvo.com --dry-run
+
+# Retomar scan interrompido
+bash swarm_red.sh -t https://alvo.com --resume \
+    --output-dir swarm_red_alvo_20260514_120000
+```
+
+### Perfis de Execução
+
+| Parâmetro | `lab` | `staging` | `production` |
+|---|---|---|---|
+| sqlmap level/risk | 5 / 3 | 3 / 2 | 1 / 1 |
+| sqlmap threads | 10 | 5 | 1 |
+| Brute force | ✅ | ✅ | ❌ |
+| Nikto | ✅ | ✅ | ❌ |
+| MSF payload | reverse_tcp | reverse_tcp | NONE |
+| XSS workers | 5 | 3 | 1 |
+| Max exploits | 999 | 50 | 10 |
+
+**`lab`** — Ambiente descartável. Sem restrições.  
+**`staging`** — Homologação/pré-produção. Agressividade alta com limites razoáveis.  
+**`production`** — Janela de manutenção aprovada. Impacto mínimo, sem dump, sem brute force.
+
+---
+
+## `pci_scan.sh` — Conformidade PCI DSS 4.0.1
+
+Scanner de conformidade que cobre requisitos 1.3, 2.2, 3.5, 4.2.1, 6.x, 8.x, 11.x e 12.5.2.
+
+> **Não substitui** ASV scan externo (Req 11.3.2) nem pentest humano (Req 11.4).
+
+```bash
+bash pci_scan.sh https://alvo.com
+```
+
+---
+
+## `swarm_diff.py` — Rastreamento de Remediação
+
+Compara dois diretórios de scan e classifica vulnerabilidades em novas, corrigidas e persistentes. Integrado automaticamente ao final de cada execução do `swarm_red.sh`.
+
+```bash
+# Manual
+python3 swarm_diff.py scan_alvo_anterior/ scan_alvo_novo/
+
+# Com relatório HTML
+python3 swarm_diff.py scan_anterior/ scan_novo/ --html
+```
+
+Output:
+- Terminal colorido com contadores por severidade
+- `swarm_diff_<timestamp>.html` com tabelas e KPIs de remediação
+
+---
+
+## Notificações
+
+`swarm.sh` e `swarm_red.sh` enviam notificação ao finalizar. Configure via variáveis de ambiente:
+
+```bash
+# Telegram
+export SWARM_TELEGRAM_TOKEN="<bot_token>"
+export SWARM_TELEGRAM_CHAT="<chat_id>"
+
+# Microsoft Teams (legacy connector ou Power Automate Workflow)
+export SWARM_TEAMS_WEBHOOK="https://outlook.office.com/webhook/..."
+
+# Slack / webhook genérico
+export SWARM_NOTIFY_WEBHOOK="https://hooks.slack.com/..."
+```
+
+Todos os canais são independentes — você pode ter Telegram **e** Teams ativos ao mesmo tempo.
+
+**Como obter a URL do Teams:**  
+Canal → `⋯` → `Connectors` → `Incoming Webhook` (legacy)  
+ou Canal → `Workflows` → `Post to a channel when a webhook request is received` (Power Automate)
 
 ---
 
 ## Instalação
 
-### Requisitos de Sistema
+### Requisitos
 
-- Linux (Ubuntu/Debian/Kali) ou WSL2 (Ubuntu 20.04+)
-- bash ≥ 4.4
-- Python 3.8+
-- Go 1.21+ (para ferramentas ProjectDiscovery)
+- Linux (Ubuntu 22.04+, Debian 12, Kali) ou WSL2
+- bash ≥ 4.4, Python 3.8+, Go 1.21+
 
-### Instalação Automática (recomendado)
+### Automática (recomendado)
 
 ```bash
-git clone https://github.com/trickMeister1337/SWARM-RED.git
-cd SWARM-RED
+git clone https://github.com/trickMeister1337/SWARM.git
+cd SWARM
 bash setup.sh
 ```
 
-O `setup.sh` detecta automaticamente sua distribuição Linux e instala todas as dependências:
+O `setup.sh` detecta a distribuição (apt / dnf / pacman / zypper) e instala:
 
-| Distro | Gerenciador |
-|---|---|
-| Ubuntu / Debian / Kali | `apt-get` |
-| Fedora / RHEL | `dnf` |
-| Arch / Manjaro | `pacman` |
-| openSUSE | `zypper` |
-
-**O que é instalado:**
-- Ferramentas de sistema: `nmap`, `hydra`, `nikto`, `sqlmap`, `curl`, `jq`, `git`, `python3-pip`
-- Go (detecta amd64/arm64, baixa binário oficial se não instalado via pkg manager)
-- Ferramentas Go: `subfinder`, `httpx`, `katana`, `nuclei`, `ffuf`, `dalfox`, `waybackurls`
-- Python: `arjun` (via pip3 com `--break-system-packages` para Ubuntu 22.04+)
-- Metasploit Framework (via repositório oficial)
-- Wordlist: SecLists em `/opt/SecLists`
-
-### Instalação Manual (dependências individuais)
-
-```bash
-# Ferramentas Go
-go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-go install -v github.com/projectdiscovery/katana/cmd/katana@latest
-go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-go install -v github.com/ffuf/ffuf/v2@latest
-go install -v github.com/hahwul/dalfox/v2@latest
-
-# Python
-pip3 install arjun --break-system-packages
-
-# Adicionar Go ao PATH (inclua no ~/.bashrc ou ~/.zshrc)
-export PATH="$HOME/go/bin:$HOME/.local/bin:$PATH"
-```
+- Sistema: `nmap`, `hydra`, `nikto`, `sqlmap`, `curl`, `jq`, `testssl.sh`
+- Go tools: `subfinder`, `httpx`, `katana`, `nuclei`, `ffuf`, `dalfox`, `waybackurls`
+- Python: `wafw00f`, `trufflehog`, `arjun`
+- Metasploit Framework (repositório oficial)
+- OWASP ZAP (snap)
+- SecLists em `/opt/SecLists`
 
 ### Atualizar ferramentas
 
@@ -150,272 +312,150 @@ go install -v github.com/hahwul/dalfox/v2@latest
 
 ---
 
-## Uso
-
-### Modo Blackbox (standalone)
+## Fluxo completo recomendado
 
 ```bash
-# Básico
-bash swarm_red.sh -t https://alvo.com
+# 1. OSINT pré-engajamento
+bash osint.sh alvo.com --shodan-key $KEY --github-token $TOKEN
 
-# Com perfil e autenticação
-bash swarm_red.sh -t https://alvo.com -p staging \
-    --auth-cookie "session=abc123; csrf=xyz" \
-    --auth-header "Authorization: Bearer <token>"
+# 2. Recon e varredura com contexto OSINT
+bash swarm.sh https://alvo.com --osint-dir osint_alvo.com_*/
 
-# Escopo explícito (múltiplos domínios)
-bash swarm_red.sh -t https://alvo.com \
-    --scope api.alvo.com \
-    --scope app.alvo.com
+# 3. Exploração dirigida pelos findings do scan
+bash swarm_red.sh -d scan_alvo.com_*/ -p staging
 
-# Escopo via arquivo
-bash swarm_red.sh -t https://alvo.com --scope-file escopo.txt
+# 4. Segunda rodada → swarm_diff gerado automaticamente
+bash swarm_red.sh -d scan_alvo.com_*/ -p staging
 
-# Apenas fases específicas
-bash swarm_red.sh -t https://alvo.com --only sqli,xss
-
-# Pular fases
-bash swarm_red.sh -t https://alvo.com --skip brute,services
-
-# Simular sem executar (dry-run)
-bash swarm_red.sh -t https://alvo.com --dry-run
-
-# Retomar após interrupção
-bash swarm_red.sh -t https://alvo.com --resume --output-dir swarm_red_alvo_20260514_120000
-
-# Output em diretório customizado
-bash swarm_red.sh -t https://alvo.com --output-dir /mnt/pentest/alvo
+# 5. Higiene pós-scan
+tar czf resultados.tar.gz swarm_red_*/ scan_*/ osint_*/
+gpg -c resultados.tar.gz
+shred -vfz resultados.tar.gz
+rm -rf swarm_red_*/ scan_*/ osint_*/
 ```
-
-### Modo Integração SWARM
-
-```bash
-# Após um scan SWARM
-bash swarm_red.sh -d scan_alvo.com_20260514_120000
-
-# Com perfil de produção
-bash swarm_red.sh -d scan_alvo.com_20260514_120000 -p production
-
-# Sem Metasploit
-bash swarm_red.sh -d scan_alvo.com_20260514_120000 --no-msf
-
-# LHOST customizado para payloads Metasploit
-bash swarm_red.sh -d scan_alvo.com_20260514_120000 --lhost 10.10.10.5 --lport 9001
-```
-
-### Referência completa de opções
-
-```
-SWARM RED v7.0 — Blackbox Pentest Engine
-
-MODOS:
-  bash swarm_red.sh -t https://target.com [-p profile]  # Blackbox
-  bash swarm_red.sh -d scan_dir           [-p profile]  # Integração SWARM
-
-OPÇÕES:
-  -t, --target URL          URL alvo (modo blackbox)
-  -d, --dir SCAN_DIR        Diretório de scan SWARM (modo integração)
-  -p, --profile PROFILE     lab | staging | production  (padrão: lab)
-  --scope DOMAIN            Domínio em escopo (pode repetir)
-  --scope-file FILE         Arquivo com domínios/IPs em escopo (um por linha)
-  --auth-cookie COOKIE      Cookie de autenticação ("session=abc123")
-  --auth-header HEADER      Header de auth ("Authorization: Bearer token")
-  --skip FASES              Fases a pular (vírgula): recon,surface,crawl,sqli,xss,brute,services
-  --only FASES              Executar apenas estas fases (vírgula)
-  --dry-run                 Simular sem executar ferramentas
-  --resume                  Retomar do último checkpoint
-  --no-msf                  Desabilitar Metasploit
-  --lhost IP                IP para payloads Metasploit (padrão: auto-detect)
-  --lport PORT              Porta Metasploit (padrão: 4444)
-  --threads N               Override de threads por fase
-  --output-dir DIR          Diretório de saída customizado
-```
-
----
-
-## Perfis de Execução
-
-Configurados em `lib/profiles.conf`. Selecione com `-p <perfil>`.
-
-| Parâmetro | lab | staging | production |
-|---|---|---|---|
-| sqlmap level | 5 | 3 | 1 |
-| sqlmap risk | 3 | 2 | 1 |
-| sqlmap threads | 10 | 5 | 1 |
-| sqlmap dump | ✅ | ✅ | ❌ |
-| MSF payload | reverse_tcp | reverse_tcp | NONE |
-| Brute force | ✅ | ✅ | ❌ |
-| Nikto | ✅ | ✅ | ❌ |
-| XSS workers | 5 | 3 | 1 |
-| Recon threads | 100 | 50 | 20 |
-| Crawl depth | 5 | 3 | 2 |
-| Max exploits | 999 | 50 | 10 |
-
-**lab** — Ambiente descartável, sem restrições. Use em VMs isoladas ou labs de treinamento.
-
-**staging** — Homologação/pré-produção. Agressividade alta mas com limites razoáveis.
-
-**production** — Janela de manutenção aprovada. Impacto mínimo, apenas confirmação de vulnerabilidades críticas. Sem brute force, sem dump de dados.
-
----
-
-## Estrutura de Output
-
-```
-swarm_red_alvo.com_20260514_120000/
-├── data/
-│   ├── live_hosts.txt          # Hosts ativos (recon)
-│   ├── nmap.txt                # Output nmap completo
-│   ├── open_services.txt       # Portas abertas (port/proto/service)
-│   ├── targets_scored.txt      # URLs priorizadas (score|url)
-│   ├── cves_found.txt          # CVEs extraídos do nuclei
-│   └── zap_high_crit.txt       # Findings ZAP High/Critical
-├── recon/
-│   ├── subdomains.txt          # Subdomínios descobertos
-│   └── live_hosts_httpx.txt    # httpx output com tech-detect
-├── crawl/
-│   ├── katana_urls.txt         # URLs do katana
-│   ├── ffuf_results.json       # Output raw do ffuf
-│   └── all_urls.txt            # URLs consolidadas
-├── sqlmap/
-│   └── <hash>_output.log       # Log por URL testada
-├── xss/
-│   ├── xss_confirmed.txt       # XSS confirmados (XSS|HIGH|url|param|payload)
-│   └── xss_all_results.json    # Output dalfox consolidado
-├── hydra/
-│   └── <service>_<port>.log    # Log hydra por serviço
-├── nikto/
-│   └── nikto_filtered.json     # Findings filtrados por severidade
-├── metasploit/
-│   ├── swarm_red.rc            # Resource script gerado
-│   ├── msf_output.log          # Output bruto msfconsole
-│   ├── hosts.csv               # Hosts confirmados
-│   ├── services.csv            # Serviços confirmados
-│   ├── vulns.csv               # Vulnerabilidades confirmadas
-│   └── creds.csv               # Credenciais encontradas
-├── searchsploit/
-│   └── CVE-XXXX-XXXXX.json     # Lookup por CVE
-├── exploits_confirmed.csv       # Todos os findings confirmados
-│                                # Formato: TYPE|SEV|TARGET|detail...
-├── swarm_red.log                # Log cronológico completo (trilha de auditoria)
-├── .swarm_red_state             # Checkpoints de fase (para --resume)
-└── relatorio_swarm_red.html     # Relatório HTML Big4-style
-```
-
-### Formato do exploits_confirmed.csv
-
-```
-SQLI|CRITICAL|https://alvo.com/login?id=1|DBMS=MySQL|Type=UNION|<logfile>
-XSS|HIGH|https://alvo.com/search?q=<script>|param=q|payload=<svg/onload=alert(1)>
-BRUTE|HIGH|ssh://alvo.com:22|user=admin|pass=admin123
-```
-
----
-
-## Relatório
-
-O relatório HTML gerado (`relatorio_swarm_red.html`) é estruturado no padrão Big4 com:
-
-- **Badge de modo** (BLACKBOX / SWARM) e perfil de execução
-- **Sumário executivo** com métricas de cobertura
-- **Superfície de ataque** — subdomínios, portas, serviços, tecnologias
-- **Narrativa de ataque** — linha do tempo das fases executadas
-- **Findings confirmados** — com evidência técnica, CVSS, MITRE ATT&CK
-- **Análise de CVEs** — com EPSS e KEV quando disponível
-- **Análise ZAP** — findings High/Critical do OWASP ZAP
-- **Brute force** — credenciais encontradas por serviço
-- **Nikto** — web vulnerabilities filtradas por severidade
-- **Recomendações** — por categoria de vulnerabilidade
 
 ---
 
 ## Arquitetura
 
 ```
-swarm-red/
-├── swarm_red.sh          # Orquestrador principal (thin)
-├── setup.sh              # Instalador universal multi-distro
-├── test_swarm_red.sh     # Suite de testes (55 testes)
+SWARM/
+├── swarm.sh                  # Scanner principal (11 fases)
+├── swarm_red.sh              # Engine de exploração (8 fases)
+├── osint.sh                  # OSINT pré-engajamento (10 fases)
+├── pci_scan.sh               # Conformidade PCI DSS 4.0.1
+├── swarm_batch.sh            # Wrapper multi-alvo
+├── swarm_diff.py             # Comparação entre scans
+├── setup.sh                  # Instalador universal
+├── test_lib.py               # 42 testes unitários Python
+├── test_swarm_red.sh         # Testes de integração bash
 ├── lib/
-│   ├── recon.sh          # Fase 1: subfinder + httpx
-│   ├── crawl.sh          # Fase 3: katana + ffuf
-│   ├── sqli.sh           # Fase 5: sqlmap
-│   ├── xss.sh            # Fase 6: dalfox
-│   ├── brute.sh          # Fase 7: hydra
-│   ├── msf.sh            # Fase 8: metasploit
-│   ├── web.sh            # Fase 8: nikto
-│   ├── evidence.py       # Coleta e consolidação de evidências
-│   ├── report_generator.py  # Geração do relatório HTML
-│   └── profiles.conf     # Configuração de perfis (arrays bash)
-└── LICENSE
+│   ├── recon.sh              # subfinder + httpx
+│   ├── crawl.sh              # katana + ffuf
+│   ├── sqli.sh               # sqlmap
+│   ├── xss.sh                # dalfox
+│   ├── brute.sh              # hydra
+│   ├── msf.sh                # metasploit
+│   ├── web.sh                # nikto
+│   ├── ingest.py             # Priorização de URLs por score
+│   ├── evidence.py           # Extração de evidências sqlmap/ZAP
+│   ├── parsers.py            # Parse de nuclei JSONL e ZAP JSON
+│   ├── poc_generator.py      # Geração de PoCs reproduzíveis
+│   ├── poc_validator.py      # Validação ativa (min 60% confiança)
+│   ├── report_generator.py   # Relatório HTML Big4-style
+│   ├── cve_enricher.py       # NVD API v2 + EPSS + CISA KEV
+│   ├── header_check.py       # Verificação de security headers
+│   └── profiles.conf         # Perfis de execução (arrays bash)
+├── profiles/
+│   ├── lab.conf
+│   ├── staging.conf
+│   └── production.conf
+└── .github/
+    └── workflows/
+        └── ci.yml            # Syntax check + pytest em cada push
 ```
 
-Cada fase é um módulo independente: pode ser testado isoladamente, substituído ou desabilitado via `--skip`. O orquestrador chama cada módulo com parâmetros explícitos (sem variáveis globais entre módulos).
+### Módulos Python — responsabilidades
 
-### Sistema de Checkpoints
-
-Cada fase grava seu estado em `.swarm_red_state`. Com `--resume`, fases já concluídas são puladas automaticamente. Útil quando a execução é interrompida:
-
-```bash
-# Scan interrompido na fase XSS
-bash swarm_red.sh -t https://alvo.com --resume --output-dir swarm_red_alvo_20260514/
-# → recon, surface, crawl, sqli já concluídos são pulados
-# → retoma na fase XSS
-```
+| Módulo | Responsabilidade |
+|---|---|
+| `ingest.py` | Lê output do swarm.sh (findings.json, nuclei, ZAP, nmap) e produz listas priorizadas por score para cada fase de exploração |
+| `evidence.py` | Extrai evidência estruturada dos logs sqlmap; funções `is_valid_url` e `strip_ansi` |
+| `parsers.py` | Parse de nuclei JSONL, ZAP JSON, extração de URLs e CVEs com filtros de domínio externo e parâmetros HTTP |
+| `poc_generator.py` | Gera PoCs reproduzíveis (curl time-based, boolean, CORS) e `poc/verify.sh` para times de desenvolvimento |
+| `poc_validator.py` | Reexecuta cada finding via curl com threshold mínimo de 60% de confiança |
+| `report_generator.py` | Gera `relatorio_swarm_red.html` no padrão Big4 com seções MITRE ATT&CK |
+| `cve_enricher.py` | Enriquecimento NVD/EPSS/KEV com cache diário |
 
 ---
 
-## Uso Corporativo
+## CI/CD
 
-### Multi-alvo sequencial
+Cada push ou PR para `main` dispara dois jobs em paralelo:
 
-```bash
-# Arquivo targets.txt com um alvo por linha
-while IFS= read -r target; do
-    [[ -z "$target" || "$target" == "#"* ]] && continue
-    echo "EU AUTORIZO" | bash swarm_red.sh -t "$target" -p staging --output-dir "results/$(date +%Y%m%d)/$target"
-    sleep 30
-done < targets.txt
+```yaml
+syntax:       bash -n em swarm.sh, swarm_red.sh, osint.sh, pci_scan.sh,
+              setup.sh, swarm_batch.sh e todos os lib/*.sh
+unit-tests:   python3 -m pytest test_lib.py (42 testes)
 ```
 
-### Integração com CI/CD (dry-run de validação)
-
-```bash
-bash swarm_red.sh -t https://staging.app.com --dry-run | grep -E "FAIL|ERROR" && exit 1 || exit 0
-```
-
-### Escopo restrito (subdomain em escopo específico)
-
-```bash
-cat > escopo.txt << 'EOF'
-api.empresa.com
-app.empresa.com
-admin.empresa.com
-EOF
-
-bash swarm_red.sh -t https://empresa.com \
-    --scope-file escopo.txt \
-    -p production \
-    --skip brute
-```
+Status visível em: `https://github.com/trickMeister1337/SWARM/actions`
 
 ---
 
 ## Testes
 
 ```bash
-# Suite completa (55 testes)
+# Testes unitários Python (42 testes)
+python3 -m pytest test_lib.py -v
+
+# Suite bash (integração)
 bash test_swarm_red.sh
 
-# Verificação de sintaxe individual
-bash -n swarm_red.sh && echo OK
-bash -n lib/sqli.sh && echo OK
+# Syntax check manual
+bash -n swarm.sh && bash -n swarm_red.sh && bash -n osint.sh
 
-# Teste de dry-run blackbox
+# Dry-run completo
 echo "EU AUTORIZO" | bash swarm_red.sh -t https://example.com --dry-run
+```
 
-# Teste de dry-run SWARM integration
-bash swarm_red.sh -d scan_target_20260514_120000/ --dry-run
+---
+
+## Estrutura de Output
+
+### `swarm_red.sh`
+
+```
+swarm_red_alvo.com_20260514_120000/
+├── data/
+│   ├── live_hosts.txt          # Hosts ativos
+│   ├── nmap.txt                # Output nmap completo
+│   ├── open_services.txt       # Portas abertas
+│   ├── targets_scored.txt      # URLs priorizadas (score|url)
+│   └── cves_found.txt          # CVEs extraídos
+├── crawl/                      # URLs katana + ffuf
+├── sqlmap/                     # Logs por URL testada
+├── xss/                        # XSS confirmados
+├── hydra/                      # Logs hydra por serviço
+├── metasploit/                 # Resource script + outputs
+├── searchsploit/               # Lookup por CVE
+├── exploits_confirmed.csv      # Todos os findings confirmados
+├── swarm_red.log               # Log cronológico (trilha de auditoria)
+└── relatorio_swarm_red.html    # Relatório HTML final
+```
+
+### `swarm.sh`
+
+```
+scan_alvo.com_20260514_120000/
+├── raw/
+│   ├── nuclei.json             # Findings nuclei (JSONL)
+│   ├── zap_alerts.json         # Alerts ZAP
+│   ├── nmap.txt                # Output nmap
+│   └── tls_issues.txt          # Problemas TLS (testssl)
+├── relatorio_swarm.html        # Relatório técnico completo
+├── sumario_executivo.html      # Sumário de risco para gestão
+└── findings.json               # Export para SIEM/Jira
 ```
 
 ---
@@ -424,27 +464,32 @@ bash swarm_red.sh -d scan_target_20260514_120000/ --dry-run
 
 ### Obrigatórias
 
-| Ferramenta | Versão | Propósito |
-|---|---|---|
-| `bash` | ≥ 4.4 | Runtime (arrays associativos) |
-| `python3` | ≥ 3.8 | Scoring, evidências, relatório |
-| `curl` | qualquer | Verificações HTTP |
+| Ferramenta | Versão mínima |
+|---|---|
+| bash | 4.4 |
+| python3 | 3.8 |
+| curl | qualquer |
 
-### Opcionais (fase desabilitada graciosamente se ausente)
+### Opcionais por fase
 
 | Ferramenta | Fase | Instalação |
 |---|---|---|
-| `subfinder` | Recon | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` |
-| `httpx` | Recon / Surface | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` |
-| `nmap` | Surface | `apt install nmap` |
-| `katana` | Crawl | `go install github.com/projectdiscovery/katana/cmd/katana@latest` |
-| `ffuf` | Crawl | `go install github.com/ffuf/ffuf/v2@latest` |
-| `sqlmap` | SQLi | `apt install sqlmap` |
-| `dalfox` | XSS | `go install github.com/hahwul/dalfox/v2@latest` |
-| `hydra` | Brute Force | `apt install hydra` |
-| `nikto` | Web Scanner | `apt install nikto` |
-| `msfconsole` | Metasploit | `bash setup.sh` (instala via repositório oficial) |
-| `searchsploit` | CVE lookup | `apt install exploitdb` |
+| subfinder | Recon | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` |
+| httpx | Recon / Surface | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` |
+| nmap | Surface | `apt install nmap` |
+| katana | Crawl | `go install github.com/projectdiscovery/katana/cmd/katana@latest` |
+| nuclei | Varredura | `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest` |
+| ffuf | Crawl | `go install github.com/ffuf/ffuf/v2@latest` |
+| sqlmap | SQLi | `apt install sqlmap` |
+| dalfox | XSS | `go install github.com/hahwul/dalfox/v2@latest` |
+| hydra | Brute Force | `apt install hydra` |
+| nikto | Web Scanner | `apt install nikto` |
+| msfconsole | Metasploit | `bash setup.sh` |
+| testssl.sh | TLS | `apt install testssl` |
+| wafw00f | WAF Detection | `pip3 install wafw00f` |
+| zaproxy | ZAP Active Scan | `snap install zaproxy --classic` |
+| trufflehog | Secrets | `pip3 install trufflehog` |
+| searchsploit | CVE lookup | `apt install exploitdb` |
 
 ---
 
@@ -454,4 +499,4 @@ MIT — veja [LICENSE](LICENSE).
 
 ---
 
-*SWARM RED v7.0 — Para uso exclusivo em atividades de segurança ofensiva autorizadas.*
+*Para uso exclusivo em atividades de segurança ofensiva autorizadas.*
