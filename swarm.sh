@@ -34,6 +34,13 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 ZAP_PORT=${ZAP_PORT:-8080}
 ZAP_HOST="127.0.0.1"
 ZAP_STARTED_BY_SCRIPT=0
+# Em modo paralelo (SWARM_BATCH=1), cada worker usa dir ZAP isolado para evitar conflito de lock/config
+if [ "${SWARM_BATCH:-0}" -eq 1 ]; then
+    ZAP_HOME="$HOME/.ZAP_${ZAP_PORT}"
+    mkdir -p "$ZAP_HOME"
+else
+    ZAP_HOME="$HOME/.ZAP"
+fi
 ZAP_SPIDER_TIMEOUT=600           # segundos; 0 = sem timeout
 ZAP_SCAN_TIMEOUT=1200            # segundos; 0 = sem timeout
 NUCLEI_RATE_LIMIT=50
@@ -1210,16 +1217,19 @@ if command -v zaproxy &>/dev/null; then
     else
         echo -e "  ${BLUE}[…] Preparando ambiente ZAP...${NC}"
 
-        # Limpar instâncias travadas e lock file
-        pkill -9 -f "zap-.*\.jar" 2>/dev/null
-        pkill -9 -f zaproxy 2>/dev/null
+        # Limpar apenas a instância ZAP nesta porta (safe para modo paralelo)
+        fuser -k "${ZAP_PORT}/tcp" 2>/dev/null || true
+        pkill -f "zaproxy.*-port ${ZAP_PORT}" 2>/dev/null || true
         sleep 2
-        rm -f ~/.ZAP/zap.lock 2>/dev/null
+        rm -f "${ZAP_HOME}/zap.lock" 2>/dev/null
 
         # Corrigir config.xml — adicionar 127.0.0.1 e localhost sem porta na lista de addrs
         # O ZAP 2.17 bloqueia a API para IPs não listados mesmo com api.disablekey=true
         # O arquivo real usa a tag <name> para os endereços
-        ZAP_CONFIG="$HOME/.ZAP/config.xml"
+        ZAP_CONFIG="$ZAP_HOME/config.xml"
+        # Em modo batch, copiar config base do ~/.ZAP/ se o dir for novo
+        [ ! -f "$ZAP_CONFIG" ] && [ -f "$HOME/.ZAP/config.xml" ] && \
+            cp "$HOME/.ZAP/config.xml" "$ZAP_CONFIG" 2>/dev/null || true
         if [ -f "$ZAP_CONFIG" ]; then
             cp "$ZAP_CONFIG" "${ZAP_CONFIG}.swarm_backup" 2>/dev/null
             python3 - "$ZAP_CONFIG" << 'PYFIX'
@@ -1271,6 +1281,7 @@ PYFIX
         zaproxy -daemon \
                 -host "$ZAP_HOST" \
                 -port "$ZAP_PORT" \
+                -dir  "$ZAP_HOME" \
                 -config api.disablekey=true \
                 > "$OUTDIR/raw/zap_daemon.log" 2>&1 &
 
