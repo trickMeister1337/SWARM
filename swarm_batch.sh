@@ -1,9 +1,10 @@
 #!/bin/bash
 # ==============================================================================
 # SWARM BATCH — Orquestrador de múltiplos alvos
-# Executa swarm.sh em fila sequencial com progresso em tela e relatório consolidado
-# Uso: bash swarm_batch.sh targets.txt
-#      bash swarm_batch.sh targets.txt --delay 30    (segundos entre scans)
+# Executa swarm.sh com suporte a paralelização via semáforo FIFO
+# Uso: bash swarm_batch.sh targets.txt [--delay N] [--workers N]
+#      bash swarm_batch.sh targets.txt --workers 5   (5 scans em paralelo)
+#      bash swarm_batch.sh targets.txt --delay 30    (sequencial, 30s delay)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,34 +15,37 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 # ── Argumentos ───────────────────────────────────────────────────────────────
 TARGETS_FILE=""
-DELAY_BETWEEN=15  # segundos entre scans (garante ZAP encerrado)
+DELAY_BETWEEN=15
+WORKERS=1
 
-for _arg in "$@"; do
-    case "$_arg" in
-        --delay) ;;
-        *)
-            if [[ "$_prev" == "--delay" ]]; then
-                DELAY_BETWEEN="$_arg"
-            elif [[ -z "$TARGETS_FILE" && "$_arg" != --* ]]; then
-                TARGETS_FILE="$_arg"
-            fi
-            ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --delay)   DELAY_BETWEEN="$2"; shift 2 ;;
+        --workers) WORKERS="$2";       shift 2 ;;
+        -*)        echo -e "${RED}Opção desconhecida: $1${NC}" >&2; shift ;;
+        *)         [[ -z "$TARGETS_FILE" ]] && TARGETS_FILE="$1"; shift ;;
     esac
-    _prev="$_arg"
 done
 
-
 if [ -z "$TARGETS_FILE" ]; then
-    echo -e "${RED}Uso: $0 <targets.txt> [--delay segundos]${NC}"
-    echo -e "${YELLOW}Exemplo: $0 targets.txt${NC}"
-    echo -e "${YELLOW}         $0 targets.txt --delay 30${NC}"
+    echo -e "${RED}Uso: $0 <targets.txt> [--delay N] [--workers N]${NC}"
+    echo -e "${YELLOW}Exemplos:${NC}"
+    echo -e "  $0 targets.txt"
+    echo -e "  $0 targets.txt --workers 5"
+    echo -e "  $0 targets.txt --delay 30"
     exit 1
 fi
 
 [ ! -f "$TARGETS_FILE" ] && echo -e "${RED}[✗] Arquivo não encontrado: $TARGETS_FILE${NC}" && exit 1
 [ ! -f "$SWARM" ]        && echo -e "${RED}[✗] swarm.sh não encontrado em: $SWARM${NC}" && exit 1
 
-# ── Ler alvos ────────────────────────────────────────────────────────────────
+# ── Validar --workers ─────────────────────────────────────────────────────────
+if ! [[ "$WORKERS" =~ ^[0-9]+$ ]] || [ "$WORKERS" -lt 1 ]; then
+    echo -e "${RED}[✗] --workers deve ser um inteiro >= 1${NC}"; exit 1
+fi
+[ "$WORKERS" -gt 10 ] && echo -e "${YELLOW}[!] Mais de 10 workers pode sobrecarregar o sistema${NC}"
+
+# ── Ler alvos ─────────────────────────────────────────────────────────────────
 mapfile -t TARGETS < <(
     grep -v '^\s*#' "$TARGETS_FILE" \
     | grep -v '^\s*$' \
@@ -54,15 +58,17 @@ mapfile -t TARGETS < <(
 
 TOTAL=${#TARGETS[@]}
 if [ "$TOTAL" -eq 0 ]; then
-    echo -e "${RED}[✗] Nenhum alvo válido em $TARGETS_FILE${NC}"
-    exit 1
+    echo -e "${RED}[✗] Nenhum alvo válido em $TARGETS_FILE${NC}"; exit 1
 fi
+
+# Limitar workers ao número de alvos
+[ "$WORKERS" -gt "$TOTAL" ] && WORKERS=$TOTAL
 
 # ── Diretório de batch ────────────────────────────────────────────────────────
 BATCH_TS=$(date +%Y%m%d_%H%M%S)
 BATCH_DIR="$SCRIPT_DIR/scan_batch_${BATCH_TS}"
 mkdir -p "$BATCH_DIR/logs"
-STATE_FILE="$BATCH_DIR/.state"  # rastreia resultados
+STATE_FILE="$BATCH_DIR/.state"
 
 BATCH_START=$(date +%s)
 
@@ -75,7 +81,14 @@ echo "╚═══════════════════════�
 echo -e "${NC}"
 echo -e "${GREEN}[+] Arquivo   : $TARGETS_FILE${NC}"
 echo -e "${GREEN}[+] Alvos     : $TOTAL${NC}"
-echo -e "${GREEN}[+] Delay     : ${DELAY_BETWEEN}s entre scans (aguarda ZAP encerrar)${NC}"
+echo -e "${GREEN}[+] Workers   : $WORKERS${NC}"
+if [ "$WORKERS" -eq 1 ]; then
+    echo -e "${GREEN}[+] Delay     : ${DELAY_BETWEEN}s entre scans (aguarda ZAP encerrar)${NC}"
+else
+    _ports=""
+    for ((i=0; i<WORKERS; i++)); do _ports+="$((8080 + i * 10)) "; done
+    echo -e "${GREEN}[+] Portas ZAP: ${_ports}${NC}"
+fi
 echo -e "${GREEN}[+] Output    : $BATCH_DIR/${NC}"
 echo -e "${GREEN}[+] Iniciado  : $(date '+%d/%m/%Y %H:%M:%S')${NC}"
 echo ""
@@ -97,81 +110,170 @@ print_progress() {
     echo -ne "\r  [${bar}] ${pct}% (${current}/${total})"
 }
 
-# ── Loop de scans ─────────────────────────────────────────────────────────────
-IDX=0
-FAILED=0
-PASSED=0
+# ── Modo sequencial ───────────────────────────────────────────────────────────
+run_sequential() {
+    local IDX=0
+    for TARGET_URL in "${TARGETS[@]}"; do
+        IDX=$((IDX + 1))
 
-for TARGET_URL in "${TARGETS[@]}"; do
-    IDX=$((IDX + 1))
+        echo ""
+        echo -e "${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${CYAN}${BOLD}  SCAN $IDX/$TOTAL: $TARGET_URL${NC}"
+        echo -e "${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BLUE}[*] Iniciado em: $(date '+%d/%m/%Y %H:%M:%S')${NC}"
+
+        local SCAN_START
+        SCAN_START=$(date +%s)
+        local _domain
+        _domain=$(echo "$TARGET_URL" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
+        local _log="$BATCH_DIR/logs/${_domain}.log"
+
+        # Garantir que ZAP da rodada anterior foi encerrado
+        if pgrep -f "zaproxy\|zap-.*jar" > /dev/null 2>&1; then
+            echo -e "${YELLOW}[!] ZAP ainda rodando — aguardando encerramento...${NC}"
+            pkill -f "zaproxy" 2>/dev/null; pkill -f "zap-.*jar" 2>/dev/null
+            sleep "$DELAY_BETWEEN"
+            rm -f ~/.ZAP/zap.lock 2>/dev/null
+        fi
+
+        local SCAN_EXIT=0
+        set -o pipefail
+        SWARM_BATCH=1 bash "$SWARM" "$TARGET_URL" 2>&1 | tee "$_log" || SCAN_EXIT=$?
+        set +o pipefail
+
+        local SCAN_END
+        SCAN_END=$(date +%s)
+        local SCAN_DUR=$(( SCAN_END - SCAN_START ))
+        local DUR_STR="${SCAN_DUR}s"
+        [ "$SCAN_DUR" -ge 60 ] && DUR_STR="$(( SCAN_DUR/60 ))m $(( SCAN_DUR%60 ))s"
+
+        local _outdir
+        _outdir=$(ls -td "$SCRIPT_DIR/scan_${_domain}_"* 2>/dev/null | head -1)
+        if [ -n "$_outdir" ] && [ -d "$_outdir" ]; then
+            mv "$_outdir" "$BATCH_DIR/" 2>/dev/null || true
+            _outdir="$BATCH_DIR/$(basename "$_outdir")"
+        fi
+
+        if [ "$SCAN_EXIT" -eq 0 ] && [ -n "$_outdir" ]; then
+            echo "OK|$TARGET_URL|$_outdir|$SCAN_DUR" >> "$STATE_FILE"
+            echo -e "${GREEN}[✓] Concluído em $DUR_STR → $(basename "$_outdir")${NC}"
+        else
+            echo "FAIL|$TARGET_URL||$SCAN_DUR" >> "$STATE_FILE"
+            echo -e "${RED}[✗] Falhou (exit $SCAN_EXIT) — log: $_log${NC}"
+        fi
+
+        echo ""; print_progress "$IDX" "$TOTAL"; echo ""
+
+        if [ "$IDX" -lt "$TOTAL" ]; then
+            echo -e "${BLUE}[*] Aguardando ${DELAY_BETWEEN}s antes do próximo scan...${NC}"
+            for ((s=DELAY_BETWEEN; s>0; s--)); do
+                echo -ne "\r    ${s}s restantes...   "; sleep 1
+            done
+            echo -ne "\r                        \r"
+            pkill -f "zaproxy" 2>/dev/null; pkill -f "zap-.*jar" 2>/dev/null; true
+            rm -f ~/.ZAP/zap.lock 2>/dev/null
+        fi
+    done
+}
+
+# ── Modo paralelo ─────────────────────────────────────────────────────────────
+run_parallel() {
+    echo -e "${YELLOW}[*] Modo paralelo — ${WORKERS} workers simultâneos${NC}"
+    echo ""
+
+    # Semáforo baseado em FIFO — cada token é uma porta ZAP disponível
+    # Ler token = adquirir slot; escrever token de volta = liberar slot
+    local SEM_FIFO
+    SEM_FIFO=$(mktemp -u "$BATCH_DIR/.semXXXXXX")
+    mkfifo "$SEM_FIFO"
+    exec 3<>"$SEM_FIFO"
+    rm -f "$SEM_FIFO"  # desvincula nome; fd 3 permanece aberto
+
+    for ((i=0; i<WORKERS; i++)); do
+        printf "%d\n" "$((8080 + i * 10))" >&3
+    done
+
+    local IDX=0
+    for TARGET_URL in "${TARGETS[@]}"; do
+        IDX=$((IDX + 1))
+
+        # Adquirir semáforo — bloqueia até haver worker livre
+        local WORKER_ZAP_PORT
+        read -u 3 WORKER_ZAP_PORT
+
+        local _domain
+        _domain=$(echo "$TARGET_URL" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
+        local _log="$BATCH_DIR/logs/${_domain}.log"
+        local _IDX_SNAP=$IDX
+
+        echo -e "${CYAN}[>>] Worker ZAP:${WORKER_ZAP_PORT} — SCAN ${_IDX_SNAP}/${TOTAL}: $TARGET_URL${NC}"
+
+        # Capturar variáveis no escopo do subshell
+        (
+            local SCAN_START
+            SCAN_START=$(date +%s)
+
+            # Matar ZAP nesta porta se ainda estiver rodando
+            pkill -f "port ${WORKER_ZAP_PORT}" 2>/dev/null || true
+            sleep 2
+
+            local SCAN_EXIT=0
+            ZAP_PORT=$WORKER_ZAP_PORT SWARM_BATCH=1 \
+                bash "$SWARM" "$TARGET_URL" > "$_log" 2>&1 || SCAN_EXIT=$?
+
+            local SCAN_END
+            SCAN_END=$(date +%s)
+            local SCAN_DUR=$(( SCAN_END - SCAN_START ))
+            local DUR_STR="${SCAN_DUR}s"
+            [ "$SCAN_DUR" -ge 60 ] && DUR_STR="$(( SCAN_DUR/60 ))m $(( SCAN_DUR%60 ))s"
+
+            local _outdir
+            _outdir=$(ls -td "$SCRIPT_DIR/scan_${_domain}_"* 2>/dev/null | head -1)
+            if [ -n "$_outdir" ] && [ -d "$_outdir" ]; then
+                mv "$_outdir" "$BATCH_DIR/" 2>/dev/null || true
+                _outdir="$BATCH_DIR/$(basename "$_outdir")"
+            fi
+
+            if [ "$SCAN_EXIT" -eq 0 ] && [ -n "$_outdir" ]; then
+                # echo para STATE_FILE é atômico para linhas < PIPE_BUF
+                echo "OK|$TARGET_URL|$_outdir|$SCAN_DUR" >> "$STATE_FILE"
+                echo -e "${GREEN}[✓] ZAP:${WORKER_ZAP_PORT} — ${_domain} — $DUR_STR → $(basename "$_outdir")${NC}"
+            else
+                echo "FAIL|$TARGET_URL||$SCAN_DUR" >> "$STATE_FILE"
+                echo -e "${RED}[✗] ZAP:${WORKER_ZAP_PORT} — ${_domain} — falhou (exit $SCAN_EXIT) — log: $_log${NC}"
+            fi
+
+            # Liberar semáforo devolvendo a porta
+            printf "%d\n" "$WORKER_ZAP_PORT" >&3
+        ) &
+
+        # Pequeno delay entre lançamentos para evitar race no startup do ZAP
+        sleep 5
+    done
 
     echo ""
-    echo -e "${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}${BOLD}  SCAN $IDX/$TOTAL: $TARGET_URL${NC}"
-    echo -e "${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}[*] Iniciado em: $(date '+%d/%m/%Y %H:%M:%S')${NC}"
+    echo -e "${BLUE}[*] Aguardando conclusão de todos os workers...${NC}"
+    wait
+    echo -e "${GREEN}[✓] Todos os workers finalizados.${NC}"
 
-    SCAN_START=$(date +%s)
-    _domain=$(echo "$TARGET_URL" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
-    _log="$BATCH_DIR/logs/${_domain}.log"
+    exec 3>&-
+}
 
-    # Garantir que ZAP da rodada anterior foi encerrado
-    if pgrep -f "zaproxy\|zap-.*jar" > /dev/null 2>&1; then
-        echo -e "${YELLOW}[!] ZAP ainda rodando — aguardando encerramento...${NC}"
-        pkill -f "zaproxy" 2>/dev/null; pkill -f "zap-.*jar" 2>/dev/null
-        sleep "$DELAY_BETWEEN"
-        rm -f ~/.ZAP/zap.lock 2>/dev/null
-    fi
+# ── Execução ──────────────────────────────────────────────────────────────────
+if [ "$WORKERS" -eq 1 ]; then
+    run_sequential
+else
+    run_parallel
+fi
 
-    # Executar scan (output capturado no log + exibido em tela simultaneamente)
-    SCAN_EXIT=0
-    set -o pipefail
-    SWARM_BATCH=1 bash "$SWARM" "$TARGET_URL" 2>&1 | tee "$_log" || SCAN_EXIT=$?
-    set +o pipefail
+# ── Contadores finais via state file ─────────────────────────────────────────
+PASSED=0; FAILED=0
+if [ -f "$STATE_FILE" ]; then
+    PASSED=$(grep -c "^OK|" "$STATE_FILE" 2>/dev/null || echo 0)
+    FAILED=$(grep -c "^FAIL|" "$STATE_FILE" 2>/dev/null || echo 0)
+fi
 
-    SCAN_END=$(date +%s)
-    SCAN_DUR=$(( SCAN_END - SCAN_START ))
-    DUR_STR="${SCAN_DUR}s"
-    [ "$SCAN_DUR" -ge 60 ] && DUR_STR="$(( SCAN_DUR/60 ))m $(( SCAN_DUR%60 ))s"
-
-    # Localizar diretório criado e mover para batch
-    _outdir=$(ls -td "$SCRIPT_DIR/scan_${_domain}_"* 2>/dev/null | head -1)
-    if [ -n "$_outdir" ] && [ -d "$_outdir" ]; then
-        mv "$_outdir" "$BATCH_DIR/" 2>/dev/null || true
-        _outdir="$BATCH_DIR/$(basename "$_outdir")"
-    fi
-
-    # Registrar resultado
-    if [ "$SCAN_EXIT" -eq 0 ] && [ -n "$_outdir" ]; then
-        echo "OK|$TARGET_URL|$_outdir|$SCAN_DUR" >> "$STATE_FILE"
-        PASSED=$((PASSED + 1))
-        echo -e "${GREEN}[✓] Concluído em $DUR_STR → $( basename "$_outdir" )${NC}"
-    else
-        echo "FAIL|$TARGET_URL||$SCAN_DUR" >> "$STATE_FILE"
-        FAILED=$((FAILED + 1))
-        echo -e "${RED}[✗] Falhou (exit $SCAN_EXIT) — log: $_log${NC}"
-    fi
-
-    # Barra de progresso geral
-    echo ""
-    print_progress "$IDX" "$TOTAL"
-    echo ""
-
-    # Delay entre scans (exceto após o último)
-    if [ "$IDX" -lt "$TOTAL" ]; then
-        echo -e "${BLUE}[*] Aguardando ${DELAY_BETWEEN}s antes do próximo scan...${NC}"
-        for ((s=DELAY_BETWEEN; s>0; s--)); do
-            echo -ne "\r    ${s}s restantes...   "
-            sleep 1
-        done
-        echo -ne "\r                        \r"
-        # Limpar ZAP definitivamente
-        pkill -f "zaproxy" 2>/dev/null; pkill -f "zap-.*jar" 2>/dev/null; true
-        rm -f ~/.ZAP/zap.lock 2>/dev/null
-    fi
-done
-
-# ── Relatório consolidado ────────────────────────────────────────────────────
+# ── Relatório consolidado ─────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${CYAN}${BOLD}  GERANDO RELATÓRIO CONSOLIDADO${NC}"
@@ -427,7 +529,6 @@ echo -e "  ${CYAN}📊 Consolidado: $BATCH_DIR/relatorio_consolidado.html${NC}"
 echo -e "  ${CYAN}📋 Logs       : $BATCH_DIR/logs/${NC}"
 echo ""
 
-# Abrir relatório consolidado
 [ -n "$DISPLAY" ] && command -v xdg-open &>/dev/null && \
     xdg-open "$BATCH_DIR/relatorio_consolidado.html" 2>/dev/null || \
     command -v wslview &>/dev/null && \

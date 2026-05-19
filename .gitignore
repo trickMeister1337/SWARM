@@ -8,6 +8,15 @@ swarm_output/
 swarm_refactored/
 swarm_refactored.tar.gz
 
+# Arquivos de alvo/endereços de clientes (nunca subir ao git)
+subdomains*.txt
+targets_opt*.txt
+cde_targets.txt
+*_targets.txt
+relatorio_*.html
+sumario_*.txt
+relatorio_consolidado.html
+
 # Scan results (sensitive)
 *.csv
 *.log
