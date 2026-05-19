@@ -20,6 +20,157 @@ from datetime import datetime
 from collections import defaultdict
 
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+
+# ─── knowledge base de remediações ───────────────────────────────────────────
+# Usado quando o campo remediation está ausente ou é genérico ("Revisar.").
+REMEDIATION_KB: dict[str, str] = {
+    "Node-Red - Default Login": """\
+RISCO: Acesso administrativo completo com credenciais padrão → RCE imediato.
+
+AÇÃO IMEDIATA:
+  1. Troque as credenciais padrão AGORA — acesse o painel e altere a senha antes de qualquer outra coisa.
+  2. Habilite autenticação em settings.js (Node-RED ≥ 1.x):
+
+     module.exports = {
+         adminAuth: {
+             type: "credentials",
+             users: [{
+                 username: "admin",
+                 password: "$2b$08$<bcrypt-hash>",  // gere com: node -e "console.log(require('bcryptjs').hashSync('SuaSenhaForte',8))"
+                 permissions: "*"
+             }]
+         }
+     }
+
+  3. Restrinja o endpoint /red/ e /admin por IP no reverse proxy (Nginx/Caddy):
+
+     location /red/ {
+         allow 10.0.0.0/8;    # apenas rede interna
+         deny all;
+         proxy_pass http://localhost:1880/;
+     }
+
+  4. Desabilite o editor em produção se não for necessário (settings.js):
+       editorTheme: { header: { title: "Production" } },
+       // ou: httpAdminRoot: false  (desabilita UI completamente)
+
+  5. Habilite auditoria de fluxos e revise flows.json em busca de credenciais expostas.
+  6. Atualize Node-RED para a versão mais recente (npm install -g node-red@latest).
+
+VALIDAÇÃO: curl -u admin:password http://<host>:1880/red/ deve retornar 401 após a correção.\
+""",
+
+    "Weak Cipher Suites Detection": """\
+Desabilite cipher suites fracas (DES, RC4, 3DES, EXPORT, NULL) e force TLS 1.2+.
+
+Nginx (em /etc/nginx/nginx.conf ou no vhost):
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384';
+  ssl_prefer_server_ciphers on;
+  ssl_session_cache shared:SSL:10m;
+
+Apache (/etc/apache2/mods-enabled/ssl.conf):
+  SSLProtocol -all +TLSv1.2 +TLSv1.3
+  SSLCipherSuite ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:!aNULL:!eNULL:!EXPORT:!RC4:!DES:!3DES
+  SSLHonorCipherOrder on
+
+Referência: https://ssl-config.mozilla.org/ (perfil "Intermediate" para compatibilidade)
+Validação: testssl.sh --cipher <host> ou SSL Labs (ssllabs.com/ssltest/)\
+""",
+
+    "TLS Version - Detect": """\
+TLS 1.0 e TLS 1.1 são considerados inseguros (RFC 8996) e devem ser desabilitados.
+
+Nginx:
+  ssl_protocols TLSv1.2 TLSv1.3;
+
+Apache:
+  SSLProtocol -all +TLSv1.2 +TLSv1.3
+
+AWS ALB/CloudFront: Configure a Security Policy para ELBSecurityPolicy-TLS13-1-2-2021-06 ou superior.
+Validação: testssl.sh --protocols <host>\
+""",
+
+    "HTTP Missing Security Headers": """\
+Adicione os seguintes cabeçalhos de segurança HTTP à resposta do servidor:
+
+Nginx (no bloco server {} ou location {}):
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "SAMEORIGIN" always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+  add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; object-src 'none'" always;
+
+Apache (no .htaccess ou VirtualHost):
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+
+Validação: securityheaders.com ou curl -I https://<host>\
+""",
+
+    "WAF Detection": """\
+Finding informativo — presença de WAF detectada. Nenhuma ação de remediação necessária.
+Recomendação: Mantenha as regras do WAF atualizadas e revise periodicamente os logs de bloqueio.\
+""",
+
+    "Wappalyzer Technology Detection": """\
+Finding informativo — tecnologias identificadas via Wappalyzer. Nenhuma ação imediata necessária.
+Recomendação: Remova ou ofusque cabeçalhos que revelem versões específicas (X-Powered-By, Server)
+para reduzir a superfície de reconhecimento passivo.\
+""",
+
+    "Nginx version detect": """\
+Remova a divulgação de versão do Nginx para dificultar a identificação de vulnerabilidades conhecidas.
+
+Em /etc/nginx/nginx.conf (bloco http {}):
+  server_tokens off;
+
+Para remover também do cabeçalho Server:
+  # Requer módulo ngx_headers_more (OpenResty ou compilação customizada):
+  more_clear_headers Server;
+
+Validação: curl -I https://<host> — o cabeçalho Server não deve exibir a versão.\
+""",
+
+    "Absence of Anti-CSRF Tokens": """\
+Implemente tokens CSRF em todos os formulários HTML e requisições de estado mutável (POST/PUT/DELETE/PATCH).
+
+1. Framework-level (preferido):
+   - Django: {{ csrf_token }} no template + @csrf_protect no view
+   - Spring Security: <csrf /> em SecurityConfig (habilitado por padrão no Spring Security 4+)
+   - Laravel: @csrf na blade template
+   - Express (Node.js): use o pacote csurf ou csrf-csrf
+
+2. Implementação manual (se sem framework):
+   a. Gere um token aleatório criptograficamente seguro na sessão:
+      token = secrets.token_hex(32)  # Python
+      session['csrf_token'] = token
+   b. Inclua-o em cada formulário como campo hidden:
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+   c. Valide no servidor em cada requisição de escrita:
+      if request.form['csrf_token'] != session['csrf_token']: abort(403)
+
+3. Para APIs com SPA (Single Page Application):
+   - Use o padrão Double Submit Cookie ou SameSite=Strict nos cookies de sessão
+   - Adicione o header personalizado X-Requested-With: XMLHttpRequest
+
+4. SameSite Cookie (defesa em camadas):
+   Set-Cookie: session=<valor>; SameSite=Strict; Secure; HttpOnly
+
+Validação: Tente submeter um formulário de outro domínio sem o token — deve retornar 403.\
+""",
+}
+
+_GENERIC_REMEDIATIONS = {"revisar.", "revisar", "review.", "review", "n/a", ""}
+
+
+def enrich_remediation(name: str, remediation: str) -> str:
+    """Retorna remediação do KB se a original for genérica ou ausente."""
+    if (remediation or "").strip().lower() in _GENERIC_REMEDIATIONS:
+        return REMEDIATION_KB.get(name, remediation)
+    return remediation
 SEV_COLOR = {
     "critical": "#c0392b",
     "high":     "#e55a00",
@@ -351,7 +502,7 @@ def render_html(targets: list[dict], findings_all: list[dict],
         url = esc(f.get("url", ""))
         source = esc(f.get("source", ""))
         desc = esc(f.get("description", ""))
-        remediation = esc(f.get("remediation", ""))
+        remediation = esc(enrich_remediation(f.get("name", ""), f.get("remediation", "")))
         cves = f.get("cve_ids", [])
         cvss = f.get("cvss")
         epss = f.get("epss")
