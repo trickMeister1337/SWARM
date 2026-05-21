@@ -1,6 +1,6 @@
-# SWARM
+# SWARM Suite
 
-> Pipeline automatizado de pentest ofensivo — reconhecimento, varredura, exploração e relatório em um único comando.
+> Suite completa de segurança ofensiva — reconhecimento, varredura, exploração e relatório em um único pipeline automatizado.
 
 [![Shell](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash)](https://www.gnu.org/software/bash/)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python)](https://python.org)
@@ -44,6 +44,31 @@ O SWARM é uma suite completa de segurança ofensiva composta por scripts indepe
 ---
 
 ## Últimas Atualizações
+
+### v7.2 — Cobertura de superfície expandida + SWARM RED melhorias (Mai 2026)
+
+**`swarm.sh` — 4 novos módulos de detecção:**
+
+- **Scan de serviços perigosos** — nmap agora inclui portas de infraestrutura sensível: Redis (6379), MongoDB (27017), Elasticsearch (9200/9300), Kubernetes API (6443), etcd (2379), CouchDB (5984), Memcached (11211), MSSQL (1433), PostgreSQL (5432), MySQL (3306). Portas abertas de bancos expostos são destacadas em vermelho no terminal.
+- **PYSECSCAN — security.txt (RFC-9116)** — verifica presença de `/.well-known/security.txt` e `/security.txt`; gera finding `SECSCAN-001` (info) quando ausente e salva o arquivo quando presente.
+- **PYSECSCAN — exposição de IPs internos** — varre respostas HTTP de 9 endpoints padrão (/, /health, /metrics, /actuator/health etc.) buscando endereços RFC-1918 em body e headers; gera finding `SECSCAN-002` (medium) quando encontrado.
+- **Wordlist ffuf expandida** — adicionados `phpinfo.php`, `info.php`, `test.php`, `phpinfo/`, `.well-known/security.txt`, `security.txt`, `robots.txt`, `sitemap.xml`, `crossdomain.xml`, `elmah.axd`, `trace.axd`, `_profiler`, `telescope`, `horizon` (cobertura de PHP debug, .NET ELMAH, Laravel e Symfony).
+
+**`swarm_red.sh` — melhorias:**
+
+- **HTTP Form Brute Force** — nova função `_run_http_form_brute()` dentro de `run_brute()`: detecta automaticamente endpoints `/login`, `/signin`, `/auth`, `/logon` no crawl e executa hydra `http-post-form` / `https-post-form` com wordlists do sistema.
+- **Timing e logging em todas as fases** — `run_xss()`, `run_brute()`, `run_services()` e `run_report()` agora registram tempo de execução e contagem de resultados no `swarm_red.log` (trilha de auditoria).
+- **Filtro de URLs advisory** — `_build_scored_targets` filtra domínios de advisories (github.com/security, nvd.nist.gov, vercel.com/changelog, cve.org etc.) da lista de alvos SQLi/XSS, eliminando falso-positivos.
+
+**`lib/report_generator.py`:**
+
+- Nova flag `--swarm-dir <path>`: integra os findings do scan SWARM de origem no relatório RED, exibindo seção separada "Contexto SWARM — Scan de Origem" com badge visual distinto.
+
+**`lib/evidence.py`:**
+
+- Corrigido falso-positivo: heurística "might not be injectable" e "not injectable" do sqlmap agora excluem o parâmetro de ser marcado como vulnerável.
+
+---
 
 ### v7.1 — Ferramentas atualizadas + correções de relatório (Mai 2026)
 
@@ -124,17 +149,18 @@ Pipeline de 11 fases que mapeia a superfície de ataque completa, valida vulnera
   ┌──────────────────────────────────────────────────────────────┐
   │                    SWARM — Consultant Edition                │
   │                                                              │
-  │  [1]  Subdomain Discovery   subfinder                        │
-  │  [2]  Surface Mapping       httpx + nmap                     │
-  │  [3]  TLS Analysis          testssl (paralelo com nuclei)    │
-  │  [4]  Vulnerability Scan    nuclei (CVE + exposure + tech)   │
-  │  [5]  PoC Confirmation      poc_validator.py (min 60%)       │
-  │  [6]  CVE Enrichment        NVD API v2 + EPSS + CISA KEV     │
-  │  [7]  WAF Detection         wafw00f + evasão passiva         │
-  │  [8]  Email Security        SPF / DMARC / DKIM               │
-  │  [9]  ZAP Active Scan       Spider + Ajax + Active Scan      │
-  │  [10] JS Analysis           katana + trufflehog + ffuf       │
-  │  [11] Relatório             HTML + sumário executivo + JSON  │
+  │  [1]   Subdomain Discovery   subfinder                       │
+  │  [2]   Surface Mapping       httpx + nmap (web + serviços)   │
+  │  [2.5] WAF + SecScan         wafw00f + security.txt + IPs    │
+  │  [3]   TLS Analysis          testssl (paralelo com nuclei)   │
+  │  [4]   Vulnerability Scan    nuclei (CVE + exposure + tech)  │
+  │  [5]   PoC Confirmation      poc_validator.py (min 60%)      │
+  │  [6]   CVE Enrichment        NVD API v2 + EPSS + CISA KEV    │
+  │  [7]   WAF Detection         wafw00f + evasão passiva        │
+  │  [8]   Email Security        SPF / DMARC / DKIM              │
+  │  [9]   ZAP Active Scan       Spider + Ajax + Active Scan     │
+  │  [10]  JS Analysis           katana + trufflehog + ffuf      │
+  │  [11]  Relatório             HTML + sumário executivo + JSON │
   └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -190,6 +216,7 @@ Motor de exploração que opera em dois modos: **Blackbox** (standalone a partir
   │  [6] XSS         dalfox   → paralelo por URL                 │
   │       ↓                                                      │
   │  [7] BRUTE       hydra    → SSH/FTP/MySQL/RDP/SMB            │
+  │                  hydra    → HTTP/HTTPS form brute (auto)     │
   │       ↓                                                      │
   │  [8] SERVICES    nikto + msfconsole + searchsploit           │
   │       ↓                                                      │
@@ -462,11 +489,11 @@ SWARM/
 | Módulo | Responsabilidade |
 |---|---|
 | `ingest.py` | Lê output do swarm.sh (findings.json, nuclei, ZAP, nmap) e produz listas priorizadas por score para cada fase de exploração |
-| `evidence.py` | Extrai evidência estruturada dos logs sqlmap; funções `is_valid_url` e `strip_ansi` |
+| `evidence.py` | Extrai evidência estruturada dos logs sqlmap; exclui falsos-positivos "not injectable" / "might not be injectable" |
 | `parsers.py` | Parse de nuclei JSONL, ZAP JSON, extração de URLs e CVEs com filtros de domínio externo e parâmetros HTTP |
 | `poc_generator.py` | Gera PoCs reproduzíveis (curl time-based, boolean, CORS) e `poc/verify.sh` para times de desenvolvimento |
 | `poc_validator.py` | Reexecuta cada finding via curl com threshold mínimo de 60% de confiança |
-| `report_generator.py` | Gera `relatorio_swarm_red.html` no padrão Big4 com seções MITRE ATT&CK |
+| `report_generator.py` | Gera `relatorio_swarm_red.html` no padrão Big4; aceita `--swarm-dir` para integrar findings do scan de origem |
 | `cve_enricher.py` | Enriquecimento NVD/EPSS/KEV com cache diário |
 
 ---
@@ -533,8 +560,12 @@ scan_alvo.com_20260514_120000/
 ├── raw/
 │   ├── nuclei.json             # Findings nuclei (JSONL)
 │   ├── zap_alerts.json         # Alerts ZAP
-│   ├── nmap.txt                # Output nmap
-│   └── tls_issues.txt          # Problemas TLS (testssl)
+│   ├── nmap.txt                # Output nmap (web + serviços perigosos)
+│   ├── tls_issues.txt          # Problemas TLS (testssl)
+│   ├── monitoring_findings.json # Endpoints /metrics expostos
+│   ├── ratelimit_findings.json  # Rate limiting ausente em /login
+│   ├── secscan_findings.json    # security.txt + IPs internos expostos
+│   └── security_txt.txt        # Conteúdo do security.txt (quando presente)
 ├── relatorio_swarm.html        # Relatório técnico completo
 ├── sumario_executivo.html      # Sumário de risco para gestão
 └── findings.json               # Export para SIEM/Jira

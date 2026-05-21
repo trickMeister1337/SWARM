@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 # ==============================================================================
 # SWARM - CONSULTANT EDITION
@@ -487,12 +488,21 @@ fi
 OPEN_PORTS="N/A"
 if command -v nmap &>/dev/null; then
     echo -e "  ${BLUE}[…] Executando nmap...${NC}"
-    nmap -p 80,443,8000,8080,8443,8888,3000,9090 -T4 -sV --open \
+    # Web + exposed dangerous services (Redis,MongoDB,Elasticsearch,K8s,etcd,CouchDB,Memcached,MSSQL,Postgres,MySQL)
+    nmap -p 80,443,8000,8080,8443,8888,3000,9090,6379,27017,9200,9300,6443,2379,5984,11211,15000-15010,28017,1433,5432,3306 \
+         -T4 -sV --open \
          "$DOMAIN" -oN "$OUTDIR/raw/nmap.txt" > /dev/null 2>&1
     OPEN_PORTS=$(grep -E "^[0-9]+/tcp.*open" "$OUTDIR/raw/nmap.txt" 2>/dev/null \
                  | awk '{print $1}' | tr '\n' ' ' | sed 's/ $//')
     OPEN_PORTS=${OPEN_PORTS:-nenhuma}
     echo -e "  ${GREEN}[✓] Portas abertas: ${OPEN_PORTS}${NC}"
+    # Highlight dangerous exposed services
+    _dangerous_ports=$(grep -E "^(6379|27017|9200|9300|6443|2379|5984|11211|15[0-9]{3}|28017)/tcp.*open" \
+        "$OUTDIR/raw/nmap.txt" 2>/dev/null | awk '{print $1}' | tr '\n' ' ' | sed 's/ $//')
+    if [ -n "$_dangerous_ports" ]; then
+        echo -e "  ${RED}[!] Serviços sensíveis expostos: ${_dangerous_ports}${NC}"
+    fi
+    unset _dangerous_ports
 else
     echo -e "  ${YELLOW}[○] nmap não disponível — pulando scan de portas${NC}"
 fi
@@ -695,6 +705,384 @@ PYSECHEADERS
 echo -e "  ${GREEN}[✓] Headers de segurança verificados${NC}"
 export SECURITY_HEADERS_FILE="$OUTDIR/raw/security_headers.json"
 
+# ── Technology Version Fingerprinting ────────────────────────────
+# Probes well-known unauthenticated version-disclosure endpoints.
+# Detects outdated installations and maps them to known CVEs.
+# Output: raw/version_findings.json
+echo -e "  ${BLUE}[…] Fingerprinting de versão de aplicações...${NC}"
+python3 - "$OUTDIR" "$TARGET" << 'PYVERSION'
+import sys, json, re, urllib.request, urllib.error, ssl
+
+outdir = sys.argv[1]
+target = sys.argv[2].rstrip("/")
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+def fetch(url, timeout=8, attempts=3, backoff=4):
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+                return r.read().decode("utf-8", errors="replace"), r.status
+        except Exception as e:
+            last_err = e
+            if attempt < attempts - 1:
+                import time; time.sleep(backoff)
+    print(f"  [!] fetch falhou após {attempts} tentativa(s): {url} — {type(last_err).__name__}: {last_err}")
+    return None, None
+
+# ── Technology probe definitions ──────────────────────────────────
+# Fields: (tech_name, [(path, required_body_substring)],
+#           version_regex, min_ok_version,
+#           severity_if_outdated, cve_refs, remediation)
+# required_body_substring: string that must be in the response to avoid
+# false positives (e.g. another app responding to the same endpoint).
+PROBES = [
+    (
+        "Grafana",
+        [("/api/health", '"database"'), ("/login", "grafana")],
+        r'"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"',
+        "10.0",
+        "high",
+        "CVE-2023-3128, CVE-2023-6152, CVE-2023-2183, CVE-2023-1410",
+        "Atualize o Grafana para a versão 10.x ou superior. "
+        "Consulte https://grafana.com/security/security-advisories/ para o changelog de segurança.",
+    ),
+    (
+        "Prometheus",
+        [("/api/v1/status/buildinfo", '"appName"'), ("/-/healthy", "Prometheus")],
+        r'"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"',
+        "2.45",
+        "medium",
+        "CVE-2022-21698",
+        "Atualize o Prometheus para a versão 2.45+ (LTS atual).",
+    ),
+    (
+        "Kibana",
+        [("/api/status", '"tagline"')],
+        r'"number"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"',
+        "8.0",
+        "high",
+        "CVE-2023-31416, CVE-2022-23712",
+        "Atualize o Kibana para a versão 8.x atual.",
+    ),
+    (
+        "Jenkins",
+        [("/api/json?pretty=true", '"_class"'), ("/login", "Jenkins")],
+        r'Jenkins\s+ver\.\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)|"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+)"',
+        "2.440",
+        "high",
+        "CVE-2024-23897, CVE-2023-27898",
+        "Atualize o Jenkins para a versão LTS mais recente.",
+    ),
+    (
+        "HashiCorp Vault",
+        [("/v1/sys/health", '"initialized"')],
+        r'"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"',
+        "1.15",
+        "high",
+        "CVE-2023-3774, CVE-2023-0620",
+        "Atualize o Vault para a versão 1.15+ atual.",
+    ),
+    (
+        "Elasticsearch",
+        [("/", '"cluster_name"'), ("/_cluster/health", '"cluster_name"')],
+        r'"number"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"',
+        "8.0",
+        "high",
+        "CVE-2023-31418, CVE-2022-23712",
+        "Atualize o Elasticsearch para a versão 8.x atual.",
+    ),
+    (
+        "Consul",
+        [("/v1/agent/self", '"Config"')],
+        r'"Version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"',
+        "1.17",
+        "medium",
+        "CVE-2023-3518",
+        "Atualize o Consul para a versão 1.17+ atual.",
+    ),
+    (
+        "Traefik",
+        [("/api/version", '"Version"'), ("/dashboard/api/version", '"Version"')],
+        r'"Version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+[^"]*)"',
+        "3.0",
+        "medium",
+        "CVE-2022-46153",
+        "Atualize o Traefik para a versão 3.x atual.",
+    ),
+]
+
+def version_tuple(v):
+    """Convert '9.5.6' to (9, 5, 6) for comparison."""
+    try:
+        parts = re.sub(r"[^0-9.]", "", v.split("-")[0]).split(".")
+        return tuple(int(x) for x in parts if x)
+    except Exception:
+        return (0,)
+
+findings = []
+
+for tech, path_specs, version_re, min_ok_version, sev, cves, remediation in PROBES:
+    detected_version = None
+    hit_path = path_specs[0][0]
+    for path, required in path_specs:
+        body, status = fetch(target + path)
+        if not body:
+            continue
+        if required.lower() not in body.lower():
+            continue          # discriminator failed — wrong technology
+        m = re.search(version_re, body, re.IGNORECASE)
+        if m:
+            detected_version = next((g for g in m.groups() if g), None)
+            hit_path = path
+            break
+
+    if not detected_version:
+        continue
+
+    detected_t = version_tuple(detected_version)
+    min_t      = version_tuple(min_ok_version)
+    is_outdated = (detected_t < min_t) if detected_t and min_t else False
+
+    status_str = "DESATUALIZADO" if is_outdated else "ok"
+    print(f"  [version] {tech} {detected_version} → {status_str}")
+    # Only emit findings for outdated versions — current versions have no remediation value
+    # and may produce false positives from multi-tenant endpoints.
+    if not is_outdated:
+        continue
+    finding = {
+        "id":          f"version-{tech.lower().replace(' ','-').replace('/','-')}",
+        "name":        f"{tech} v{detected_version} — Versão Desatualizada",
+        "severity":    sev,
+        "source":      "Version Fingerprint",
+        "url":         target,
+        "cve":         f"CWE-1104 — {cves}",
+        "cve_ids":     [],
+        "description": (
+            f"{tech} versão {detected_version} detectada via endpoint não autenticado "
+            f"({hit_path}). Versão desatualizada — mínimo recomendado: {min_ok_version}. "
+            f"CVEs conhecidos nesta linha: {cves}."
+        ),
+        "remediation": remediation,
+        "evidence":    f"GET {hit_path} → {{\"version\":\"{detected_version}\"}}",
+        "param": "", "attack": "", "other": "",
+        "severity_orig": sev,
+        "severity_reclassified": False,
+        "detected_version": detected_version,
+        "min_version": min_ok_version,
+        "is_outdated": True,
+    }
+    findings.append(finding)
+
+out_file = f"{outdir}/raw/version_findings.json"
+with open(out_file, "w") as f:
+    json.dump(findings, f, indent=2, ensure_ascii=False)
+
+if findings:
+    outdated = [x for x in findings if x["is_outdated"]]
+    print(f"  [✓] {len(findings)} tecnologia(s) detectada(s), {len(outdated)} desatualizada(s)")
+else:
+    print("  [✓] Nenhuma tecnologia com versão detectável encontrada")
+PYVERSION
+export VERSION_FINDINGS_FILE="$OUTDIR/raw/version_findings.json"
+
+# ── Monitoring Endpoint Exposure Check ───────────────────────────────────────
+# Checks /metrics, /actuator/*, /-/metrics for unauthenticated access.
+# Extracts datasource names, alert names, PCI-sensitive labels.
+python3 - "$OUTDIR" "$TARGET" << 'PYMONITORING'
+import sys, re, json, urllib.request, urllib.error, ssl
+
+outdir, target = sys.argv[1], sys.argv[2].rstrip("/")
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+
+MONITORING_PATHS = [
+    "/metrics",
+    "/-/metrics",
+    "/actuator/prometheus",
+    "/actuator/metrics",
+    "/api/v1/metrics",
+]
+
+PCI_TERMS = re.compile(r'\b(cde|pci|cardholder|card.?holder|pan|cvv|payment.?card)\b', re.I)
+
+def fetch(url, attempts=3, backoff=4):
+    import time as _t
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            r = urllib.request.urlopen(req, timeout=10, context=ctx)
+            return r.read().decode("utf-8", errors="replace"), r.status
+        except urllib.error.HTTPError as e:
+            return "", e.code
+        except Exception as e:
+            last_err = e
+            if attempt < attempts - 1:
+                _t.sleep(backoff)
+    print(f"  [!] fetch falhou após {attempts} tentativa(s): {url} — {type(last_err).__name__}: {last_err}")
+    return "", 0
+
+findings = []
+
+for path in MONITORING_PATHS:
+    body, status = fetch(target + path)
+    if status != 200 or not body:
+        continue
+    # Must look like Prometheus text format or JSON metrics
+    if not any(marker in body for marker in ("# HELP", "# TYPE", "_total", "_bucket", '"names"')):
+        continue
+
+    print(f"  [!] {path} acessível sem autenticação (HTTP 200, {len(body)} bytes)")
+
+    # Extract named labels: datasource="...", name="...", dialer_name="..."
+    label_pattern = re.compile(r'(?:datasource|dialer_name|name)="([^"]+)"')
+    names = sorted(set(label_pattern.findall(body)))
+
+    # Separate datasource names from alert names
+    ds_names  = sorted(set(re.findall(r'datasource="([^"]+)"', body)))
+    alert_names = sorted(set(re.findall(r'name="([^"]+)"', body)))
+
+    # Technology inference from plugin_id labels
+    plugin_ids = sorted(set(re.findall(r'plugin_id="([^"]+)"', body)))
+
+    # PCI sensitive
+    pci_hits = [n for n in names if PCI_TERMS.search(n)]
+
+    sev = "critical" if pci_hits else "high"
+
+    desc_parts = [
+        f"Endpoint {path} retorna métricas internas sem autenticação (HTTP 200).",
+    ]
+    if ds_names:
+        desc_parts.append(f"Datasources expostos ({len(ds_names)}): {', '.join(ds_names[:10])}" +
+                          (" ..." if len(ds_names) > 10 else "."))
+    if pci_hits:
+        desc_parts.append(f"ATENÇÃO PCI DSS: datasource(s) com nomenclatura de ambiente CDE detectado(s): {', '.join(pci_hits)}.")
+    if alert_names:
+        desc_parts.append(f"Nomes de alertas expostos: {', '.join(alert_names[:5])}" +
+                          (" ..." if len(alert_names) > 5 else "."))
+    if plugin_ids:
+        desc_parts.append(f"Stack inferida via plugin_id: {', '.join(plugin_ids)}.")
+
+    rem = (
+        f"Restringir {path} por IP ou exigir autenticação. "
+        "No Grafana: definir metrics_endpoint_enabled = false em [metrics] no grafana.ini, "
+        "ou proteger via proxy reverso (allow only from monitoring subnet). "
+        "Referência: https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-monitoring/"
+    )
+
+    findings.append({
+        "id":          f"exposed-metrics-{path.strip('/').replace('/', '-')}",
+        "name":        f"Endpoint {path} Exposto Sem Autenticação",
+        "severity":    sev,
+        "source":      "Version Fingerprint",
+        "url":         target + path,
+        "cve":         "CWE-200 — Information Exposure",
+        "cve_ids":     [],
+        "description": " ".join(desc_parts),
+        "remediation": rem,
+        "evidence":    f"GET {path} → HTTP 200 ({len(body)} bytes de telemetria interna)",
+        "param": "", "attack": "", "other": "",
+        "severity_orig": sev,
+        "severity_reclassified": False,
+        "datasources": ds_names,
+        "pci_labels":  pci_hits,
+        "alert_names": alert_names,
+        "plugins":     plugin_ids,
+    })
+    # Only report the first accessible metrics path
+    break
+
+out_file = f"{outdir}/raw/monitoring_findings.json"
+with open(out_file, "w") as f:
+    json.dump(findings, f, indent=2, ensure_ascii=False)
+
+if findings:
+    print(f"  [✓] {len(findings)} endpoint(s) de monitoramento exposto(s)")
+else:
+    print("  [✓] Nenhum endpoint de monitoramento exposto sem autenticação")
+PYMONITORING
+
+# ── PYSECSCAN: security.txt (RFC-9116) + internal IP exposure ────
+echo -e "  ${BLUE}[…]${NC} Verificando security.txt e exposição de IPs internos..."
+python3 - "$OUTDIR" "$TARGET" "$DOMAIN" << 'PYSECSCAN'
+import sys, re, json, ssl, urllib.request, urllib.error
+
+outdir, target, domain = sys.argv[1], sys.argv[2].rstrip('/'), sys.argv[3]
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+findings = []
+
+def fetch(url, timeout=10):
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "SWARM-Scanner/2.0"})
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            return r.status, r.read(65536).decode("utf-8", errors="replace"), dict(r.headers)
+    except Exception:
+        return None, None, {}
+
+# ── RFC-9116: security.txt ────────────────────────────────────────
+sec_paths = ["/.well-known/security.txt", "/security.txt"]
+sec_found = False
+for path in sec_paths:
+    status, body, _ = fetch(f"{target}{path}")
+    if status == 200 and body and ("Contact:" in body or "contact:" in body):
+        sec_found = True
+        print(f"  [✓] security.txt encontrado em {path}")
+        with open(f"{outdir}/raw/security_txt.txt", "w") as f:
+            f.write(body)
+        break
+
+if not sec_found:
+    print("  [!] security.txt ausente (RFC-9116 não implementado)")
+    findings.append({
+        "id": "SECSCAN-001", "tool": "pysecscan", "type": "secscan",
+        "title": "security.txt ausente (RFC-9116)",
+        "url": f"{target}/.well-known/security.txt",
+        "severity": "info",
+        "detail": "O alvo não publica security.txt — dificulta divulgação responsável de vulnerabilidades.",
+    })
+
+# ── Internal IP exposure in HTTP responses ────────────────────────
+RFC1918 = re.compile(
+    r'\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+    r'|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}'
+    r'|192\.168\.\d{1,3}\.\d{1,3})\b'
+)
+probe_paths = ["/", "/health", "/metrics", "/-/metrics", "/actuator/health",
+               "/api/v1", "/api", "/status", "/ping"]
+ip_hits = {}
+for path in probe_paths:
+    status, body, hdrs = fetch(f"{target}{path}")
+    if body:
+        matches = RFC1918.findall(body)
+        for hk, hv in hdrs.items():
+            matches += RFC1918.findall(hv)
+        if matches:
+            unique = list(dict.fromkeys(matches))
+            ip_hits[path] = unique
+            print(f"  [⚠] IPs internos em {path}: {', '.join(unique[:5])}")
+
+if ip_hits:
+    findings.append({
+        "id": "SECSCAN-002", "tool": "pysecscan", "type": "secscan",
+        "title": "Exposição de endereços IP internos (RFC-1918)",
+        "url": target,
+        "severity": "medium",
+        "detail": f"Respostas HTTP expõem IPs da rede interna: {ip_hits}. "
+                  "Facilita reconhecimento de topologia interna e ataques SSRF.",
+    })
+else:
+    print("  [✓] Nenhum IP interno exposto nas respostas HTTP")
+
+out_file = f"{outdir}/raw/secscan_findings.json"
+with open(out_file, "w") as f:
+    json.dump(findings, f, indent=2, ensure_ascii=False)
+PYSECSCAN
+
 phase_banner "FASE 3/11: ANÁLISE TLS (testssl) — paralelo com nuclei"
 
 TLS_ISSUES=0
@@ -748,7 +1136,11 @@ if command -v nuclei &>/dev/null; then
         echo -e "  ${BLUE}[…] Evasão passiva ativada: UA rotation + origin spoofing + payload alterations${NC}"
     fi
 
-    NUCLEI_TEMPLATES_FLAGS="${NUCLEI_TEMPLATES_FLAGS:-}"  # templates extras: ex NUCLEI_TEMPLATES_FLAGS="-t custom/"
+    # Always include custom templates directory if it exists
+    _custom_tpl_dir="$(dirname "$0")/nuclei-custom-templates"
+    [ -d "$_custom_tpl_dir" ] && \
+        NUCLEI_TEMPLATES_FLAGS="${NUCLEI_TEMPLATES_FLAGS:-} -t $_custom_tpl_dir" || \
+        NUCLEI_TEMPLATES_FLAGS="${NUCLEI_TEMPLATES_FLAGS:-}"
 
     # Preparar lista de URLs: domínio raiz + URLs do Katana
     _nuclei_list="$OUTDIR/raw/nuclei_urls.txt"
@@ -770,7 +1162,7 @@ if command -v nuclei &>/dev/null; then
         _batch_pids=""
         for _batch in "$_batch_dir"/batch_*; do
             eval timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
-                -tags cve,tech,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect \
+                -tags cve,tech,detect,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect \
                 -severity critical,high,medium,low \
                 -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                 -timeout 10 -no-interactsh \
@@ -856,6 +1248,11 @@ try:
     print(len([f for f in findings if f.get('severity','') in ('WARN','HIGH','CRITICAL','LOW')]))
 except: print(0)" 2>/dev/null)
     echo -e "  ${GREEN}[✓] testssl concluído — $TLS_ISSUES problema(s) TLS detectado(s)${NC}"
+fi
+# ── Validação de output nuclei ────────────────────────────────────
+if [ ! -s "$OUTDIR/raw/nuclei.json" ]; then
+    echo -e "  ${YELLOW}[!] AVISO: nuclei.json vazio ou ausente — resultado da Fase 4 pode estar incompleto.${NC}"
+    echo -e "  ${YELLOW}    Verifique conectividade com o alvo e considere re-executar deletando FASE_4 do .swarm_state${NC}"
 fi
 phase_end "P4"
 phase_done "FASE_4"
@@ -1572,6 +1969,12 @@ try:
     print(len(data.get('alerts',[])))
 except: print(0)" 2>/dev/null)
         echo -e "  ${GREEN}[✓] ZAP encontrou ${ALERT_COUNT} alerta(s)${NC}"
+
+# ── Validação de output ZAP ───────────────────────────────────────
+if [ ! -s "$OUTDIR/raw/zap_alerts.json" ]; then
+    echo -e "  ${YELLOW}[!] AVISO: zap_alerts.json vazio ou ausente — resultado da Fase 9 pode estar incompleto.${NC}"
+    echo -e "  ${YELLOW}    Verifique se o ZAP spider completou e considere re-executar deletando FASE_9 do .swarm_state${NC}"
+fi
 phase_end "P9"
 phase_done "FASE_9"
         # Atualizar metadata com resultado ZAP
@@ -1926,6 +2329,26 @@ assets
 media
 uploads
 files
+phpinfo.php
+info.php
+test.php
+test/
+phpinfo/
+php.php
+.well-known/security.txt
+security.txt
+.well-known/change-password
+robots.txt
+sitemap.xml
+crossdomain.xml
+clientaccesspolicy.xml
+elmah.axd
+trace.axd
+_profiler
+_wdt
+__clockwork
+telescope
+horizon
 WORDLIST
 
     # Wordlist: custom específica de fintech/hotelaria + seclists se disponível (combinadas)
@@ -1998,6 +2421,114 @@ else
     echo -e "  ${YELLOW}    Instale: go install github.com/trufflesecurity/trufflehog/v3@latest${NC}"
 fi
 
+# ── Rate Limiting Check ──────────────────────────────────────────
+# Sends 20 rapid login attempts and checks for 429 / Retry-After / delays.
+# Tests common login paths: /login, /api/login, /api/auth/login, /auth/login.
+echo -e "  ${BLUE}[…]${NC} Testando rate limiting em endpoints de login..."
+python3 - "$OUTDIR" "$TARGET" << 'PYRATELIMIT'
+import sys, re, json, time, urllib.request, urllib.error, ssl
+
+outdir, target = sys.argv[1], sys.argv[2].rstrip("/")
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+
+LOGIN_PATHS = ["/login", "/api/login", "/api/auth/login", "/auth/login", "/api/user/login",
+               "/admin/login", "/api/v1/login", "/signin", "/api/signin"]
+
+JSON_BODY   = b'{"user":"swarmtest","password":"swarmtest_probe_ratelimit"}'
+FORM_BODY   = b"user=swarmtest&password=swarmtest_probe_ratelimit"
+N_REQUESTS  = 20
+
+def post(url, body, content_type, attempts=2, backoff=3):
+    import time as _t
+    for attempt in range(attempts):
+        try:
+            req = urllib.request.Request(url, data=body, method="POST",
+                  headers={"User-Agent": "Mozilla/5.0", "Content-Type": content_type})
+            r = urllib.request.urlopen(req, timeout=8, context=ctx)
+            return r.status, dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers)
+        except Exception as e:
+            if attempt < attempts - 1:
+                _t.sleep(backoff)
+            else:
+                print(f"  [!] post falhou: {url} — {type(e).__name__}: {e}")
+    return 0, {}
+
+findings = []
+tested_paths = []
+
+for path in LOGIN_PATHS:
+    url = target + path
+    # Quick probe: does this path respond to POST?
+    code, headers = post(url, JSON_BODY, "application/json")
+    if code == 0:
+        continue
+    if code not in (200, 400, 401, 403, 422, 429):
+        # Try form-encoded
+        code, headers = post(url, FORM_BODY, "application/x-www-form-urlencoded")
+        if code not in (200, 400, 401, 403, 422, 429):
+            continue
+
+    content_type = "application/json" if code != 0 else "application/x-www-form-urlencoded"
+    tested_paths.append(path)
+
+    codes   = []
+    got_429 = False
+    got_retry_after = False
+    t0 = time.time()
+    for i in range(N_REQUESTS):
+        c, hdrs = post(url, JSON_BODY if content_type == "application/json" else FORM_BODY,
+                       content_type)
+        codes.append(c)
+        if c == 429:
+            got_429 = True
+        if "retry-after" in {k.lower() for k in hdrs}:
+            got_retry_after = True
+
+    elapsed = time.time() - t0
+    # If total elapsed is > 3× expected (N * 0.1s), server may be throttling
+    if got_429 or got_retry_after:
+        print(f"  [✓] {path}: rate limiting detectado (429={got_429}, Retry-After={got_retry_after})")
+        break  # rate limiting works — stop
+    else:
+        print(f"  [!] {path}: SEM rate limiting — {N_REQUESTS} req em {elapsed:.1f}s, codes={set(codes)}")
+        findings.append({
+            "id":          f"missing-rate-limit-{path.strip('/').replace('/', '-')}",
+            "name":        f"Login Sem Rate Limiting: {path}",
+            "severity":    "medium",
+            "source":      "Rate Limit Check",
+            "url":         target + path,
+            "cve":         "CWE-307 — Improper Restriction of Excessive Authentication Attempts",
+            "cve_ids":     [],
+            "description": (
+                f"Endpoint {path} não implementa rate limiting. "
+                f"{N_REQUESTS} requisições POST com credenciais inválidas completadas em {elapsed:.1f}s "
+                f"sem retorno de HTTP 429 ou header Retry-After. "
+                "Permite ataques de força bruta e credential stuffing sem restrição."
+            ),
+            "remediation": (
+                "Implementar rate limiting no endpoint de login: máximo 5-10 tentativas por IP por minuto. "
+                "Opções: fail2ban, nginx limit_req, Grafana built-in brute_force_login_protection = true "
+                "(grafana.ini [security]), ou WAF com regra de throttling em POST /login."
+            ),
+            "evidence":    f"POST {path} × {N_REQUESTS} → HTTP {set(codes)} em {elapsed:.1f}s — nenhum bloqueio",
+            "param": "", "attack": "", "other": "",
+            "severity_orig": "medium",
+            "severity_reclassified": False,
+        })
+        break  # only report once even if multiple paths lack rate limiting
+
+out_file = f"{outdir}/raw/ratelimit_findings.json"
+with open(out_file, "w") as f:
+    json.dump(findings, f, indent=2, ensure_ascii=False)
+
+if not findings and tested_paths:
+    print(f"  [✓] Rate limiting OK nos endpoints testados: {', '.join(tested_paths)}")
+elif not tested_paths:
+    print("  [○] Nenhum endpoint de login acessível encontrado para teste de rate limiting")
+PYRATELIMIT
+
 export SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
 phase_end "P10_5"
 phase_done "FASE_10_5"
@@ -2007,6 +2538,16 @@ phase_done "FASE_10_5"
 phase_start "P11"
 phase_banner "FASE 11/11: GERAÇÃO DE RELATÓRIO"
 
+# Sanitizar variáveis numéricas — evita ValueError no bloco Python se exportadas como ""
+JS_SECRETS="${JS_SECRETS:-0}";    JS_ENDPOINTS="${JS_ENDPOINTS:-0}"
+JS_FRAMEWORKS="${JS_FRAMEWORKS:-0}"; JS_FILES="${JS_FILES:-0}"
+KATANA_URLS="${KATANA_URLS:-0}";  SMUGGLER_FOUND="${SMUGGLER_FOUND:-0}"
+FFUF_FOUND="${FFUF_FOUND:-0}";    TRUFFLEHOG_FOUND="${TRUFFLEHOG_FOUND:-0}"
+ACTIVE_COUNT="${ACTIVE_COUNT:-0}"; SUB_COUNT="${SUB_COUNT:-0}"
+TLS_ISSUES="${TLS_ISSUES:-0}";    CONFIRMED_COUNT="${CONFIRMED_COUNT:-0}"
+EMAIL_ISSUES="${EMAIL_ISSUES:-0}"; OPENAPI_FOUND="${OPENAPI_FOUND:-0}"
+AUTH_TOKEN="${AUTH_TOKEN:-}";     AUTH_HEADER="${AUTH_HEADER:-}"
+WAF_DETECTED="${WAF_DETECTED:-false}"; WAF_NAME="${WAF_NAME:-}"
 export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
 
 # Usar swarm_report.py externo se disponível (manutenção mais fácil)
@@ -2481,6 +3022,64 @@ if os.path.exists(_shf):
     try: security_headers_data = json.load(open(_shf))
     except Exception as e: errors.append(f'security_headers: {e}')
 
+# Convert missing security headers into pseudo-findings so they are counted
+# in stats/risk_score and rendered as cards in the HTML report.
+_HDR_CWE = {
+    "content-security-policy":  ("CWE-693", "critical"),
+    "strict-transport-security":("CWE-319", "high"),
+    "x-frame-options":          ("CWE-1021","medium"),
+    "x-content-type-options":   ("CWE-693", "medium"),
+    "referrer-policy":          ("CWE-200", "low"),
+    "permissions-policy":       ("CWE-693", "low"),
+    "x-xss-protection":         ("CWE-693", "info"),
+}
+_HDR_REM = {
+    "content-security-policy":   "Adicionar: Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' — ajustar para a stack da aplicação.",
+    "strict-transport-security": "Adicionar: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
+    "x-frame-options":           "Adicionar: X-Frame-Options: SAMEORIGIN (ou DENY se não há iframes legítimos)",
+    "x-content-type-options":    "Adicionar: X-Content-Type-Options: nosniff",
+    "referrer-policy":           "Adicionar: Referrer-Policy: strict-origin-when-cross-origin",
+    "permissions-policy":        "Adicionar: Permissions-Policy: camera=(), microphone=(), geolocation=()",
+    "x-xss-protection":          "Remover ou substituir por Content-Security-Policy — X-XSS-Protection é legado e ignorado em browsers modernos.",
+}
+header_findings = []
+for _shd in security_headers_data:
+    _url = _shd.get("url", TARGET)
+    for _hdr, _hinfo in _shd.get("missing", {}).items():
+        _cwe, _sev_default = _HDR_CWE.get(_hdr, ("CWE-693", "info"))
+        _sev = _hinfo.get("severity", _sev_default)
+        header_findings.append({
+            "id":   f"missing-header-{_hdr}",
+            "name": f"Security Header Ausente: {_hdr}",
+            "severity": _sev, "severity_orig": _sev, "severity_reclassified": False,
+            "source": "Security Headers",
+            "url": _url,
+            "cve": _cwe, "cve_ids": [],
+            "description": _hinfo.get("description", f"Header {_hdr} ausente"),
+            "remediation": _HDR_REM.get(_hdr, f"Configurar o header {_hdr} no servidor web ou proxy reverso."),
+            "evidence": "", "param": "", "attack": "", "other": "",
+        })
+
+# ── Version Fingerprint + Monitoring + Rate Limit findings ───
+version_findings = []
+for _vf_file, _vf_label in [
+    ('version_findings.json',    'version_findings'),
+    ('monitoring_findings.json', 'monitoring_findings'),
+    ('ratelimit_findings.json',  'ratelimit_findings'),
+    ('secscan_findings.json',    'secscan_findings'),
+]:
+    _vff = os.path.join(OUTDIR, 'raw', _vf_file)
+    if os.path.exists(_vff):
+        try:
+            _vf_raw = json.load(open(_vff))
+            for _vf in _vf_raw:
+                _vf.setdefault("severity_orig", _vf.get("severity","info"))
+                _vf.setdefault("severity_reclassified", False)
+                _vf.setdefault("cve_ids", [])
+                version_findings.append(_vf)
+        except Exception as e:
+            errors.append(f'{_vf_label}: {e}')
+
 # ── JS Analysis ──────────────────────────────────────────────
 js_analysis = {}
 js_file = os.path.join(OUTDIR,"raw","js_analysis.json")
@@ -2536,7 +3135,7 @@ for f in findings:
 
 # Stats — contagem de CARDS únicos por severidade (padrão relatórios profissionais)
 # Cada tipo de vulnerabilidade = 1, independente de quantas URLs afeta
-all_f = sorted(findings + zap_findings, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
+all_f = sorted(findings + zap_findings + header_findings + version_findings, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
 stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
 for f in all_f:
     if f["severity"] in stats: stats[f["severity"]] += 1
@@ -2712,31 +3311,81 @@ def render_finding(f):
     if other_val and '[URLs afetadas]' not in other_val:
         rows += f"\n    <tr><th>Detalhe</th><td>{html.escape(other_val)}</td></tr>"
     rows += f"\n    <tr><th>Recomendação</th><td>{html.escape(f.get('remediation',''))}</td></tr>"
-    src_cls = 'source-nuclei' if f.get('source') == 'Nuclei' else 'source-zap'
+    _src = f.get('source','')
+    src_cls = ('source-nuclei'  if _src == 'Nuclei'              else
+               'source-headers' if _src == 'Security Headers'    else
+               'source-version' if _src == 'Version Fingerprint' else
+               'source-zap')
     return f'''<div class="vuln {f['severity']}">
   <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}{reclassify_badge}</h3>
   <table>{rows}
   </table></div>'''
 
-vhtml = '<div class="info-box"><p>✅ Nenhuma vulnerabilidade encontrada no escopo analisado.</p></div>' if not all_f else     "".join(render_finding(f) for f in all_f)
+# Only render critical / high / medium as detailed cards
+_main_findings = [f for f in all_f if f["severity"] in ("critical","high","medium")]
+vhtml = (
+    '<div class="info-box"><p>✅ Nenhuma vulnerabilidade encontrada no escopo analisado.</p></div>'
+    if not _main_findings
+    else "".join(render_finding(f) for f in _main_findings)
+)
 
-# Tabela compacta para Low/Info agrupados
+# ── Consolidated Low / Info table (all sources) ───────────────
+# Collect low/info items from every source: Nuclei, Security Headers,
+# Version Fingerprint, and ZAP low_groups (already grouped by name).
+_low_info_findings = [f for f in all_f if f["severity"] in ("low","info")]
+
 low_table_html = ""
-if zap_low_groups:
-    rows_low = "".join(
-        f'<tr><td>{html.escape(name)}</td>'
-        f'<td style="text-align:center">{grp["count"]}</td>'
-        f'<td style="text-align:center">{badge(grp.get("sev", grp["finding"]["severity"]))}</td>'
-        f'<td>{html.escape(grp["cve"])}</td>'
-        f'<td>{html.escape(grp["conf"])}</td>'
-        f'<td style="font-size:11px;color:#555">{"<br>".join(html.escape(u) for u in grp["urls"])}</td>'
-        f'<td style="font-size:11px">{html.escape(grp["finding"]["remediation"] or "")}</td></tr>'
-        for name, grp in sorted(zap_low_groups.items())
-    )
-    low_table_html = f'''<h2>4. Achados Baixo / Informativo — ZAP ({len(zap_low_groups)} tipos distintos, {sum(g["count"] for g in zap_low_groups.values())} ocorrências no total)</h2>
-    <p style="color:#666;font-size:13px">Agrupados por tipo para reduzir ruído. Validar manualmente antes de reportar.</p>
+if _low_info_findings or zap_low_groups:
+    _src_color = {
+        "Nuclei":              "#3498db",
+        "ZAP":                 "#e74c3c",
+        "Security Headers":    "#7d3c98",
+        "Version Fingerprint": "#d35400",
+    }
+    rows_low = ""
+    # Rows from all_f (low/info)
+    for f in sorted(_low_info_findings, key=lambda x: ({"low":0,"info":1}.get(x["severity"],2), x.get("source",""), x.get("name",""))):
+        src = f.get("source","")
+        src_col = _src_color.get(src, "#636e72")
+        rows_low += (
+            f'<tr>'
+            f'<td style="font-size:12px">{html.escape(f.get("name",""))}</td>'
+            f'<td style="text-align:center">{badge(f["severity"])}</td>'
+            f'<td style="text-align:center"><span style="background:{src_col};color:white;'
+            f'padding:2px 7px;border-radius:4px;font-size:10px;font-weight:bold">'
+            f'{html.escape(src)}</span></td>'
+            f'<td style="font-size:11px">{html.escape(f.get("cve","—") or "—")}</td>'
+            f'<td style="font-size:11px;color:#555">{html.escape(f.get("description","") or "")}</td>'
+            f'<td style="font-size:11px">{html.escape(f.get("remediation","") or "")}</td>'
+            f'</tr>'
+        )
+    # Rows from ZAP low_groups (deduplicated ZAP low/info)
+    for name, grp in sorted(zap_low_groups.items()):
+        src_col = _src_color.get("ZAP","#e74c3c")
+        urls_str = ", ".join(grp["urls"][:3])
+        if len(grp["urls"]) > 3:
+            urls_str += f" (+{len(grp['urls'])-3})"
+        rows_low += (
+            f'<tr>'
+            f'<td style="font-size:12px">{html.escape(name)}'
+            f'{"<br><span style=\\'font-size:10px;color:#888\\'>" + html.escape(urls_str) + "</span>" if urls_str else ""}'
+            f'</td>'
+            f'<td style="text-align:center">{badge(grp.get("sev","low"))}</td>'
+            f'<td style="text-align:center"><span style="background:{src_col};color:white;'
+            f'padding:2px 7px;border-radius:4px;font-size:10px;font-weight:bold">ZAP</span></td>'
+            f'<td style="font-size:11px">{html.escape(grp.get("cve","—") or "—")}</td>'
+            f'<td style="font-size:11px;color:#555">{grp["count"]} ocorrência(s) — confiança: {html.escape(grp.get("conf","?"))}</td>'
+            f'<td style="font-size:11px">{html.escape((grp["finding"].get("remediation") or ""))}</td>'
+            f'</tr>'
+        )
+    _total_low = len(_low_info_findings) + len(zap_low_groups)
+    low_table_html = f'''<h2>4. Achados Baixo / Informativo ({_total_low} item(ns))</h2>
+    <p style="color:#666;font-size:13px">Itens de baixa/info prioridade consolidados. Validar e endereçar após as correções críticas.</p>
     <table>
-      <tr style="background:#f5f5f5"><th>Tipo de Alerta</th><th>Qtd</th><th>Sev</th><th>CVE / CWE</th><th>Confiança</th><th>URLs (amostra)</th><th>Recomendação</th></tr>
+      <tr style="background:#f5f5f5">
+        <th>Achado</th><th style="width:80px">Sev</th><th style="width:120px">Fonte</th>
+        <th style="width:130px">CVE / CWE</th><th>Descrição</th><th>Recomendação</th>
+      </tr>
       {rows_low}
     </table>'''
 
@@ -3152,7 +3801,7 @@ body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#
 .vuln.critical{{border-left:10px solid #7a2e2e}}.vuln.high{{border-left:10px solid #b34e4e}}
 .vuln.medium{{border-left:10px solid #d4833a}}.vuln.low{{border-left:10px solid #4a7c8c}}.vuln.info{{border-left:10px solid #6e8f72}}
 .vuln h3{{margin-top:0}}.source-badge{{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:8px}}
-.source-nuclei{{background:#3498db;color:white}}.source-zap{{background:#e74c3c;color:white}}
+.source-nuclei{{background:#3498db;color:white}}.source-zap{{background:#e74c3c;color:white}}.source-headers{{background:#7d3c98;color:white}}.source-version{{background:#d35400;color:white}}
 .footer{{background:#f5f5f5;padding:20px;text-align:center;font-size:12px;color:#666}}
 table{{width:100%;border-collapse:collapse;margin:10px 0}}th,td{{border:1px solid #ddd;padding:10px;text-align:left;vertical-align:top}}
 th{{background:#f5f5f5;font-weight:600}}h2{{color:#1a3a4f;border-bottom:2px solid #e0e0e0;padding-bottom:8px}}

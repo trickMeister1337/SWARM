@@ -28,7 +28,8 @@ def extract_sqlmap_evidence(log_content: str, log_dir: str) -> Dict[str, Any]:
         ll = l.lower()
         clean = re.sub(r"\[\d{2}:\d{2}:\d{2}\]\s*\[\w+\]\s*", "", l)
 
-        if "parameter '" in ll and ("is vulnerable" in ll or "injectable" in ll):
+        if "parameter '" in ll and ("is vulnerable" in ll or "injectable" in ll) \
+                and "not injectable" not in ll and "might not be injectable" not in ll:
             info["injectable"] = True
             m = re.search(r"parameter '([^']+)'", l)
             if m: info["parameter"] = m.group(1)
@@ -185,8 +186,16 @@ def collect_and_consolidate(outdir: str) -> Dict[str, Any]:
     for f in sorted(glob.glob(f"{outdir}/sqlmap/*_output.log")):
         with open(f) as fh:
             c = fh.read()
-        vuln = any(w in c.lower() for w in
-                   ["is vulnerable", "injectable", "identified the following injection"])
+        cl = c.lower()
+        vuln = (
+            "is vulnerable" in cl
+            or "identified the following injection" in cl
+            or (
+                "injectable" in cl
+                and "not injectable" not in cl
+                and "might not be injectable" not in cl
+            )
+        )
         info = extract_sqlmap_evidence(c, os.path.dirname(f))
         info["injectable"] = info["injectable"] or vuln
         evidence = format_sqlmap_evidence(info)

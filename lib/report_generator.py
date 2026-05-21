@@ -2,12 +2,14 @@
 """
 SWARM RED v7.0 — Gerador de Relatório Red Team (Big4 Style).
 
-Uso: python3 report_generator.py <outdir> <target> <profile> <total> <success> <failed> <version>
+Uso: python3 report_generator.py <outdir> <target> <profile> <total> <success> <failed> <version> [--swarm-dir <scan_dir>]
 
 Lê dados consolidados de evidence.py e gera relatorio_swarm_red.html.
+--swarm-dir: integra findings.json do SWARM scan de origem no relatório.
 """
 import sys
 import os
+import json
 import html as H
 from datetime import datetime
 
@@ -18,9 +20,57 @@ from poc_generator import collect_pocs, generate_verify_script
 esc = lambda s: H.escape(str(s)) if s else ""
 
 
+def _load_swarm_findings(swarm_dir: str) -> list:
+    """Load and convert findings.json from a SWARM scan directory."""
+    fpath = os.path.join(swarm_dir, "findings.json")
+    if not os.path.exists(fpath):
+        return []
+    try:
+        with open(fpath, encoding="utf-8") as f:
+            data = json.load(f)
+        raw = data.get("findings", []) if isinstance(data, dict) else data
+    except Exception:
+        return []
+
+    sev_map = {"critical": "Critical", "high": "High", "medium": "Medium",
+               "low": "Low", "info": "Info"}
+    converted = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        sev = sev_map.get(str(item.get("severity", "info")).lower(), "Info")
+        cves_str = ", ".join(item.get("cve_ids", [])) if item.get("cve_ids") else ""
+        detail_parts = []
+        if item.get("description"):
+            detail_parts.append(item["description"])
+        if cves_str:
+            detail_parts.append(f"CVEs: {cves_str}")
+        if item.get("cvss"):
+            detail_parts.append(f"CVSS: {item['cvss']}")
+        if item.get("epss"):
+            detail_parts.append(f"EPSS: {item['epss']:.4f}")
+        if item.get("in_kev"):
+            detail_parts.append("⚠ CISA KEV")
+        if item.get("remediation"):
+            detail_parts.append(f"\nRemediação: {item['remediation']}")
+        converted.append({
+            "sev":    sev,
+            "tool":   "swarm",
+            "title":  item.get("name", item.get("id", "Finding SWARM")),
+            "target": item.get("url", ""),
+            "type":   "swarm",
+            "detail": "\n".join(detail_parts),
+            "count":  1,
+            "endpoints": [item.get("url", "")] if item.get("url") else [],
+            "source": item.get("source", "SWARM"),
+        })
+    return converted
+
+
 def generate_report(
     outdir: str, target: str, profile: str,
-    total: int, success: int, failed: int, version: str
+    total: int, success: int, failed: int, version: str,
+    swarm_dir: str = ""
 ) -> str:
     now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     data = collect_and_consolidate(outdir)
@@ -41,6 +91,13 @@ def generate_report(
     zap_hc        = data["zap_hc"]
     ssd           = data["searchsploit"]
     subdomains    = data["subdomains"]
+
+    # Merge SWARM findings when scan directory is provided
+    swarm_findings = []
+    if swarm_dir and os.path.isdir(swarm_dir):
+        swarm_findings = _load_swarm_findings(swarm_dir)
+        # Append after RED findings so they render in their own block
+        findings = findings + swarm_findings
 
     st = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0, "Info": 0}
     for f in findings:
@@ -67,7 +124,8 @@ def generate_report(
         total=total, success=success, st=st, tf=tf, rs=rs, rl_=rl_, rc_=rc_,
         pl=pl, sqli_vc=sqli_vc, xss_vc=xss_vc, msf_sess=msf_sess,
         total_endpoints=total_endpoints,
-        findings=findings, sqli_results=sqli_results, xss_results=xss_results,
+        findings=findings, swarm_findings=swarm_findings,
+        sqli_results=sqli_results, xss_results=xss_results,
         msf_log=msf_log, hydra_results=hydra_results, nikto_findings=nikto_findings,
         cves=cves, services=services, log_content=log_content,
         zap_hc=zap_hc, ssd=ssd, outdir=outdir, pocs=pocs, subdomains=subdomains,
@@ -106,7 +164,7 @@ th{background:#f5f5f5;font-weight:600;font-size:.85em}
 .sb{display:inline-block;padding:3px 10px;border-radius:4px;font-size:.75em;font-weight:700;color:#fff}
 .sb-cr{background:#7a2e2e}.sb-hi{background:#b34e4e}.sb-me{background:#d4833a}.sb-lo{background:#4a7c8c}.sb-in{background:#6e8f72}
 .tb{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.7em;font-weight:700;margin-left:6px;color:#fff}
-.t-sq{background:#e67e22}.t-ms{background:#2980b9}.t-hy{background:#8e44ad}.t-nk{background:#27ae60}.t-df{background:#c0392b}
+.t-sq{background:#e67e22}.t-ms{background:#2980b9}.t-hy{background:#8e44ad}.t-nk{background:#27ae60}.t-df{background:#c0392b}.t-sw{background:#1a3a4f}
 .ev{background:#2d3436;color:#dfe6e9;padding:14px;border-radius:6px;font-family:'Cascadia Code',monospace;font-size:.82em;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:400px;margin:8px 0;line-height:1.5}
 .rb{background:#e0e0e0;border-radius:4px;height:14px;margin:8px 0}.ri{height:14px;border-radius:4px}
 code{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:.85em}
@@ -283,54 +341,79 @@ def _section_narrative(**k) -> str:
     return h
 
 
-def _section_findings(**k) -> str:
-    findings = k["findings"]
-    h = '<h2 id="s5">5. Achados e Vulnerabilidades</h2>\n'
-    if not findings:
-        return h + '<div class="ib g"><p><strong>Nenhum exploit confirmado.</strong></p></div>\n'
-
-    total_ep = sum(f.get("count", 1) for f in findings)
-    h += f'<div class="ib"><p><strong>{len(findings)} achado(s)</strong> representando {total_ep} endpoint(s).</p></div>\n'
+def _render_finding_card(i: int, f: dict, prefix: str = "RED") -> str:
+    sv, tl = f["sev"], f["tool"]
+    tc = {"sqlmap": "t-sq", "metasploit": "t-ms", "hydra": "t-hy",
+          "nikto": "t-nk", "dalfox": "t-df", "swarm": "t-sw"}.get(tl, "t-sq")
+    sc = {"Critical": "sb-cr", "High": "sb-hi", "Medium": "sb-me", "Low": "sb-lo"}.get(sv, "sb-in")
+    cnt = f.get("count", 1)
+    cnt_html = f' <span class="cnt-badge">{cnt} endpoint{"s" if cnt>1 else ""}</span>' if cnt > 1 else ""
 
     mitre = {
         "sqli":        "T1190 — Exploit Public-Facing Application",
         "xss":         "T1059.007 — JavaScript Execution",
         "bruteforce":  "T1110 — Brute Force",
         "exploit":     "T1210 — Exploitation of Remote Services",
+        "swarm":       "T1046/T1190 — Recon + Vulnerability Scan",
     }
     impact = {
         "sqli":       "Leitura, modificação ou exclusão de dados. Possível escalação para RCE.",
         "xss":        "Roubo de sessão, defacement, phishing, exfiltração de dados via JS.",
         "bruteforce": "Acesso não autorizado. Possível movimentação lateral.",
         "exploit":    "Execução remota de código ou acesso privilegiado.",
+        "swarm":      "Identificado pelo scan automatizado SWARM — requer análise e remediação.",
     }
 
-    for i, f in enumerate(findings, 1):
-        sv, tl = f["sev"], f["tool"]
-        tc = {"sqlmap": "t-sq", "metasploit": "t-ms", "hydra": "t-hy",
-              "nikto": "t-nk", "dalfox": "t-df"}.get(tl, "t-sq")
-        sc = {"Critical": "sb-cr", "High": "sb-hi", "Medium": "sb-me", "Low": "sb-lo"}.get(sv, "sb-in")
-        cnt = f.get("count", 1)
-        cnt_html = f' <span class="cnt-badge">{cnt} endpoint{"s" if cnt>1 else ""}</span>' if cnt > 1 else ""
+    source_label = esc(f.get("source", tl) if tl == "swarm" else tl)
+    h  = f'<div class="fd {sv}"><h3>{prefix}-{i:03d}: {esc(f["title"])}{cnt_html} <span class="sb {sc}">{sv.upper()}</span> <span class="tb {tc}">{source_label}</span></h3>\n'
+    h += f'<table><tr><th style="width:130px">Alvo</th><td><code>{esc(f["target"][:200])}</code></td></tr>\n'
+    h += f'<tr><th>MITRE ATT&CK</th><td>{mitre.get(f.get("type",""), "T1210")}</td></tr>\n'
+    h += f'<tr><th>Impacto</th><td>{impact.get(f.get("type",""), "Comprometimento do sistema")}</td></tr></table>\n'
 
-        h += f'<div class="fd {sv}"><h3>RED-{i:03d}: {esc(f["title"])}{cnt_html} <span class="sb {sc}">{sv.upper()}</span> <span class="tb {tc}">{esc(tl)}</span></h3>\n'
-        h += f'<table><tr><th style="width:130px">Alvo</th><td><code>{esc(f["target"][:200])}</code></td></tr>\n'
-        h += f'<tr><th>MITRE ATT&CK</th><td>{mitre.get(f.get("type",""), "T1210")}</td></tr>\n'
-        h += f'<tr><th>Impacto</th><td>{impact.get(f.get("type",""), "Comprometimento do sistema")}</td></tr></table>\n'
+    eps = f.get("endpoints", [])
+    if eps and len(eps) > 1:
+        h += f'<p><strong>Endpoints afetados ({len(eps)}):</strong></p>\n<div class="ep-list"><ol>\n'
+        for ep in eps[:30]: h += f'<li>{esc(ep)}</li>\n'
+        if len(eps) > 30: h += f'<li><em>... e mais {len(eps)-30}</em></li>\n'
+        h += '</ol></div>\n'
 
-        eps = f.get("endpoints", [])
-        if eps and len(eps) > 1:
-            h += f'<p><strong>Endpoints afetados ({len(eps)}):</strong></p>\n<div class="ep-list"><ol>\n'
-            for ep in eps[:30]: h += f'<li>{esc(ep)}</li>\n'
-            if len(eps) > 30: h += f'<li><em>... e mais {len(eps)-30}</em></li>\n'
-            h += '</ol></div>\n'
+    det = f.get("detail", "")
+    if det and det.strip():
+        h += f'<p><strong>Evidência técnica:</strong></p>\n<div class="ev">{esc(det)}</div>\n'
+    h += '</div>\n'
+    return h
 
-        det = f.get("detail", "")
-        if det and det.strip():
-            h += f'<p><strong>Evidência técnica:</strong></p>\n<div class="ev">{esc(det)}</div>\n'
-        h += '</div>\n'
 
-    # Nikto
+def _section_findings(**k) -> str:
+    all_findings    = k["findings"]
+    swarm_findings  = k.get("swarm_findings", [])
+    # RED findings are those that are NOT from the merged SWARM list
+    red_findings    = [f for f in all_findings if f not in swarm_findings]
+
+    h = '<h2 id="s5">5. Achados e Vulnerabilidades</h2>\n'
+    if not all_findings:
+        return h + '<div class="ib g"><p><strong>Nenhum exploit confirmado.</strong></p></div>\n'
+
+    total_ep = sum(f.get("count", 1) for f in all_findings)
+    h += f'<div class="ib"><p><strong>{len(all_findings)} achado(s)</strong> representando {total_ep} endpoint(s).</p></div>\n'
+
+    # ── RED findings ──
+    if red_findings:
+        h += f'<h3>Red Team — Exploração Ativa ({len(red_findings)})</h3>\n'
+        for i, f in enumerate(red_findings, 1):
+            h += _render_finding_card(i, f, prefix="RED")
+    else:
+        h += '<div class="ib g"><p>Nenhum exploit confirmado pelo Red Team nesta fase.</p></div>\n'
+
+    # ── SWARM findings ──
+    if swarm_findings:
+        h += f'<h3>Contexto SWARM — Scan de Origem ({len(swarm_findings)})</h3>\n'
+        h += '<div class="ib n"><p>Vulnerabilidades identificadas pelo scan SWARM que precede este engagement. '
+        h += 'Incluídas para contexto e priorização de remediação.</p></div>\n'
+        for i, f in enumerate(swarm_findings, 1):
+            h += _render_finding_card(i, f, prefix="SWM")
+
+    # ── Nikto ──
     if k["nikto_findings"]:
         h += '<h3>Nikto — Misconfigurations</h3><table><tr><th>Severidade</th><th>Achado</th><th>URL</th></tr>\n'
         for nf in k["nikto_findings"][:30]:
@@ -341,11 +424,11 @@ def _section_findings(**k) -> str:
                 h += f'<td>{esc(nf.get("msg",""))}</td><td><code>{esc(nf.get("url",""))}</code></td></tr>\n'
         h += '</table>\n'
 
-    # MSF log
+    # ── MSF log ──
     if k["msf_log"]:
         h += '<h3>Log Metasploit</h3>\n<div class="ev">' + esc(k["msf_log"][-2000:]) + '</div>\n'
 
-    # ZAP
+    # ── ZAP ──
     zap_hi = [z for z in k["zap_hc"] if z.get("risk") in ("Critical","High")]
     zap_show = zap_hi or [z for z in k["zap_hc"] if z.get("risk") == "Medium"]
     if zap_show:
@@ -469,9 +552,22 @@ if __name__ == "__main__":
     if len(sys.argv) < 8:
         print(__doc__)
         sys.exit(1)
+
+    # Parse optional --swarm-dir <path>
+    args = sys.argv[8:]
+    swarm_dir_arg = ""
+    i = 0
+    while i < len(args):
+        if args[i] == "--swarm-dir" and i + 1 < len(args):
+            swarm_dir_arg = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
     path = generate_report(
         outdir=sys.argv[1], target=sys.argv[2], profile=sys.argv[3],
         total=int(sys.argv[4]), success=int(sys.argv[5]),
-        failed=int(sys.argv[6]), version=sys.argv[7]
+        failed=int(sys.argv[6]), version=sys.argv[7],
+        swarm_dir=swarm_dir_arg,
     )
     print(f"REPORT_OK:{path}")

