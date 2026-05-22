@@ -222,6 +222,10 @@ if [ -z "$TARGET" ]; then
 fi
 
 # ── Modo single-target: continua normalmente ─────────────────────
+# Normalizar scheme — alvos sem http(s):// assumem https://
+if ! echo "$TARGET" | grep -qE '^https?://'; then
+    TARGET="https://$TARGET"
+fi
 DOMAIN=$(echo "$TARGET" | sed -E 's|https?://||' | cut -d/ -f1 | cut -d: -f1)
 
 # ── Validação básica do domínio antes de continuar ───────────────
