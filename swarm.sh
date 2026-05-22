@@ -814,6 +814,86 @@ PROBES = [
         "CVE-2022-46153",
         "Atualize o Traefik para a versão 3.x atual.",
     ),
+    # ── Web Application Stacks ──────────────────────────────────────────────────
+    (
+        "WordPress",
+        [("/feed/", "wordpress.org"),
+         ("/wp-login.php", "WordPress"),
+         ("/wp-json/", '"wp:rest-api"')],
+        r'wordpress\.org/\?v=([0-9]+\.[0-9]+\.?[0-9]*)',
+        "6.4",
+        "high",
+        "CVE-2024-6307, CVE-2023-5561, CVE-2023-2745",
+        "Atualize o WordPress core para 6.4+. Mantenha plugins atualizados: wp plugin list --update=available. "
+        "Desabilite xmlrpc.php se não utilizado. Habilite autenticação de dois fatores para administradores.",
+    ),
+    (
+        "Drupal",
+        [("/CHANGELOG.txt", "Drupal"),
+         ("/core/CHANGELOG.txt", "Drupal")],
+        r'Drupal ([0-9]+\.[0-9]+\.?[0-9]*)',
+        "10.0",
+        "high",
+        "CVE-2023-5256, CVE-2022-25271, SA-CORE-2022-015",
+        "Atualize para Drupal 10.x. Execute: drush updb && drush cr. "
+        "Remova CHANGELOG.txt e INSTALL.txt publicamente acessíveis. Consulte: https://www.drupal.org/security",
+    ),
+    (
+        "Joomla",
+        [("/administrator/manifests/files/joomla.xml", "<version>")],
+        r'<version>([0-9]+\.[0-9]+\.?[0-9]*)</version>',
+        "4.4",
+        "high",
+        "CVE-2023-40626, CVE-2023-23752",
+        "Atualize o Joomla para 4.4+. Restrinja /administrator/ por IP/rede. "
+        "Aplique patches em: https://developer.joomla.org/security-centre.html",
+    ),
+    (
+        "Spring Boot Actuator",
+        [("/actuator", '"_links"'),
+         ("/actuator/health", '"status"')],
+        r'"Spring Boot"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+)"',
+        "3.2.0",
+        "high",
+        "CVE-2022-22965, CVE-2023-20883, CVE-2022-22950",
+        "Restrinja /actuator com Spring Security (autenticação obrigatória). "
+        "Nunca exponha /actuator/heapdump, /actuator/env ou /actuator/shutdown publicamente. "
+        "Atualize para Spring Boot 3.2+.",
+    ),
+    (
+        "Django Debug",
+        [("/__debug__/", "djdt"),
+         ("/admin/", "Django administration")],
+        r'Django/([0-9]+\.[0-9]+\.?[0-9]*)',
+        "4.2",
+        "medium",
+        "CVE-2024-27351, CVE-2023-46695, CVE-2022-34265",
+        "Defina DEBUG=False em produção. Remova django-debug-toolbar de ambientes públicos. "
+        "Atualize o Django para 4.2+ (LTS).",
+    ),
+    (
+        "Laravel Debug",
+        [("/telescope", "Laravel Telescope"),
+         ("/horizon", "Laravel Horizon"),
+         ("/_debugbar/", "Debugbar")],
+        r'Laravel\s+v?([0-9]+\.[0-9]+\.?[0-9]*)',
+        "10.0",
+        "high",
+        "CVE-2023-47128, CVE-2021-43996",
+        "Defina APP_DEBUG=false em produção. Proteja /telescope e /horizon com middleware de autenticação. "
+        "Atualize o Laravel para 10.x.",
+    ),
+    (
+        "Apache Struts",
+        [("/struts2-showcase/", "Struts Showcase"),
+         ("/index.action", "Apache Struts")],
+        r'Struts\s+([0-9]+\.[0-9]+\.[0-9]+)',
+        "6.3.0.2",
+        "critical",
+        "CVE-2024-53677, CVE-2023-50164, CVE-2021-31805, S2-066",
+        "Atualize Apache Struts 2 para 6.3.0.2+ IMEDIATAMENTE — CVE-2023-50164 e S2-066 têm exploits RCE públicos. "
+        "Remova struts2-showcase. Consulte: https://struts.apache.org/security",
+    ),
 ]
 
 def version_tuple(v):
@@ -889,6 +969,214 @@ else:
     print("  [✓] Nenhuma tecnologia com versão detectável encontrada")
 PYVERSION
 export VERSION_FINDINGS_FILE="$OUTDIR/raw/version_findings.json"
+
+# ── Tech Profile Builder: agrega httpx tech-detect + katana paths + PROBES ───
+# Gera tech_profile.json usado pelas Fases 4 (Nuclei), 10.5 (ffuf) e 11 (relatório)
+echo -e "  ${BLUE}[…]${NC} Construindo perfil tecnológico do alvo..."
+python3 - "$OUTDIR" "$TARGET" << 'PYTECHPROFILE'
+import sys, re, json, os
+
+outdir, target = sys.argv[1], sys.argv[2].rstrip("/")
+
+tech_inventory = {}  # { "TechName": {"version": "x.y.z", "source": "...", "confidence": "..."} }
+
+# 1. Parse httpx_results.txt para extrair tech-detect
+httpx_file = os.path.join(outdir, "raw", "httpx_results.txt")
+if os.path.exists(httpx_file):
+    for line in open(httpx_file, errors="replace"):
+        line = line.strip()
+        brackets = re.findall(r'\[([^\]]+)\]', line)
+        for brk in brackets:
+            if re.match(r'^\d{3}$', brk.strip()):
+                continue  # skip status codes
+            items = [x.strip() for x in brk.split(',')]
+            for item in items:
+                m = re.match(r'^([A-Za-z][A-Za-z0-9\s\.\-+/]+?)(?::([0-9][0-9.a-z\-]*))?$', item.strip())
+                if m:
+                    name = m.group(1).strip()
+                    version = m.group(2) or ""
+                    if 2 < len(name) < 50 and name not in ("GET", "POST", "HTTP", "HTTPS"):
+                        if name not in tech_inventory or (version and not tech_inventory[name].get("version")):
+                            tech_inventory[name] = {
+                                "version": version,
+                                "source": "httpx",
+                                "confidence": "high"
+                            }
+
+# 2. Integra resultados das PROBES (version_findings.json)
+vf_file = os.path.join(outdir, "raw", "version_findings.json")
+if os.path.exists(vf_file):
+    try:
+        for f in json.load(open(vf_file)):
+            m = re.match(r'^([A-Za-z][A-Za-z0-9\s\-/]+?)\s+v?[0-9]', f.get("name", ""))
+            if m:
+                tech_name = m.group(1).strip()
+                tech_inventory[tech_name] = {
+                    "version":     f.get("detected_version", ""),
+                    "source":      "probe",
+                    "confidence":  "confirmed",
+                    "outdated":    f.get("is_outdated", False),
+                    "min_version": f.get("min_version", ""),
+                    "cves":        f.get("cve", ""),
+                }
+    except Exception as e:
+        print(f"  [!] tech_profile: erro ao ler version_findings.json: {e}")
+
+# 3. Fingerprinting por padrões de path (katana_urls.txt)
+PATH_TECH_MAP = [
+    (r'/wp-(?:admin|content|includes|login\.php|json)',  "WordPress",       ""),
+    (r'/wp-json/wp/v2',                                  "WordPress",       ""),
+    (r'/sites/(?:default|all)/',                         "Drupal",          ""),
+    (r'/core/(?:CHANGELOG|modules|themes)',              "Drupal",          ""),
+    (r'/administrator/',                                 "Joomla",          ""),
+    (r'/components/com_',                                "Joomla",          ""),
+    (r'/actuator/',                                      "Spring Boot",     ""),
+    (r'/telescope',                                      "Laravel",         ""),
+    (r'/horizon',                                        "Laravel",         ""),
+    (r'/_debugbar/',                                     "Laravel",         ""),
+    (r'/__debug__/',                                     "Django",          ""),
+    (r'/static/admin/',                                  "Django",          ""),
+    (r'/_next/',                                         "Next.js",         ""),
+    (r'/__nuxt/',                                        "Nuxt.js",         ""),
+    (r'/rails/',                                         "Ruby on Rails",   ""),
+    (r'/assets/application-[a-f0-9]+\.',                "Ruby on Rails",   ""),
+    (r'/struts2-',                                       "Apache Struts",   ""),
+    (r'\.action(?:\?|$)',                                "Apache Struts",   ""),
+    (r'/grafana',                                        "Grafana",         ""),
+    (r'/kibana',                                         "Kibana",          ""),
+    (r'/jenkins',                                        "Jenkins",         ""),
+    (r'/phpmyadmin',                                     "phpMyAdmin",      ""),
+    (r'/adminer',                                        "Adminer",         ""),
+    (r'/swagger-ui',                                     "Swagger/OpenAPI", ""),
+    (r'/v[0-9]+/api/',                                   "REST API",        ""),
+]
+
+katana_file = os.path.join(outdir, "raw", "katana_urls.txt")
+if os.path.exists(katana_file):
+    try:
+        urls_blob = open(katana_file, errors="replace").read()
+        for pattern, tech_name, tech_ver in PATH_TECH_MAP:
+            if re.search(pattern, urls_blob, re.IGNORECASE) and tech_name not in tech_inventory:
+                tech_inventory[tech_name] = {
+                    "version":    tech_ver,
+                    "source":     "path_fingerprint",
+                    "confidence": "medium"
+                }
+    except Exception as e:
+        print(f"  [!] tech_profile: erro ao ler katana_urls.txt: {e}")
+
+# 4. Categorização e mapeamento para Nuclei/ffuf
+TECH_CATEGORIES = {
+    "cms":        ["WordPress", "Drupal", "Joomla", "Magento", "PrestaShop", "TYPO3"],
+    "webserver":  ["Nginx", "Apache", "IIS", "LiteSpeed", "Caddy", "Tomcat", "Jetty"],
+    "language":   ["PHP", "Python", "Ruby", "Java", "Node.js", "Go", "ASP.NET", ".NET"],
+    "framework":  ["Laravel", "Symfony", "Django", "Ruby on Rails", "Spring Boot",
+                   "Express.js", "Next.js", "Nuxt.js", "Flask", "FastAPI", "Apache Struts"],
+    "database":   ["MySQL", "PostgreSQL", "MongoDB", "Redis", "Elasticsearch", "CouchDB"],
+    "cdn":        ["Cloudflare", "Akamai", "Fastly", "CloudFront", "Varnish"],
+    "cloud":      ["AWS", "Azure", "Google Cloud", "DigitalOcean"],
+    "monitoring": ["Grafana", "Prometheus", "Kibana", "Elasticsearch", "Datadog"],
+    "devops":     ["Jenkins", "GitLab", "Kubernetes", "Docker", "Consul", "Vault", "Traefik"],
+}
+
+TECH_TO_NUCLEI_TAGS = {
+    "WordPress":      ["wordpress", "wp"],
+    "Drupal":         ["drupal"],
+    "Joomla":         ["joomla"],
+    "Magento":        ["magento"],
+    "PrestaShop":     ["prestashop"],
+    "Nginx":          ["nginx"],
+    "Apache":         ["apache"],
+    "IIS":            ["iis"],
+    "Tomcat":         ["tomcat"],
+    "PHP":            ["php"],
+    "Spring Boot":    ["spring", "springboot", "actuator"],
+    "Django":         ["django"],
+    "Laravel":        ["laravel"],
+    "Ruby on Rails":  ["ruby", "rails"],
+    "Node.js":        ["node", "nodejs"],
+    "Next.js":        ["nextjs", "node"],
+    "Nuxt.js":        ["nuxt", "node"],
+    "Redis":          ["redis"],
+    "MongoDB":        ["mongodb"],
+    "MySQL":          ["mysql"],
+    "Elasticsearch":  ["elastic", "elasticsearch"],
+    "AWS":            ["aws"],
+    "Kubernetes":     ["kubernetes", "k8s"],
+    "Docker":         ["docker"],
+    "Jenkins":        ["jenkins"],
+    "Grafana":        ["grafana"],
+    "Prometheus":     ["prometheus"],
+    "Kibana":         ["kibana"],
+    "phpMyAdmin":     ["phpmyadmin"],
+    "Traefik":        ["traefik"],
+    "Consul":         ["consul"],
+    "Vault":          ["vault"],
+    "Apache Struts":  ["struts"],
+    "Swagger/OpenAPI":["swagger", "openapi"],
+}
+
+CMS_FFUF_PROFILES = {
+    "WordPress": "wordpress", "Drupal": "drupal", "Joomla": "joomla",
+    "Laravel": "laravel", "Django": "django", "Spring Boot": "spring",
+    "Next.js": "nodejs", "Ruby on Rails": "rails", "PHP": "php",
+    "Apache Struts": "struts", "Magento": "magento",
+}
+
+CMS_SCANNERS = {
+    "WordPress": "wpscan",
+    "Joomla":    "joomscan",
+    "Drupal":    "droopescan",
+}
+
+nuclei_tags_set = set()
+for tech_name in tech_inventory:
+    for known, tags in TECH_TO_NUCLEI_TAGS.items():
+        if known.lower() in tech_name.lower() or tech_name.lower() in known.lower():
+            nuclei_tags_set.update(tags)
+
+ffuf_profile = "generic"
+cms_scanner  = None
+for tech_name in tech_inventory:
+    if tech_name in CMS_FFUF_PROFILES and ffuf_profile == "generic":
+        ffuf_profile = CMS_FFUF_PROFILES[tech_name]
+    if tech_name in CMS_SCANNERS and not cms_scanner:
+        cms_scanner = CMS_SCANNERS[tech_name]
+
+categories = {}
+for cat, techs in TECH_CATEGORIES.items():
+    found = [t for t in techs if t in tech_inventory]
+    if found:
+        categories[cat] = found
+
+profile = {
+    "detected":          tech_inventory,
+    "categories":        categories,
+    "nuclei_extra_tags": sorted(nuclei_tags_set),
+    "ffuf_profile":      ffuf_profile,
+    "cms_scanner":       cms_scanner,
+    "total_detected":    len(tech_inventory),
+}
+
+out_file = os.path.join(outdir, "raw", "tech_profile.json")
+with open(out_file, "w") as f:
+    json.dump(profile, f, indent=2, ensure_ascii=False)
+
+if tech_inventory:
+    preview = ", ".join(
+        f"{k}" + (f" {v['version']}" if v.get("version") else "")
+        for k, v in list(tech_inventory.items())[:8]
+    ) + (" ..." if len(tech_inventory) > 8 else "")
+    print(f"  [✓] Tech profile: {len(tech_inventory)} tecnologia(s) — {preview}")
+    if nuclei_tags_set:
+        print(f"      → Nuclei tags extras: {', '.join(sorted(nuclei_tags_set)[:12])}")
+    if ffuf_profile != "generic":
+        print(f"      → ffuf profile: {ffuf_profile}")
+    if cms_scanner:
+        print(f"      → CMS scanner ativado: {cms_scanner}")
+else:
+    print("  [✓] Tech profile: nenhuma tecnologia detectada via fingerprinting")
+PYTECHPROFILE
 
 # ── Monitoring Endpoint Exposure Check ───────────────────────────────────────
 # Checks /metrics, /actuator/*, /-/metrics for unauthenticated access.
@@ -1142,6 +1430,29 @@ if command -v nuclei &>/dev/null; then
         NUCLEI_TEMPLATES_FLAGS="${NUCLEI_TEMPLATES_FLAGS:-} -t $_custom_tpl_dir" || \
         NUCLEI_TEMPLATES_FLAGS="${NUCLEI_TEMPLATES_FLAGS:-}"
 
+    # Tags adaptativas: base + extras por stack tecnológica detectada no tech profile
+    _nuclei_base_tags="cve,tech,detect,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect"
+    _tech_profile_nuc="$OUTDIR/raw/tech_profile.json"
+    if [ -f "$_tech_profile_nuc" ]; then
+        _extra_tags=$(python3 -c "
+import json
+try:
+    p = json.load(open('$_tech_profile_nuc'))
+    tags = p.get('nuclei_extra_tags', [])
+    # Evitar duplicatas com os base tags já definidos
+    base = set('cve,tech,detect,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect'.split(','))
+    new_tags = [t for t in tags if t not in base]
+    if new_tags:
+        print(','.join(new_tags))
+except: pass
+" 2>/dev/null || true)
+        if [ -n "$_extra_tags" ]; then
+            _nuclei_base_tags="${_nuclei_base_tags},${_extra_tags}"
+            echo -e "  ${GREEN}[✓]${NC} Nuclei: tags extras por stack → ${_extra_tags}"
+        fi
+    fi
+    unset _tech_profile_nuc
+
     # Preparar lista de URLs: domínio raiz + URLs do Katana
     _nuclei_list="$OUTDIR/raw/nuclei_urls.txt"
     echo "$TARGET" > "$_nuclei_list"
@@ -1162,7 +1473,7 @@ if command -v nuclei &>/dev/null; then
         _batch_pids=""
         for _batch in "$_batch_dir"/batch_*; do
             eval timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
-                -tags cve,tech,detect,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect \
+                -tags "$_nuclei_base_tags" \
                 -severity critical,high,medium,low \
                 -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                 -timeout 10 -no-interactsh \
@@ -1189,11 +1500,11 @@ if command -v nuclei &>/dev/null; then
     fi
 
     [ "${_nuclei_skip:-0}" = "1" ] || eval timeout "$NUCLEI_TIMEOUT" nuclei $_nuclei_input \
-           -tags cve,tech,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect \
+           -tags "$_nuclei_base_tags" \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
            -timeout 10 -no-interactsh \
-           $NUCLEI_EVASION_FLAGS \
+           $NUCLEI_TEMPLATES_FLAGS $NUCLEI_EVASION_FLAGS \
            -jsonl -o "$OUTDIR/raw/nuclei.json" \
            > /dev/null 2>"$OUTDIR/raw/nuclei_error.log"
 
@@ -2351,6 +2662,170 @@ telescope
 horizon
 WORDLIST
 
+    # Append de paths específicos por stack detectada (tech_profile.json)
+    _ffuf_profile="generic"
+    if [ -f "$OUTDIR/raw/tech_profile.json" ]; then
+        _ffuf_profile=$(python3 -c "
+import json
+try:
+    p = json.load(open('$OUTDIR/raw/tech_profile.json'))
+    print(p.get('ffuf_profile', 'generic'))
+except: print('generic')
+" 2>/dev/null || echo "generic")
+    fi
+
+    case "$_ffuf_profile" in
+    wordpress)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist WordPress adicionada"
+        cat >> "$_custom_wl" << 'WP_PATHS'
+wp-admin/
+wp-admin/admin-ajax.php
+wp-admin/options-general.php
+wp-content/debug.log
+wp-content/uploads/
+wp-json/wp/v2/users
+wp-json/wp/v2/posts
+xmlrpc.php
+wp-cron.php
+wp-config.php.bak
+wp-config.php~
+wp-config.php.old
+wp-includes/
+WP_PATHS
+        ;;
+    laravel)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Laravel adicionada"
+        cat >> "$_custom_wl" << 'LARAVEL_PATHS'
+.env
+.env.backup
+.env.production
+.env.staging
+telescope/
+telescope/requests
+horizon/
+horizon/api/jobs
+storage/logs/laravel.log
+vendor/
+_debugbar/
+api/user
+storage/
+LARAVEL_PATHS
+        ;;
+    spring)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Spring Boot/Actuator adicionada"
+        cat >> "$_custom_wl" << 'SPRING_PATHS'
+actuator
+actuator/health
+actuator/env
+actuator/heapdump
+actuator/logfile
+actuator/metrics
+actuator/mappings
+actuator/beans
+actuator/configprops
+actuator/threaddump
+actuator/shutdown
+actuator/info
+v2/api-docs
+v3/api-docs
+swagger-ui.html
+swagger-ui/index.html
+SPRING_PATHS
+        ;;
+    django)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Django adicionada"
+        cat >> "$_custom_wl" << 'DJANGO_PATHS'
+admin/
+admin/login/
+api/
+api/v1/
+api/v2/
+static/admin/
+media/
+__debug__/
+DJANGO_PATHS
+        ;;
+    drupal)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Drupal adicionada"
+        cat >> "$_custom_wl" << 'DRUPAL_PATHS'
+user/login
+user/register
+admin/
+admin/reports/status
+INSTALL.txt
+CHANGELOG.txt
+core/CHANGELOG.txt
+sites/default/settings.php
+xmlrpc.php
+modules/
+themes/
+DRUPAL_PATHS
+        ;;
+    rails)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Ruby on Rails adicionada"
+        cat >> "$_custom_wl" << 'RAILS_PATHS'
+rails/info/routes
+rails/info/properties
+rails/mailers
+sidekiq/
+sidekiq/queues
+letter_opener/
+RAILS_PATHS
+        ;;
+    php)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist PHP adicionada"
+        cat >> "$_custom_wl" << 'PHP_PATHS'
+phpinfo.php
+info.php
+test.php
+setup.php
+install.php
+upgrade.php
+phpmyadmin/
+adminer/
+PHP_PATHS
+        ;;
+    struts)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Apache Struts adicionada"
+        cat >> "$_custom_wl" << 'STRUTS_PATHS'
+index.action
+login.action
+struts/webconsole.html
+struts2-showcase/
+Welcome.action
+STRUTS_PATHS
+        ;;
+    magento)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Magento adicionada"
+        cat >> "$_custom_wl" << 'MAGENTO_PATHS'
+admin/
+admin/dashboard/
+downloader/
+downloader/index.php
+app/etc/local.xml
+api/rest/
+MAGENTO_PATHS
+        ;;
+    nodejs)
+        echo -e "  ${GREEN}[✓]${NC} ffuf: wordlist Node.js/Next.js adicionada"
+        cat >> "$_custom_wl" << 'NODEJS_PATHS'
+api/
+api/v1/
+api/health
+api/status
+_next/
+__nextjs_original-stack-frame
+.next/
+node_modules/
+package.json
+NODEJS_PATHS
+        ;;
+    *)
+        :  # generic — wordlist padrão é suficiente
+        ;;
+    esac
+    unset _ffuf_profile
+
     # Wordlist: custom específica de fintech/hotelaria + seclists se disponível (combinadas)
     _wordlist="$_custom_wl"
     for _wl in \
@@ -2395,6 +2870,73 @@ else
     echo -e "  ${YELLOW}[○]${NC} ffuf não instalado — pulando"
     echo -e "  ${YELLOW}    Instale: go install github.com/ffuf/ffuf/v2@latest${NC}"
 fi
+
+# ── Scanners CMS-específicos condicionais ────────────────────────
+# Ativados somente se o CMS correspondente foi detectado no tech profile
+WPSCAN_VULNS=0
+_cms_to_run=""
+if [ -f "$OUTDIR/raw/tech_profile.json" ]; then
+    _cms_to_run=$(python3 -c "
+import json
+try:
+    p = json.load(open('$OUTDIR/raw/tech_profile.json'))
+    print(p.get('cms_scanner', '') or '')
+except: print('')
+" 2>/dev/null || echo "")
+fi
+
+if [ "$_cms_to_run" = "wpscan" ]; then
+    if command -v wpscan &>/dev/null; then
+        echo -e "  ${BLUE}[…]${NC} wpscan: WordPress detectado — executando scanner específico..."
+        _wpscan_args="--url $TARGET --enumerate vp,vt,u,ap --no-update --format json"
+        [ -n "${WPSCAN_API_TOKEN:-}" ] && _wpscan_args="$_wpscan_args --api-token $WPSCAN_API_TOKEN"
+        timeout 180 wpscan $_wpscan_args \
+            -o "$OUTDIR/raw/wpscan.json" 2>/dev/null || true
+        if [ -s "$OUTDIR/raw/wpscan.json" ]; then
+            WPSCAN_VULNS=$(python3 -c "
+import json
+try:
+    d = json.load(open('$OUTDIR/raw/wpscan.json'))
+    vulns  = sum(len(v.get('vulnerabilities', [])) for v in d.get('plugins', {}).values())
+    vulns += len(d.get('main_theme', {}).get('vulnerabilities', []))
+    vulns += len(d.get('vulnerabilities', []))
+    print(vulns)
+except: print(0)" 2>/dev/null || echo 0)
+            echo -e "  ${GREEN}[✓]${NC} wpscan: ${WPSCAN_VULNS} vulnerabilidade(s) detectada(s) em plugins/temas"
+        fi
+    else
+        echo -e "  ${YELLOW}[○]${NC} wpscan não instalado — WordPress detectado mas scanner indisponível"
+        echo -e "  ${YELLOW}    Instale: gem install wpscan  |  ou: docker run wpscanteam/wpscan${NC}"
+    fi
+elif [ "$_cms_to_run" = "joomscan" ]; then
+    if command -v joomscan &>/dev/null; then
+        echo -e "  ${BLUE}[…]${NC} joomscan: Joomla detectado — executando scanner específico..."
+        timeout 180 joomscan -u "$TARGET" --ec \
+            > "$OUTDIR/raw/joomscan.txt" 2>/dev/null || true
+        if [ -s "$OUTDIR/raw/joomscan.txt" ]; then
+            _joom_items=$(grep -c "^\[!" "$OUTDIR/raw/joomscan.txt" 2>/dev/null || echo 0)
+            echo -e "  ${GREEN}[✓]${NC} joomscan: ${_joom_items} item(s) de segurança identificado(s)"
+        fi
+        unset _joom_items
+    else
+        echo -e "  ${YELLOW}[○]${NC} joomscan não instalado — Joomla detectado mas scanner indisponível"
+        echo -e "  ${YELLOW}    Instale: cpan install OWASP::joomscan  |  ou: git clone https://github.com/OWASP/joomscan${NC}"
+    fi
+elif [ "$_cms_to_run" = "droopescan" ]; then
+    if command -v droopescan &>/dev/null; then
+        echo -e "  ${BLUE}[…]${NC} droopescan: Drupal detectado — executando scanner específico..."
+        timeout 180 droopescan scan drupal -u "$TARGET" \
+            > "$OUTDIR/raw/droopescan.txt" 2>/dev/null || true
+        if [ -s "$OUTDIR/raw/droopescan.txt" ]; then
+            echo -e "  ${GREEN}[✓]${NC} droopescan: output salvo em raw/droopescan.txt"
+        fi
+    else
+        echo -e "  ${YELLOW}[○]${NC} droopescan não instalado — Drupal detectado mas scanner indisponível"
+        echo -e "  ${YELLOW}    Instale: pip install droopescan${NC}"
+    fi
+fi
+export WPSCAN_VULNS
+unset _cms_to_run _wpscan_args
 
 # ── trufflehog: secrets em repos expostos ────────────────────────
 TRUFFLEHOG_FOUND=0
@@ -2548,7 +3090,8 @@ TLS_ISSUES="${TLS_ISSUES:-0}";    CONFIRMED_COUNT="${CONFIRMED_COUNT:-0}"
 EMAIL_ISSUES="${EMAIL_ISSUES:-0}"; OPENAPI_FOUND="${OPENAPI_FOUND:-0}"
 AUTH_TOKEN="${AUTH_TOKEN:-}";     AUTH_HEADER="${AUTH_HEADER:-}"
 WAF_DETECTED="${WAF_DETECTED:-false}"; WAF_NAME="${WAF_NAME:-}"
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER
+WPSCAN_VULNS="${WPSCAN_VULNS:-0}"
+export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER WPSCAN_VULNS
 
 # Usar swarm_report.py externo se disponível (manutenção mais fácil)
 _report_py="$(dirname "$0")/swarm_report.py"
@@ -3060,6 +3603,19 @@ for _shd in security_headers_data:
             "evidence": "", "param": "", "attack": "", "other": "",
         })
 
+# ── Tech Profile ─────────────────────────────────────────────
+tech_profile  = {}
+tech_detected = {}
+tech_categories = {}
+_tp_file = os.path.join(OUTDIR, "raw", "tech_profile.json")
+if os.path.exists(_tp_file) and os.path.getsize(_tp_file) > 0:
+    try:
+        tech_profile    = json.load(open(_tp_file, "r", encoding="utf-8"))
+        tech_detected   = tech_profile.get("detected", {})
+        tech_categories = tech_profile.get("categories", {})
+    except Exception as e:
+        errors.append(f"tech_profile: {e}")
+
 # ── Version Fingerprint + Monitoring + Rate Limit findings ───
 version_findings = []
 for _vf_file, _vf_label in [
@@ -3092,6 +3648,19 @@ js_frameworks = js_analysis.get("frameworks",[])
 js_files_list = js_analysis.get("js_files",[])
 js_probes     = js_analysis.get("endpoint_probes",[])
 js_comments   = js_analysis.get("sensitive_comments",[])
+
+# Enriquecer tech_profile com frameworks JS detectados pelo PYJS
+if js_frameworks:
+    for fw in js_frameworks:
+        fw_name = fw.get("framework","")
+        fw_ver  = fw.get("version","")
+        if fw_name and fw_name not in tech_detected:
+            tech_detected[fw_name] = {
+                "version":    fw_ver,
+                "source":     "js_analysis",
+                "confidence": "high",
+                "vulnerable": fw.get("vulnerable", False),
+            }
 
 # ── CVE enrichment (NVD + EPSS) ──────────────────────────────
 cve_enrichment = {}
@@ -3785,6 +4354,97 @@ if any(plan_parts):
 </div>
 {"".join(plan_parts)}"""
 
+# ── Gerar HTML: Inventário de Tecnologias Detectadas ─────────
+tech_inventory_html = ""
+if tech_detected:
+    # Coletar techs desatualizadas a partir do version_findings
+    outdated_names = set()
+    for _vf in version_findings:
+        if _vf.get("is_outdated"):
+            _m = re.match(r'^([A-Za-z][A-Za-z0-9\s\-/]+?)\s+v?[0-9]', _vf.get("name",""))
+            if _m:
+                outdated_names.add(_m.group(1).strip().lower())
+
+    # Mapa de CVEs por tecnologia (de version_findings)
+    tech_cve_map = {}
+    for _vf in version_findings:
+        _m = re.match(r'^([A-Za-z][A-Za-z0-9\s\-/]+?)\s+v?[0-9]', _vf.get("name",""))
+        if _m:
+            _tn = _m.group(1).strip()
+            tech_cve_map[_tn.lower()] = re.sub(r'CWE-[0-9]+\s*[—-]\s*','', _vf.get("cve",""))[:80]
+
+    rows = ""
+    for _tech_name, _info in sorted(tech_detected.items(), key=lambda x: x[0].lower()):
+        _version    = _info.get("version","") or "—"
+        _source     = _info.get("source","")
+        _confidence = _info.get("confidence","medium")
+        _is_outdated = _tech_name.lower() in outdated_names or _info.get("outdated", False)
+        _is_vuln_fw  = _info.get("vulnerable", False)
+
+        if _is_outdated:
+            _sbg, _slbl = "#b34e4e", "⚠ DESATUALIZADO"
+        elif _is_vuln_fw:
+            _sbg, _slbl = "#d4833a", "⚠ VULNERÁVEL"
+        elif _confidence == "confirmed":
+            _sbg, _slbl = "#27ae60", "✓ CONFIRMADO"
+        else:
+            _sbg, _slbl = "#6e8f72", "✓ DETECTADO"
+
+        _cves = tech_cve_map.get(_tech_name.lower(), "")
+        _src_labels = {"httpx":"httpx","probe":"probe","path_fingerprint":"path","js_analysis":"JS"}
+        _src_label = _src_labels.get(_source, _source)
+
+        rows += (
+            f'<tr>'
+            f'<td style="font-weight:600">{html.escape(_tech_name)}</td>'
+            f'<td><code style="font-size:12px">{html.escape(str(_version))}</code></td>'
+            f'<td style="text-align:center">'
+            f'<span style="background:{_sbg};color:white;padding:2px 8px;border-radius:4px;'
+            f'font-size:11px;font-weight:bold;white-space:nowrap">{_slbl}</span></td>'
+            f'<td style="font-size:11px;color:#555">{html.escape(_cves) if _cves else "—"}</td>'
+            f'<td style="text-align:center">'
+            f'<span style="background:#eee;padding:1px 6px;border-radius:3px;font-size:11px">'
+            f'{html.escape(_src_label)}</span></td>'
+            f'</tr>'
+        )
+
+    _outdated_count = len(outdated_names)
+    _total_tech     = len(tech_detected)
+
+    # Badges de categoria
+    _cat_labels_pt = {
+        "cms":"CMS","webserver":"Servidor Web","language":"Linguagem","framework":"Framework",
+        "database":"Banco de Dados","cdn":"CDN","cloud":"Cloud",
+        "monitoring":"Monitoramento","devops":"DevOps","security":"Segurança"
+    }
+    _cat_badges = "".join(
+        f'<span style="background:#e8f4f8;border:1px solid #1a3a4f;padding:3px 10px;'
+        f'border-radius:12px;font-size:12px;margin:3px;display:inline-block">'
+        f'<strong>{_cat_labels_pt.get(_cat,_cat)}:</strong> {", ".join(_items)}</span>'
+        for _cat, _items in tech_categories.items()
+    )
+    _cat_html = f'<div style="margin:10px 0 14px">{_cat_badges}</div>' if _cat_badges else ""
+
+    _outdated_badge = (
+        f' — <span style="color:#b34e4e;font-weight:bold">{_outdated_count} desatualizado(s)</span>'
+        if _outdated_count else " — stack atualizada"
+    )
+    tech_inventory_html = (
+        f'<h2>2.5. Inventário de Tecnologias Detectadas</h2>'
+        f'<div class="info-box">'
+        f'<p><strong>{_total_tech} componente(s) identificado(s)</strong>{_outdated_badge}. '
+        f'Detectados via httpx tech-detect, JS analysis e fingerprinting de endpoints.</p>'
+        + _cat_html +
+        f'</div>'
+        f'<table><tr style="background:#f5f5f5">'
+        f'<th style="width:170px">Componente</th>'
+        f'<th style="width:130px">Versão</th>'
+        f'<th style="width:150px">Status</th>'
+        f'<th>CVEs Conhecidos</th>'
+        f'<th style="width:70px">Fonte</th>'
+        f'</tr>' + rows + f'</table>'
+    )
+
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
 <title>SWARM — {html.escape(DOMAIN)}</title><style>
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
@@ -3845,6 +4505,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {f'<tr><th>URLs (Katana JS crawl)</th><td>{KATANA_URLS} URL(s) descobertas com rendering JS</td></tr>' if KATANA_URLS > 0 else ""}</table>
 <h3>Hosts Ativos (httpx)</h3><table><tr><th>Resultado</th></tr>{trows(httpx_lines,"httpx não executado ou sem resultados detectados")}</table>
 <h3>Portas Abertas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado ou sem portas abertas")}</table>
+{tech_inventory_html}
 <h2>3. Vulnerabilidades Identificadas</h2>{vhtml}
 
 <!-- Comportamento do Scan -->
@@ -3888,6 +4549,10 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {"<li><code>raw/trufflehog.json</code> — Secrets de alta confiança (trufflehog)</li>" if TRUFFLEHOG_FOUND > 0 else ""}
 {"<li><code>raw/js_analysis.json</code> — Análise JS/Secrets completa</li>" if js_analysis else ""}
 {"<li><code>raw/js_files/</code> — Arquivos JS para análise forense</li>" if js_files_list else ""}
+{"<li><code>raw/tech_profile.json</code> — Inventário de tecnologias detectadas (httpx + JS + probes)</li>" if tech_detected else ""}
+{"<li><code>raw/wpscan.json</code> — WordPress scanner (wpscan)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","wpscan.json")) else ""}
+{"<li><code>raw/joomscan.txt</code> — Joomla scanner (joomscan)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","joomscan.txt")) else ""}
+{"<li><code>raw/droopescan.txt</code> — Drupal scanner (droopescan)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","droopescan.txt")) else ""}
 </ul>
 <p><strong>Nota:</strong> Todos os achados devem ser validados manualmente antes de reportar ao cliente ou equipe de desenvolvimento.</p></div></div>
 <div class="footer"><p><strong>CONFIDENCIAL — USO INTERNO</strong></p>

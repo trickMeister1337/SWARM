@@ -45,6 +45,61 @@ O SWARM é uma suite completa de segurança ofensiva composta por scripts indepe
 
 ## Últimas Atualizações
 
+### v7.3 — Scan Adaptativo por Stack Tecnológica (Mai 2026)
+
+Implementação completa de inteligência sobre o stack do alvo: o SWARM agora detecta as tecnologias em uso e adapta automaticamente todas as ferramentas — Nuclei, ffuf, PROBES e scanners CMS — com base no que foi encontrado.
+
+**`swarm.sh` — 6 novos módulos:**
+
+- **Tech Profile Builder (`PYTECHPROFILE`)** — após a Fase 2, agrega dados de três fontes:
+  - httpx `-tech-detect` (parser do texto de saída com tech brackets `[WordPress:6.3, PHP:8.1, Nginx:1.18.0]`)
+  - katana URL fingerprinting (23 padrões de path → CMS/framework)
+  - PROBES confirmadas (`version_findings.json`)
+
+  Gera `raw/tech_profile.json` com: tecnologias detectadas + versões + fonte + categorias + tags Nuclei extras + ffuf profile + CMS scanner recomendado.
+
+- **Nuclei com tags dinâmicas** — a Fase 4 lê o tech profile e estende as tags base com tags específicas da stack. Exemplos: WordPress detectado → `-tags wordpress,wp` adicionado; Spring Boot → `-tags spring,springboot,actuator`; Drupal → `-tags drupal`. Ambos os modos (paralelo em lotes e único) usam a mesma lista dinâmica.
+
+- **PROBES expandidas para web stacks** — adicionados 7 novos alvos ao detector de versões desatualizadas:
+
+  | Tecnologia | Endpoint de Detecção | CVEs Cobertos |
+  |---|---|---|
+  | WordPress | `/feed/` generator tag | CVE-2024-6307, CVE-2023-5561 |
+  | Drupal | `/CHANGELOG.txt`, `/core/CHANGELOG.txt` | CVE-2023-5256, SA-CORE-2022-015 |
+  | Joomla | `/administrator/manifests/files/joomla.xml` | CVE-2023-40626, CVE-2023-23752 |
+  | Spring Boot Actuator | `/actuator`, `/actuator/health` | CVE-2022-22965, CVE-2023-20883 |
+  | Django Debug | `/__debug__/`, `/admin/` | CVE-2024-27351, CVE-2023-46695 |
+  | Laravel Debug | `/telescope`, `/horizon`, `/_debugbar/` | CVE-2023-47128, CVE-2021-43996 |
+  | Apache Struts | `/struts2-showcase/`, `/index.action` | CVE-2024-53677, CVE-2023-50164 (RCE) |
+
+- **ffuf com wordlists condicionais** — a Fase 10.5 seleciona paths adicionais com base no ffuf_profile do tech profile. 10 profiles implementados: `wordpress`, `laravel`, `spring`, `django`, `drupal`, `rails`, `php`, `struts`, `magento`, `nodejs`. A wordlist é acumulada sobre a base genérica, não substituída.
+
+- **Scanners CMS condicionais** — após o ffuf, ativa automaticamente o scanner específico se o CMS foi detectado e a ferramenta está instalada:
+  - WordPress → `wpscan --enumerate vp,vt,u,ap`
+  - Joomla → `joomscan --ec`
+  - Drupal → `droopescan scan drupal`
+
+  Aceita `WPSCAN_API_TOKEN` via variável de ambiente para acesso à base de vulnerabilidades premium.
+
+- **Seção "Inventário de Tecnologias" no relatório HTML** — nova seção 2.5 entre Superfície de Ataque e Vulnerabilidades Identificadas. Mostra tabela com: componente, versão detectada, status (DETECTADO / DESATUALIZADO / VULNERÁVEL), CVEs conhecidos e fonte de detecção. Badges por categoria (CMS, Servidor Web, Framework, etc.) e contador de componentes desatualizados.
+
+**Novos arquivos gerados (`raw/`):**
+
+| Arquivo | Conteúdo |
+|---|---|
+| `raw/tech_profile.json` | Inventário de tecnologias: nome, versão, fonte, confiança, tags Nuclei, ffuf profile, CMS scanner |
+| `raw/wpscan.json` | Resultado do wpscan (WordPress) |
+| `raw/joomscan.txt` | Resultado do joomscan (Joomla) |
+| `raw/droopescan.txt` | Resultado do droopescan (Drupal) |
+
+**Variável de ambiente opcional:**
+
+```bash
+export WPSCAN_API_TOKEN="seu_token_aqui"  # acesso à base premium de vulnerabilidades wpscan
+```
+
+---
+
 ### v7.2 — Cobertura de superfície expandida + SWARM RED melhorias (Mai 2026)
 
 **`swarm.sh` — 4 novos módulos de detecção:**
@@ -149,19 +204,22 @@ Pipeline de 11 fases que mapeia a superfície de ataque completa, valida vulnera
   ┌──────────────────────────────────────────────────────────────┐
   │                    SWARM — Consultant Edition                │
   │                                                              │
-  │  [1]   Subdomain Discovery   subfinder                       │
-  │  [2]   Surface Mapping       httpx + nmap (web + serviços)   │
-  │  [2.5] WAF + SecScan         wafw00f + security.txt + IPs    │
-  │  [3]   TLS Analysis          testssl (paralelo com nuclei)   │
-  │  [4]   Vulnerability Scan    nuclei (CVE + exposure + tech)  │
-  │  [5]   PoC Confirmation      poc_validator.py (min 60%)      │
-  │  [6]   CVE Enrichment        NVD API v2 + EPSS + CISA KEV    │
-  │  [7]   WAF Detection         wafw00f + evasão passiva        │
-  │  [8]   Email Security        SPF / DMARC / DKIM              │
-  │  [9]   ZAP Active Scan       Spider + Ajax + Active Scan     │
-  │  [10]  JS Analysis           katana + trufflehog + ffuf      │
-  │  [11]  Relatório             HTML + sumário executivo + JSON │
+  │  [1]    Subdomain Discovery  subfinder                       │
+  │  [2]    Surface Mapping      httpx (tech-detect) + nmap      │
+  │  [2.5]  WAF + Tech Profile   wafw00f + PYTECHPROFILE *       │
+  │  [3]    TLS Analysis         testssl (paralelo com nuclei)   │
+  │  [4]    Vulnerability Scan   nuclei (tags adaptativas) *     │
+  │  [5]    PoC Confirmation     poc_validator.py (min 60%)      │
+  │  [6]    CVE Enrichment       NVD API v2 + EPSS + CISA KEV    │
+  │  [7]    WAF Detection        wafw00f + evasão passiva        │
+  │  [8]    Email Security       SPF / DMARC / DKIM              │
+  │  [9]    ZAP Active Scan      Spider + Ajax + Active Scan     │
+  │  [10]   JS Analysis          katana + trufflehog             │
+  │  [10.5] Testes Extras        ffuf (wordlist adaptativa) *    │
+  │                              wpscan/joomscan/droopescan *    │
+  │  [11]   Relatório            HTML + inventário de tech *     │
   └──────────────────────────────────────────────────────────────┘
+  * novo em v7.3
 ```
 
 ```bash
@@ -186,10 +244,69 @@ docker run --rm -v $(pwd)/output:/swarm/output \
 
 | Arquivo | Conteúdo |
 |---|---|
-| `relatorio_swarm.html` | Relatório técnico completo com evidências e curl reproduzível |
+| `relatorio_swarm.html` | Relatório técnico completo com inventário de tech, evidências e curl reproduzível |
 | `sumario_executivo.html` | Página única de risco para gestão |
 | `findings.json` | Export estruturado para SIEM/Jira |
+| `raw/tech_profile.json` | Perfil tecnológico do alvo (novo v7.3) |
+| `raw/wpscan.json` | Resultado wpscan (se WordPress detectado) |
 | `raw/` | nuclei JSONL, ZAP alerts, TLS issues, JS analysis |
+
+---
+
+### Scan Adaptativo por Stack Tecnológica
+
+O SWARM detecta automaticamente o stack do alvo e ajusta as ferramentas sem nenhuma configuração manual.
+
+**Fluxo de detecção (Fase 2.5):**
+
+```
+httpx -tech-detect → "[WordPress:6.3, PHP:8.1, Nginx:1.18.0]"
+       +
+katana URLs → /wp-admin/, /actuator/, /_next/ → CMS fingerprint
+       +
+PROBES (HTTP) → /feed/, /CHANGELOG.txt, /actuator → versão confirmada
+       ↓
+tech_profile.json → nuclei_extra_tags, ffuf_profile, cms_scanner
+```
+
+**Exemplo de `raw/tech_profile.json` para um alvo WordPress:**
+
+```json
+{
+  "detected": {
+    "WordPress": {"version": "6.3.1", "source": "httpx", "confidence": "high"},
+    "PHP":       {"version": "8.1.0", "source": "httpx", "confidence": "high"},
+    "Nginx":     {"version": "1.18.0","source": "httpx", "confidence": "high"},
+    "jQuery":    {"version": "3.6.0", "source": "httpx", "confidence": "high"}
+  },
+  "categories": {"cms": ["WordPress"], "language": ["PHP"], "webserver": ["Nginx"]},
+  "nuclei_extra_tags": ["wordpress", "wp"],
+  "ffuf_profile": "wordpress",
+  "cms_scanner":  "wpscan",
+  "total_detected": 4
+}
+```
+
+**Mapeamento tech → comportamento:**
+
+| Stack detectada | Tags Nuclei extras | ffuf wordlist | Scanner CMS |
+|---|---|---|---|
+| WordPress | `wordpress, wp` | wp-admin, xmlrpc.php, wp-config backups | wpscan |
+| Drupal | `drupal` | CHANGELOG.txt, sites/default, modules/ | droopescan |
+| Joomla | `joomla` | administrator/, components/ | joomscan |
+| Spring Boot | `spring, springboot, actuator` | /actuator/* (heapdump, env, shutdown) | — |
+| Laravel | `laravel` | .env, telescope/, horizon/, storage/logs | — |
+| Django | `django` | admin/, __debug__/, api/v1/ | — |
+| Apache Struts | `struts` | *.action, struts2-showcase/ | — |
+| Nginx | `nginx` | — | — |
+| PHP | `php` | phpinfo.php, adminer/, phpmyadmin/ | — |
+
+**Para usar WPSCAN_API_TOKEN (base de vulnerabilidades premium):**
+
+```bash
+export WPSCAN_API_TOKEN="seu_token_aqui"
+bash swarm.sh https://alvo-wordpress.com
+```
 
 ---
 
