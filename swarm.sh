@@ -176,13 +176,15 @@ TARGET=""
 PARALLEL_JOBS=1
 AUTH_TOKEN=""      # Bearer token para scan autenticado
 AUTH_HEADER=""     # Header customizado (ex: "Cookie: session=abc")
+OSINT_DIR=""       # Diretório de output do osint.sh (reaproveita descoberta)
 
-# Parse args: suporta --token e --header além de -f/--file
+# Parse args: suporta --token, --header e --osint-dir além de -f/--file
 _args=("$@")
 for _i in "${!_args[@]}"; do
     case "${_args[$_i]}" in
-        --token|-t)  AUTH_TOKEN="${_args[$((${_i}+1))]}" ;;
-        --header|-H) AUTH_HEADER="${_args[$((${_i}+1))]}" ;;
+        --token|-t)          AUTH_TOKEN="${_args[$((${_i}+1))]}" ;;
+        --header|-H)         AUTH_HEADER="${_args[$((${_i}+1))]}" ;;
+        --osint-dir|--osint) OSINT_DIR="${_args[$((${_i}+1))]}" ;;
     esac
 done
 
@@ -210,8 +212,10 @@ fi
 # ── Sem argumento: mostrar uso ──────────────────────────────────────
 if [ -z "$TARGET" ]; then
     echo -e "${RED}Uso:${NC}"
-    echo -e "  ${YELLOW}bash swarm.sh https://target.com${NC}         — scan único"
-    echo -e "  ${YELLOW}bash swarm.sh -f targets.txt${NC}             — múltiplos alvos (via swarm_batch.sh)"
+    echo -e "  ${YELLOW}bash swarm.sh https://target.com${NC}                  — scan único"
+    echo -e "  ${YELLOW}bash swarm.sh -f targets.txt${NC}                      — múltiplos alvos (via swarm_batch.sh)"
+    echo -e "  ${YELLOW}bash swarm.sh target.com --osint-dir osint_*/${NC}     — reaproveita descoberta do osint.sh"
+    echo -e "  ${YELLOW}bash swarm.sh target.com --token <jwt>${NC}            — scan autenticado"
     echo ""
     echo -e "  ${YELLOW}Exemplo: bash swarm.sh https://app.exemplo.com${NC}"
     exit 1
@@ -449,8 +453,28 @@ unset _prefix _p _last2 _is_compound _tld _compound_tlds
 phase_start "P1"
 phase_banner "FASE 1/11: DESCOBERTA DE SUBDOMÍNIOS"
 
+# ── Integração OSINT: validar diretório fornecido ─────────────────
+if [ -n "$OSINT_DIR" ]; then
+    OSINT_DIR="${OSINT_DIR%/}"   # remover barra final
+    if [ ! -d "$OSINT_DIR" ]; then
+        echo -e "  ${YELLOW}[!] --osint-dir '${OSINT_DIR}' não encontrado — seguindo com descoberta normal${NC}"
+        OSINT_DIR=""
+    elif [ ! -s "$OSINT_DIR/targets_enriched.txt" ]; then
+        echo -e "  ${YELLOW}[!] OSINT dir sem targets_enriched.txt — descoberta normal${NC}"
+    else
+        echo -e "  ${GREEN}[✓] Integração OSINT ativa: ${OSINT_DIR}${NC}"
+    fi
+fi
+
 SUB_COUNT=0
-if [ "$IS_SUBDOMAIN" -eq 1 ]; then
+if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/targets_enriched.txt" ]; then
+    # Reaproveitar descoberta do osint.sh — não rodar subfinder de novo.
+    # targets_enriched.txt traz "https://host"; subdomains.txt espera hostnames.
+    sed -E 's#^https?://##' "$OSINT_DIR/targets_enriched.txt" \
+        | cut -d/ -f1 | sed '/^$/d' | sort -u > "$OUTDIR/raw/subdomains.txt"
+    SUB_COUNT=$(wc -l < "$OUTDIR/raw/subdomains.txt" | tr -d ' ')
+    echo -e "  ${GREEN}[✓] Reaproveitando ${SUB_COUNT} alvo(s) do OSINT — subfinder ignorado${NC}"
+elif [ "$IS_SUBDOMAIN" -eq 1 ]; then
     echo -e "  ${YELLOW}[○] Alvo é um subdomínio/API específico — descoberta ignorada${NC}"
     echo -e "  ${BLUE}[…] Usando ${DOMAIN} diretamente nas próximas fases${NC}"
     echo "$DOMAIN" > "$OUTDIR/raw/subdomains.txt"
@@ -740,11 +764,16 @@ except: pass
     fi
     unset _tech_profile_nuc
 
-    # Preparar lista de URLs: domínio raiz + URLs do Katana
+    # Preparar lista de URLs: domínio raiz + URLs do Katana + endpoints OSINT
     _nuclei_list="$OUTDIR/raw/nuclei_urls.txt"
     echo "$TARGET" > "$_nuclei_list"
     [ -s "$OUTDIR/raw/katana_urls.txt" ] && \
         cat "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list"
+    # Endpoints históricos do OSINT (wayback/gau) alimentam a varredura
+    if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/endpoints_historical.txt" ]; then
+        cat "$OSINT_DIR/endpoints_historical.txt" >> "$_nuclei_list"
+        echo -e "  ${GREEN}[✓]${NC} Nuclei: $(wc -l < "$OSINT_DIR/endpoints_historical.txt" | tr -d ' ') endpoint(s) históricos do OSINT incluídos"
+    fi
     sort -u "$_nuclei_list" -o "$_nuclei_list"
     _url_count=$(wc -l < "$_nuclei_list" | tr -d " ")
 
