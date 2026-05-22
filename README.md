@@ -45,6 +45,16 @@ O SWARM é uma suite completa de segurança ofensiva composta por scripts indepe
 
 ## Últimas Atualizações
 
+### v7.4 — Refatoração: modularização do swarm.sh (Mai 2026)
+
+O `swarm.sh` carregava ~2.500 linhas de Python embutido em 12 heredocs bash — sem syntax check, lint, testes ou debug possível. Esse código foi extraído para módulos standalone, reduzindo o `swarm.sh` de **4.991 → 1.870 linhas**.
+
+- **Gerador de relatório → `swarm_report.py`** (1.817 linhas). O `swarm.sh` já tinha o mecanismo de chamá-lo externamente; o heredoc foi removido e o módulo é a única fonte de verdade. Saída HTML/JSON validada byte-idêntica à versão anterior.
+- **11 heredocs de coleta → `lib/*.py`**: `scan_metadata`, `security_headers`, `version_fingerprint`, `tech_profile`, `monitoring_check`, `secscan`, `cve_enrich`, `email_security`, `zap_config_fix`, `js_analysis`, `ratelimit_check`. Cada módulo recebe os mesmos argumentos via `sys.argv`; corpos validados byte-idênticos aos heredocs originais.
+- **`eval` removido** da invocação do Nuclei. `NUCLEI_EVASION_FLAGS`, `NUCLEI_TEMPLATES_FLAGS` e `_nuclei_input` agora são arrays bash, que preservam corretamente argumentos com espaços (ex: `-H "User-Agent: ..."`) sem necessidade de `eval`.
+- **Confirmação ativa vinculada aos cards**: findings com confirmação correspondente (`poc_validator.py`) exibem badge **✓ CONFIRMADO ATIVAMENTE** no relatório (match por template-id do Nuclei e id do testssl). A tabela TLS passou a mostrar o nome descritivo do problema em vez do resultado cru.
+- **CI reforçado**: novo passo `py_compile` valida `swarm_report.py` e todos os `lib/*.py` em cada push/PR — o Python antes invisível nos heredocs agora é checado.
+
 ### v7.3 — Scan Adaptativo por Stack Tecnológica (Mai 2026)
 
 Implementação completa de inteligência sobre o stack do alvo: o SWARM agora detecta as tecnologias em uso e adapta automaticamente todas as ferramentas — Nuclei, ffuf, PROBES e scanners CMS — com base no que foi encontrado.
