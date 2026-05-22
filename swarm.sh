@@ -470,10 +470,13 @@ SUB_COUNT=0
 if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/targets_enriched.txt" ]; then
     # Reaproveitar descoberta do osint.sh — não rodar subfinder de novo.
     # targets_enriched.txt traz "https://host"; subdomains.txt espera hostnames.
-    sed -E 's#^https?://##' "$OSINT_DIR/targets_enriched.txt" \
-        | cut -d/ -f1 | sed '/^$/d' | sort -u > "$OUTDIR/raw/subdomains.txt"
+    # O alvo explícito (DOMAIN) é sempre incluído — nunca descartar o TARGET passado.
+    {
+        sed -E 's#^https?://##' "$OSINT_DIR/targets_enriched.txt" | cut -d/ -f1
+        echo "$DOMAIN"
+    } | sed '/^$/d' | sort -u > "$OUTDIR/raw/subdomains.txt"
     SUB_COUNT=$(wc -l < "$OUTDIR/raw/subdomains.txt" | tr -d ' ')
-    echo -e "  ${GREEN}[✓] Reaproveitando ${SUB_COUNT} alvo(s) do OSINT — subfinder ignorado${NC}"
+    echo -e "  ${GREEN}[✓] Reaproveitando ${SUB_COUNT} alvo(s) do OSINT (alvo explícito garantido) — subfinder ignorado${NC}"
 elif [ "$IS_SUBDOMAIN" -eq 1 ]; then
     echo -e "  ${YELLOW}[○] Alvo é um subdomínio/API específico — descoberta ignorada${NC}"
     echo -e "  ${BLUE}[…] Usando ${DOMAIN} diretamente nas próximas fases${NC}"

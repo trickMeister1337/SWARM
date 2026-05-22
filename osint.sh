@@ -936,6 +936,9 @@ phase_build_outputs() {
     # targets_enriched.txt — entrada para swarm.sh
     step "Gerando targets_enriched.txt"
     {
+        # O domínio-alvo sempre entra, mesmo que não haja subdomínios descobertos
+        # (ex: alvo já é um subdomínio folha)
+        [ -n "$DOMAIN" ] && echo "https://$DOMAIN"
         if [ -f "$OUTDIR/subdomains_live.txt" ]; then
             awk '{print $1}' "$OUTDIR/subdomains_live.txt" | while IFS= read -r h; do
                 [ -n "$h" ] && echo "https://$h"
