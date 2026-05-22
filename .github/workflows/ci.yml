@@ -30,6 +30,14 @@ jobs:
             bash -n "$f"
           done
 
+      - name: Check Python modules (compile)
+        run: |
+          python3 -m py_compile swarm_report.py
+          for f in lib/*.py; do
+            echo "Compiling $f..."
+            python3 -m py_compile "$f"
+          done
+
   unit-tests:
     name: Python unit tests
     runs-on: ubuntu-latest

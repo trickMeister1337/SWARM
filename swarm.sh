@@ -684,36 +684,38 @@ NUCLEI_COUNT=0
 if command -v nuclei &>/dev/null; then
     echo -e "  ${YELLOW}[!] Scan pode levar 5-10 minutos (rate-limit: ${NUCLEI_RATE_LIMIT} req/s)...${NC}"
     # Construir flags de evasão baseado em WAF detectado
-    NUCLEI_EVASION_FLAGS=""
+    # Arrays bash preservam os limites de cada argumento (headers com espaços)
+    # sem precisar de eval na invocação do nuclei.
+    NUCLEI_EVASION_FLAGS=()
     # Injetar token de autenticação no Nuclei se fornecido
     if [ -n "$AUTH_TOKEN" ]; then
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"Authorization: Bearer ${AUTH_TOKEN}\""
+        NUCLEI_EVASION_FLAGS+=(-H "Authorization: Bearer ${AUTH_TOKEN}")
         echo -e "  ${GREEN}[✓]${NC} Nuclei: Authorization header configurado"
     fi
     if [ -n "$AUTH_HEADER" ]; then
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"${AUTH_HEADER}\""
+        NUCLEI_EVASION_FLAGS+=(-H "${AUTH_HEADER}")
         echo -e "  ${GREEN}[✓]${NC} Nuclei: header customizado configurado"
     fi
     if [ "${WAF_DETECTED}" = "1" ]; then
         # User-Agent de browser real + headers que imitam tráfego legítimo
-        NUCLEI_EVASION_FLAGS="-H \"User-Agent: ${RANDOM_UA}\""
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\""
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"Accept-Language: pt-BR,pt;q=0.9,en;q=0.8\""
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"X-Forwarded-For: 127.0.0.1\""
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -H \"X-Real-IP: 127.0.0.1\""
+        # (reset intencional: comportamento idêntico ao original)
+        NUCLEI_EVASION_FLAGS=(-H "User-Agent: ${RANDOM_UA}")
+        NUCLEI_EVASION_FLAGS+=(-H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        NUCLEI_EVASION_FLAGS+=(-H "Accept-Language: pt-BR,pt;q=0.9,en;q=0.8")
+        NUCLEI_EVASION_FLAGS+=(-H "X-Forwarded-For: 127.0.0.1")
+        NUCLEI_EVASION_FLAGS+=(-H "X-Real-IP: 127.0.0.1")
         # Ignorar respostas de bloqueio do WAF (403/406/429) e continuar
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -hc 403,406,429"
+        NUCLEI_EVASION_FLAGS+=(-hc 403,406,429)
         # Payload alterations — testa variações de encoding automaticamente
-        NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -pa"
-        [ -n "$NUCLEI_DELAY" ] && NUCLEI_EVASION_FLAGS="$NUCLEI_EVASION_FLAGS -rl-duration $NUCLEI_DELAY"
+        NUCLEI_EVASION_FLAGS+=(-pa)
+        [ -n "$NUCLEI_DELAY" ] && NUCLEI_EVASION_FLAGS+=(-rl-duration "$NUCLEI_DELAY")
         echo -e "  ${BLUE}[…] Evasão passiva ativada: UA rotation + origin spoofing + payload alterations${NC}"
     fi
 
     # Always include custom templates directory if it exists
+    NUCLEI_TEMPLATES_FLAGS=()
     _custom_tpl_dir="$(dirname "$0")/nuclei-custom-templates"
-    [ -d "$_custom_tpl_dir" ] && \
-        NUCLEI_TEMPLATES_FLAGS="${NUCLEI_TEMPLATES_FLAGS:-} -t $_custom_tpl_dir" || \
-        NUCLEI_TEMPLATES_FLAGS="${NUCLEI_TEMPLATES_FLAGS:-}"
+    [ -d "$_custom_tpl_dir" ] && NUCLEI_TEMPLATES_FLAGS+=(-t "$_custom_tpl_dir")
 
     # Tags adaptativas: base + extras por stack tecnológica detectada no tech profile
     _nuclei_base_tags="cve,tech,detect,exposure,default-login,misconfig,takeover,cors,lfi,ssrf,redirect"
@@ -757,12 +759,12 @@ except: pass
         split -l 50 "$_nuclei_list" "$_batch_dir/batch_"
         _batch_pids=""
         for _batch in "$_batch_dir"/batch_*; do
-            eval timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
+            timeout "$NUCLEI_BATCH_TIMEOUT" nuclei -l "$_batch" \
                 -tags "$_nuclei_base_tags" \
                 -severity critical,high,medium,low \
                 -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
                 -timeout 10 -no-interactsh \
-                $NUCLEI_TEMPLATES_FLAGS $NUCLEI_EVASION_FLAGS \
+                "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
                 -jsonl -o "${_batch}.json" \
                 > /dev/null 2>/dev/null &
             _batch_pids="$_batch_pids $!"
@@ -780,16 +782,16 @@ except: pass
         _nuclei_skip=1
     else
         echo -e "  ${BLUE}[…] Nuclei usando ${_url_count} URL(s)${NC}"
-        _nuclei_input="-l $_nuclei_list"
+        _nuclei_input=(-l "$_nuclei_list")
         _nuclei_skip=0
     fi
 
-    [ "${_nuclei_skip:-0}" = "1" ] || eval timeout "$NUCLEI_TIMEOUT" nuclei $_nuclei_input \
+    [ "${_nuclei_skip:-0}" = "1" ] || timeout "$NUCLEI_TIMEOUT" nuclei "${_nuclei_input[@]}" \
            -tags "$_nuclei_base_tags" \
            -severity critical,high,medium,low \
            -rate-limit "$NUCLEI_RATE_LIMIT" -concurrency "$NUCLEI_CONCURRENCY" \
            -timeout 10 -no-interactsh \
-           $NUCLEI_TEMPLATES_FLAGS $NUCLEI_EVASION_FLAGS \
+           "${NUCLEI_TEMPLATES_FLAGS[@]}" "${NUCLEI_EVASION_FLAGS[@]}" \
            -jsonl -o "$OUTDIR/raw/nuclei.json" \
            > /dev/null 2>"$OUTDIR/raw/nuclei_error.log"
 
