@@ -1584,6 +1584,81 @@ if tech_detected:
         f'</tr>' + rows + f'</table>'
     )
 
+# ── Big4: Escopo & Metodologia (seção 1.1) ───────────────────
+_auth_token  = os.environ.get("AUTH_TOKEN", "")
+_auth_header = os.environ.get("AUTH_HEADER", "")
+_scan_type   = ("Autenticado (token/header fornecido)"
+                if (_auth_token or _auth_header)
+                else "Não autenticado (caixa-preta)")
+
+# Pipeline canônico — status derivado de raw/.phase_times + artefatos
+_PIPELINE = [
+    ("P1",   "Descoberta de subdomínios",     "subfinder + httpx + katana"),
+    ("P2",   "Mapeamento de superfície",      "httpx + nmap + katana"),
+    ("P2_5", "Detecção de WAF & headers",     "wafw00f + security headers"),
+    ("P3",   "Análise TLS/SSL",               "testssl.sh"),
+    ("P4",   "Varredura de vulnerabilidades", "Nuclei (tags adaptativas)"),
+    ("P5",   "Confirmação ativa de exploits", "poc_validator (re-execução)"),
+    ("P6",   "Enriquecimento de CVEs",        "NVD + EPSS + CISA KEV"),
+    ("P8",   "Segurança de e-mail",           "SPF / DMARC / DKIM"),
+    ("P9",   "Scan dinâmico",                 "OWASP ZAP (spider + active)"),
+    ("P10",  "Análise de JavaScript",         "secrets + endpoints + libs"),
+    ("P10_5","Fuzzing complementar",          "ffuf + scanners CMS"),
+    ("P11",  "Geração de relatório",          "swarm_report.py"),
+]
+_phase_artifact = {"P3": "testssl.json"}  # fases que rodam sem registrar 'end' no .phase_times
+_method_rows = ""
+for _pid, _pname, _ptools in _PIPELINE:
+    if _pid in phase_times:
+        _d = phase_times[_pid]
+        if _d > 0:
+            _label, _dur, _color = "✓ Executada", f"{_d//60}m {_d%60:02d}s", "#1b5e20"
+        else:
+            _label, _dur, _color = "✓ Executada", "sem trabalho aplicável", "#4a7c8c"
+    elif _pid == "P11":
+        _label, _dur, _color = "✓ Executada", "—", "#1b5e20"
+    elif _pid in _phase_artifact and os.path.exists(os.path.join(OUTDIR, "raw", _phase_artifact[_pid])):
+        _label, _dur, _color = "✓ Executada", "—", "#1b5e20"
+    else:
+        _label, _dur, _color = "○ Não executada", "—", "#888"
+    _method_rows += (f'<tr><td style="font-family:monospace">{_pid.replace("_",".")}</td>'
+        f'<td>{html.escape(_pname)}</td>'
+        f'<td style="font-size:12px;color:#555">{html.escape(_ptools)}</td>'
+        f'<td style="color:{_color};font-weight:600;white-space:nowrap">{_label}</td>'
+        f'<td style="white-space:nowrap">{_dur}</td></tr>')
+
+# Narrativa de derivação do índice de risco
+_risk_narr = (f"O índice <strong>{risk}/100</strong> parte da contagem ponderada por severidade "
+    f"(base {base_risk}: crítico×10, alto×5, médio×2, baixo×1)")
+if kev_bonus:  _risk_narr += f", soma <strong>+{kev_bonus}</strong> por CVE(s) em exploração ativa (CISA KEV)"
+if epss_bonus: _risk_narr += f", <strong>+{epss_bonus}</strong> por probabilidade de exploração (EPSS)"
+if js_bonus:   _risk_narr += f", <strong>+{js_bonus}</strong> por exposições em JavaScript"
+_risk_narr += f". Classificação final: <strong style='color:{scol}'>{html.escape(stxt)}</strong>."
+
+_waf_limit = (f' O alvo está protegido por WAF ({html.escape(WAF_NAME)}): o active scan pode conter '
+    f'falsos negativos.' if WAF_DETECTED and WAF_NAME else '')
+
+methodology_html = f'''<h2>1.1. Escopo &amp; Metodologia</h2>
+<table>
+<tr><th style="width:220px">Alvo</th><td><code>{html.escape(TARGET)}</code></td></tr>
+<tr><th>Domínio</th><td>{html.escape(DOMAIN)}</td></tr>
+<tr><th>Data do scan</th><td>{rdate}</td></tr>
+<tr><th>Duração total</th><td>{duration_str}</td></tr>
+<tr><th>Tipo de avaliação</th><td>{_scan_type}</td></tr>
+<tr><th>Autorização</th><td>Execução restrita a ambiente com Rules of Engagement (RoE) assinado.</td></tr>
+</table>
+<div class="info-box" style="margin-top:10px">
+<p><strong>Derivação do risco:</strong> {_risk_narr}</p>
+</div>
+<h3>Pipeline executado</h3>
+<table>
+<tr style="background:#f5f5f5"><th style="width:60px">Fase</th><th>Atividade</th><th>Ferramentas</th><th style="width:150px">Status</th><th style="width:120px">Duração</th></tr>
+{_method_rows}
+</table>
+<div class="info-box" style="margin-top:10px;font-size:12px">
+<p><strong>Limitações:</strong> esta é uma avaliação automatizada e não substitui um pentest manual.{_waf_limit} Achados de severidade crítica/alta devem ser validados manualmente antes da remediação.</p>
+</div>'''
+
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
 <title>SWARM — {html.escape(DOMAIN)}</title><style>
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
@@ -1636,6 +1711,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {'<p style="background:#fff3cd;padding:8px 12px;border-radius:4px;margin:8px 0;font-size:13px"><strong style="color:#856404">🛡 WAF: '+html.escape(WAF_NAME)+'</strong> — active scan pode ter falsos negativos.</p>' if WAF_DETECTED and WAF_NAME else ""}
 {'<p style="color:#b34e4e;font-size:13px">⚠ <strong>'+str(EMAIL_ISSUES)+' problema(s) de segurança de email</strong> detectado(s).</p>' if EMAIL_ISSUES > 0 else ""}
 </div>
+{methodology_html}
 <h2>2. Superfície de Ataque</h2>
 <table>
 <tr><th style="width:220px">Subdomínios descobertos</th><td>{SUB_COUNT}</td></tr>
