@@ -41,7 +41,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests 2>/dev/null || true
+        run: pip install -r requirements-dev.txt
 
       - name: Run tests
         run: python3 -m pytest test_lib.py -v --tb=short
