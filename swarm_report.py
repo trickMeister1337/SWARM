@@ -850,8 +850,19 @@ for grp in zap_dedup.values():
     if sev in occurrences: occurrences[sev] += (grp["count"] - 1)
 
 # ── Risk score: KEV > EPSS > CVSS (metodologia 2026) ───────────
-# Base: ocorrências ponderadas por severidade CVSS
-base_risk = (occurrences["critical"]*10) + (occurrences["high"]*5) + (occurrences["medium"]*2) + occurrences["low"]
+# Base: faixa pela severidade mais alta + quantidade com retornos decrescentes.
+# Usa TIPOS ÚNICOS (stats), não ocorrências por URL — assim um mesmo alerta
+# repetido em N URLs não satura o índice (o que mascarava a discriminação:
+# quase todo scan batia 100/100). A severidade mais alta define a faixa-base
+# (alinhada às bandas 70/40/15); a quantidade adiciona um bônus limitado.
+if   stats["critical"] > 0: _risk_floor = 70   # CRÍTICO
+elif stats["high"]     > 0: _risk_floor = 40   # ALTO
+elif stats["medium"]   > 0: _risk_floor = 15   # MÉDIO
+elif stats["low"]      > 0: _risk_floor = 5
+else:                       _risk_floor = 0
+_risk_qty = min(stats["critical"]*6 + stats["high"]*3
+                + stats["medium"]*1 + stats["low"]*0.5, 25)
+base_risk = int(_risk_floor + _risk_qty)
 
 # Camada 1 — KEV: exploração ativa confirmada (peso máximo)
 # Um CVE no KEV é automaticamente urgente independente do CVSS
@@ -874,6 +885,12 @@ js_medium = [s for s in js_secrets if s.get("type","") not in HIGH_JS_TYPES]
 js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
 js_bonus = min(len(js_high)*15 + len(js_medium)*5 + len(js_vuln_fw)*8, 30)
 risk = min(base_risk + kev_bonus + epss_bonus + js_bonus, 100)
+# A faixa CRÍTICO exige um achado de severidade crítica OU exploração ativa
+# (CISA KEV). Bônus brandos (EPSS/JS) elevam dentro de ALTO, mas não devem
+# fabricar um CRÍTICO sozinhos — evita que falsos-positivos de secrets JS ou
+# probabilidade EPSS inflem a leitura executiva.
+if stats["critical"] == 0 and kev_count == 0:
+    risk = min(risk, 69)
 # Classificação baseada no risk score (KEV+EPSS+CVSS) — não apenas contagem
 # Faixas: 70-100=CRÍTICO, 40-69=ALTO, 15-39=MÉDIO, 0-14=BAIXO
 if risk >= 70:
@@ -1628,8 +1645,12 @@ for _pid, _pname, _ptools in _PIPELINE:
         f'<td style="white-space:nowrap">{_dur}</td></tr>')
 
 # Narrativa de derivação do índice de risco
-_risk_narr = (f"O índice <strong>{risk}/100</strong> parte da contagem ponderada por severidade "
-    f"(base {base_risk}: crítico×10, alto×5, médio×2, baixo×1)")
+_total_occ = sum(occurrences.values())
+_risk_narr = (f"O índice <strong>{risk}/100</strong> usa a faixa-base da severidade mais alta "
+    f"presente (crítico→70, alto→40, médio→15, baixo→5) mais um bônus de quantidade com "
+    f"retornos decrescentes sobre <strong>{total}</strong> tipo(s) único(s) de achado")
+if _total_occ > total:
+    _risk_narr += f" ({_total_occ} ocorrências no total, contadas uma vez por tipo para não saturar)"
 if kev_bonus:  _risk_narr += f", soma <strong>+{kev_bonus}</strong> por CVE(s) em exploração ativa (CISA KEV)"
 if epss_bonus: _risk_narr += f", <strong>+{epss_bonus}</strong> por probabilidade de exploração (EPSS)"
 if js_bonus:   _risk_narr += f", <strong>+{js_bonus}</strong> por exposições em JavaScript"
