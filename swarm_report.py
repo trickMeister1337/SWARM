@@ -1564,6 +1564,76 @@ if any(plan_parts):
 </div>
 {"".join(plan_parts)}"""
 
+# ── Matriz Esforço × Impacto (priorização estilo Big4) ───────────
+def _estimate_effort(f):
+    """Esforço de correção: baixo (config/infra) / médio / alto (código/arquitetura)."""
+    cve  = str(f.get("cve", "")).upper()
+    name = str(f.get("name", "")).lower()
+    src  = f.get("source", "")
+    _m   = re.search(r'CWE-?(\d+)', cve)
+    cwe  = _m.group(1) if _m else ""
+    HIGH_CWE = {"89","78","77","94","502","611","918","22","23","287","306",
+                "352","384","843","917","98","434"}
+    if cwe in HIGH_CWE: return "alto"
+    if any(k in name for k in ("sql injection","sqli","command inject","rce",
+            "remote code","deserial","ssrf","xxe","path traversal","authentication",
+            "authorization","bypass","csrf","ssti","file upload","lfi")):
+        return "alto"
+    LOW_CWE = {"693","1021","319","614","1004","532","16"}
+    if cwe in LOW_CWE: return "baixo"
+    if src in ("Email Security", "testssl.sh"): return "baixo"
+    if any(k in name for k in ("header","hsts","spf","dmarc","dkim","cipher","tls/ssl",
+            "ssl","cookie","clickjacking","security.txt","caa","ocsp","rate limit")):
+        return "baixo"
+    return "médio"
+
+def _impact_tier(sev):
+    return "alto" if sev in ("critical","high") else "médio" if sev == "medium" else "baixo"
+
+_matrix = {}
+_seen_m = set()
+for f in all_f:
+    sev = f.get("severity", "")
+    if sev not in ("critical","high","medium","low"): continue
+    nm = f.get("name", "")
+    if not nm or nm in _seen_m: continue
+    _seen_m.add(nm)
+    _matrix.setdefault((_impact_tier(sev), _estimate_effort(f)), []).append((nm, sev))
+
+def _matrix_cell(imp, eff, highlight=False):
+    items = sorted(_matrix.get((imp, eff), []), key=lambda x: SEV_ORDER.get(x[1], 9))
+    if not items:
+        body = '<span style="color:#ccc">—</span>'
+    else:
+        body = "<br>".join(f'{badge(s)} {html.escape(n[:46])}' for n, s in items[:7])
+        if len(items) > 7:
+            body += f'<br><span style="color:#888;font-size:11px">+{len(items)-7} mais</span>'
+    bg = "#eafaf1" if highlight else "#fff"
+    tag = ('<div style="font-size:10px;font-weight:bold;color:#1b5e20;margin-bottom:4px">★ QUICK WINS</div>'
+           if highlight else "")
+    return f'<td style="vertical-align:top;background:{bg};padding:8px;font-size:12px;border:1px solid #e0e0e0">{tag}{body}</td>'
+
+priority_matrix_html = ""
+if _seen_m:
+    priority_matrix_html = f"""<h2>Matriz de Priorização — Esforço × Impacto</h2>
+<div class="info-box"><p style="font-size:13px">Cruza o <strong>impacto</strong> (severidade)
+com o <strong>esforço</strong> estimado de correção. O quadrante <strong>alto impacto + baixo
+esforço</strong> são os <strong>quick wins</strong> — máxima prioridade de execução.</p></div>
+<table style="border-collapse:collapse;width:100%">
+<tr style="background:#1a3a4f;color:white">
+  <th style="padding:8px;width:90px"></th>
+  <th style="padding:8px">Esforço Baixo<br><span style="font-weight:normal;font-size:11px">config / infra</span></th>
+  <th style="padding:8px">Esforço Médio<br><span style="font-weight:normal;font-size:11px">upgrade / tuning</span></th>
+  <th style="padding:8px">Esforço Alto<br><span style="font-weight:normal;font-size:11px">código / arquitetura</span></th>
+</tr>
+<tr><th style="background:#7a2e2e;color:white;padding:8px">Impacto<br>Alto</th>
+  {_matrix_cell("alto","baixo",highlight=True)}{_matrix_cell("alto","médio")}{_matrix_cell("alto","alto")}</tr>
+<tr><th style="background:#d4833a;color:white;padding:8px">Impacto<br>Médio</th>
+  {_matrix_cell("médio","baixo")}{_matrix_cell("médio","médio")}{_matrix_cell("médio","alto")}</tr>
+<tr><th style="background:#4a7c8c;color:white;padding:8px">Impacto<br>Baixo</th>
+  {_matrix_cell("baixo","baixo")}{_matrix_cell("baixo","médio")}{_matrix_cell("baixo","alto")}</tr>
+</table>"""
+
 # ── Gerar HTML: Inventário de Tecnologias Detectadas ─────────
 tech_inventory_html = ""
 if tech_detected:
@@ -1818,6 +1888,9 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 
 <!-- Plano de Ação -->
 {action_plan_html}
+
+<!-- Matriz de Priorização Esforço × Impacto -->
+{priority_matrix_html}
 <h2>5. Arquivos de Evidência</h2><div class="info-box"><ul>
 <li><code>raw/subdomains.txt</code> — Subdomínios descobertos</li>
 <li><code>raw/httpx_results.txt</code> — Hosts HTTP ativos e tecnologias</li>
