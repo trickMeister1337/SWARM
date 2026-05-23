@@ -1,869 +1,203 @@
-# SWARM Suite
+<h1 align="center">Stiglitz</h1>
 
-> Suite completa de segurança ofensiva — reconhecimento, varredura, exploração e relatório em um único pipeline automatizado.
+<p align="center">
+  <b>The all-in-one offensive security pipeline.</b><br>
+  OSINT → Recon → Adaptive Scanning → Active Exploitation → Big4-grade reports — in one command.
+</p>
 
-[![Shell](https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash)](https://www.gnu.org/software/bash/)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python)](https://python.org)
-[![CI](https://github.com/trickMeister1337/SWARM/actions/workflows/ci.yml/badge.svg)](https://github.com/trickMeister1337/SWARM/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Author](https://img.shields.io/badge/Author-trickMeister1337-red)](https://github.com/trickMeister1337)
-
----
-
-## ⚠ Aviso Legal
-
-**Uso exclusivo em ambientes com autorização formal documentada (Rules of Engagement).**
-
-Todos os scripts exigem confirmação explícita antes de qualquer execução ativa.
-Uso não autorizado é crime (Art. 154-A CP / CFAA / Computer Misuse Act).
+<p align="center">
+  <a href="https://www.gnu.org/software/bash/"><img src="https://img.shields.io/badge/Shell-Bash-4EAA25?logo=gnu-bash&logoColor=white"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://github.com/trickMeister1337/Stiglitz/actions/workflows/ci.yml"><img src="https://github.com/trickMeister1337/Stiglitz/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg"></a>
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20WSL2-333">
+</p>
 
 ---
 
-## Visão Geral
+> ### ⚠ Authorized use only
+> Stiglitz is offensive tooling for **authorized engagements** with a signed Rules of Engagement (RoE).
+> Every script requires explicit confirmation before any active execution.
+> Unauthorized use is a crime (Art. 154-A CP / CFAA / Computer Misuse Act).
 
-O SWARM é uma suite completa de segurança ofensiva composta por scripts independentes que se integram em pipeline:
+---
+
+## What is Stiglitz?
+
+Stiglitz chains the tools a red-teamer already uses — `subfinder`, `httpx`, `nuclei`, `katana`, `testssl`, OWASP ZAP, `sqlmap`, `hydra`, Metasploit and more — into a single, coordinated pipeline. It doesn't just run them: it **reads the target**, tunes each tool to the detected stack, **actively confirms** what it finds, and produces a client-ready report with a defensible risk score.
 
 ```
-[osint.sh] → [swarm.sh] → [swarm_red.sh] → relatório HTML
-  OSINT        Recon/Scan    Exploração
+┌──────────┐    ┌──────────┐    ┌──────────────┐    ┌──────────────┐
+│ OSINT    │ →  │ Recon &  │ →  │ Active        │ →  │ Big4-grade   │
+│ (passive)│    │ Scanning │    │ Exploitation  │    │ HTML report  │
+└──────────┘    └──────────┘    └──────────────┘    └──────────────┘
+  osint.sh        swarm.sh         swarm_red.sh        auto-generated
 
-[swarm_full.sh] — orquestra as três fases acima em um único comando
-[pci_scan.sh]   — scanner de conformidade PCI DSS (independente)
+            swarm_full.sh  ── runs the whole chain in one command
+            pci_scan.sh    ── standalone PCI DSS 4.0.1 compliance scan
 ```
 
-| Script | Função | Quando usar |
+## Why Stiglitz?
+
+- **🎯 Adaptive scanning** — detects the target's stack (`httpx` tech-detect + path fingerprinting + version probes) and automatically tunes Nuclei tags, ffuf wordlists and CMS scanners. No manual configuration.
+- **🔬 Active confirmation, not just alerts** — every eligible finding is re-executed with a reproducible `curl` PoC. The report distinguishes a **confirmed exploit** from a merely **verified** hardening issue.
+- **📊 A risk score you can defend** — KEV > EPSS > CVSS methodology. The CRITICAL band requires a real critical finding or a CVE under active exploitation (CISA KEV) — soft signals can't inflate it.
+- **📁 Client-ready reports** — executive summary, scope & methodology, effort×impact prioritization matrix, evolution diff vs the last scan, CVSS vectors, and reproducible evidence. Plus `findings.json` for SIEM/Jira.
+- **🧩 One pipeline, full kill chain** — passive OSINT feeds active recon, recon feeds exploitation, every stage hands structured data to the next.
+
+## Quick start
+
+```bash
+git clone https://github.com/trickMeister1337/Stiglitz.git
+cd Stiglitz
+bash setup.sh                      # installs system + Go + Python tooling
+
+bash swarm.sh https://target.com   # recon + adaptive scan + report
+```
+
+Output lands in `scan_<domain>_<timestamp>/` — open `relatorio_swarm.html`.
+
+## Components
+
+| Tool | Role | When to use |
 |---|---|---|
-| `osint.sh` | Inteligência passiva pré-engajamento | Antes de qualquer scan |
-| `swarm.sh` | Reconhecimento e varredura (11 fases) | Mapeamento da superfície |
-| `swarm_red.sh` | Exploração automatizada (8 fases) | Após recon ou standalone |
-| `pci_scan.sh` | Conformidade PCI DSS 4.0.1 | Ambientes de pagamento |
-| `swarm_full.sh` | Pipeline completo em um comando | Relatório consolidado end-to-end |
-| `swarm_batch.sh` | Wrapper multi-alvo para `swarm.sh` | Múltiplos alvos em série |
-| `swarm_diff.py` | Comparação entre dois scans | Rastreamento de remediação |
+| `osint.sh` | Passive pre-engagement intelligence (10 phases) | Before any active scan |
+| `swarm.sh` | Recon & adaptive vulnerability scanning (11 phases) | Map the attack surface |
+| `swarm_red.sh` | Automated exploitation engine (8 phases) | After recon, or standalone |
+| `swarm_full.sh` | End-to-end orchestrator | One-command full engagement |
+| `pci_scan.sh` | PCI DSS 4.0.1 compliance scan | Payment environments |
+| `swarm_batch.sh` | Multi-target wrapper | Many targets in series |
+| `swarm_diff.py` | Scan-to-scan comparison | Remediation tracking |
 
----
-
-## Últimas Atualizações
-
-### v7.5 — Qualidade do relatório e do índice de risco (Mai 2026)
-
-- **Índice de risco sem saturação** — antes somava ocorrências por URL (mesmo alerta em N URLs estourava o número, quase todo scan batia 100/100). Agora usa tipos únicos com faixa-base pela severidade mais alta + bônus de quantidade com retornos decrescentes. A faixa CRÍTICO exige achado crítico real ou KEV — bônus brandos (EPSS/JS) não fabricam CRÍTICO sozinhos.
-- **Exploit confirmado ≠ verificado** — a confirmação ativa separa vulnerabilidades abusáveis (default-login, SQLi, cifras fracas) de verificações de hardening (headers, HSTS/CAA, config TLS). Badges distintos nos cards (✓ EXPLOIT CONFIRMADO / ✓ VERIFICADO) e seções separadas no relatório.
-- **Matriz Esforço × Impacto** — grid de priorização estilo Big4 com o quadrante alto-impacto/baixo-esforço destacado como ★ quick wins.
-- **Diff com scan anterior** — seção "Evolução desde o Último Scan" com novos / corrigidos / persistentes vs o scan anterior do mesmo domínio.
-- **Vetor CVSS nos cards** — exibe o vetor completo (`CVSS:3.1/AV:N/...`) + decodificação dos campos de exploitabilidade (vetor de ataque, complexidade, privilégio, interação).
-- **Redução de falsos-positivos** — secrets JS: "Hardcoded Password" não casa mais labels de UI; "Private Key" exige bloco PEM completo. poc_validator não marca metadados do testssl (scanTime) como exploit.
-- **Normalização de scheme** — `swarm.sh target.com` (sem `https://`) assume HTTPS, corrigindo abort por HTTP 000 em alvos HTTPS-only.
-
-### v7.4 — Refatoração: modularização do swarm.sh (Mai 2026)
-
-O `swarm.sh` carregava ~2.500 linhas de Python embutido em 12 heredocs bash — sem syntax check, lint, testes ou debug possível. Esse código foi extraído para módulos standalone, reduzindo o `swarm.sh` de **4.991 → 1.870 linhas**.
-
-- **Gerador de relatório → `swarm_report.py`** (1.817 linhas). O `swarm.sh` já tinha o mecanismo de chamá-lo externamente; o heredoc foi removido e o módulo é a única fonte de verdade. Saída HTML/JSON validada byte-idêntica à versão anterior.
-- **11 heredocs de coleta → `lib/*.py`**: `scan_metadata`, `security_headers`, `version_fingerprint`, `tech_profile`, `monitoring_check`, `secscan`, `cve_enrich`, `email_security`, `zap_config_fix`, `js_analysis`, `ratelimit_check`. Cada módulo recebe os mesmos argumentos via `sys.argv`; corpos validados byte-idênticos aos heredocs originais.
-- **`eval` removido** da invocação do Nuclei. `NUCLEI_EVASION_FLAGS`, `NUCLEI_TEMPLATES_FLAGS` e `_nuclei_input` agora são arrays bash, que preservam corretamente argumentos com espaços (ex: `-H "User-Agent: ..."`) sem necessidade de `eval`.
-- **Confirmação ativa vinculada aos cards**: findings com confirmação correspondente (`poc_validator.py`) exibem badge **✓ CONFIRMADO ATIVAMENTE** no relatório (match por template-id do Nuclei e id do testssl). A tabela TLS passou a mostrar o nome descritivo do problema em vez do resultado cru.
-- **CI reforçado**: novo passo `py_compile` valida `swarm_report.py` e todos os `lib/*.py` em cada push/PR — o Python antes invisível nos heredocs agora é checado.
-
-### v7.3 — Scan Adaptativo por Stack Tecnológica (Mai 2026)
-
-Implementação completa de inteligência sobre o stack do alvo: o SWARM agora detecta as tecnologias em uso e adapta automaticamente todas as ferramentas — Nuclei, ffuf, PROBES e scanners CMS — com base no que foi encontrado.
-
-**`swarm.sh` — 6 novos módulos:**
-
-- **Tech Profile Builder (`PYTECHPROFILE`)** — após a Fase 2, agrega dados de três fontes:
-  - httpx `-tech-detect` (parser do texto de saída com tech brackets `[WordPress:6.3, PHP:8.1, Nginx:1.18.0]`)
-  - katana URL fingerprinting (23 padrões de path → CMS/framework)
-  - PROBES confirmadas (`version_findings.json`)
-
-  Gera `raw/tech_profile.json` com: tecnologias detectadas + versões + fonte + categorias + tags Nuclei extras + ffuf profile + CMS scanner recomendado.
-
-- **Nuclei com tags dinâmicas** — a Fase 4 lê o tech profile e estende as tags base com tags específicas da stack. Exemplos: WordPress detectado → `-tags wordpress,wp` adicionado; Spring Boot → `-tags spring,springboot,actuator`; Drupal → `-tags drupal`. Ambos os modos (paralelo em lotes e único) usam a mesma lista dinâmica.
-
-- **PROBES expandidas para web stacks** — adicionados 7 novos alvos ao detector de versões desatualizadas:
-
-  | Tecnologia | Endpoint de Detecção | CVEs Cobertos |
-  |---|---|---|
-  | WordPress | `/feed/` generator tag | CVE-2024-6307, CVE-2023-5561 |
-  | Drupal | `/CHANGELOG.txt`, `/core/CHANGELOG.txt` | CVE-2023-5256, SA-CORE-2022-015 |
-  | Joomla | `/administrator/manifests/files/joomla.xml` | CVE-2023-40626, CVE-2023-23752 |
-  | Spring Boot Actuator | `/actuator`, `/actuator/health` | CVE-2022-22965, CVE-2023-20883 |
-  | Django Debug | `/__debug__/`, `/admin/` | CVE-2024-27351, CVE-2023-46695 |
-  | Laravel Debug | `/telescope`, `/horizon`, `/_debugbar/` | CVE-2023-47128, CVE-2021-43996 |
-  | Apache Struts | `/struts2-showcase/`, `/index.action` | CVE-2024-53677, CVE-2023-50164 (RCE) |
-
-- **ffuf com wordlists condicionais** — a Fase 10.5 seleciona paths adicionais com base no ffuf_profile do tech profile. 10 profiles implementados: `wordpress`, `laravel`, `spring`, `django`, `drupal`, `rails`, `php`, `struts`, `magento`, `nodejs`. A wordlist é acumulada sobre a base genérica, não substituída.
-
-- **Scanners CMS condicionais** — após o ffuf, ativa automaticamente o scanner específico se o CMS foi detectado e a ferramenta está instalada:
-  - WordPress → `wpscan --enumerate vp,vt,u,ap`
-  - Joomla → `joomscan --ec`
-  - Drupal → `droopescan scan drupal`
-
-  Aceita `WPSCAN_API_TOKEN` via variável de ambiente para acesso à base de vulnerabilidades premium.
-
-- **Seção "Inventário de Tecnologias" no relatório HTML** — nova seção 2.5 entre Superfície de Ataque e Vulnerabilidades Identificadas. Mostra tabela com: componente, versão detectada, status (DETECTADO / DESATUALIZADO / VULNERÁVEL), CVEs conhecidos e fonte de detecção. Badges por categoria (CMS, Servidor Web, Framework, etc.) e contador de componentes desatualizados.
-
-**Novos arquivos gerados (`raw/`):**
-
-| Arquivo | Conteúdo |
-|---|---|
-| `raw/tech_profile.json` | Inventário de tecnologias: nome, versão, fonte, confiança, tags Nuclei, ffuf profile, CMS scanner |
-| `raw/wpscan.json` | Resultado do wpscan (WordPress) |
-| `raw/joomscan.txt` | Resultado do joomscan (Joomla) |
-| `raw/droopescan.txt` | Resultado do droopescan (Drupal) |
-
-**Variável de ambiente opcional:**
-
-```bash
-export WPSCAN_API_TOKEN="seu_token_aqui"  # acesso à base premium de vulnerabilidades wpscan
-```
-
----
-
-### v7.3.1 — Correções de relatório e CI (Mai 2026)
-
-**`swarm.sh` — fix de contagem de findings:**
-
-- **TLS e email findings incluídos em `all_f`** — `tls_findings` usava chave `"sev"` em vez de `"severity"` e não era adicionado à lista mestre `all_f`; achados críticos/altos do testssl.sh eram exibidos no HTML mas ignorados nas stat cards, no risk score e no terminal. Corrigido: `tls_findings` agora tem todos os campos obrigatórios (`name`, `severity`, `source`, `url`, `description`, etc.) e é incluído em `all_f` junto com `email_findings` (SPF/DMARC/DKIM).
-- **`email_findings` convertido para lista de findings** — novo bloco converte o dict `email_security` (SPF/DMARC/DKIM) em findings padronizados com CWE (`CWE-349` para SPF/DMARC, `CWE-345` para DKIM), incluídos nas stats e no risk score.
-
-Resultado: terminal e relatório HTML agora mostram as mesmas contagens — ex: um alvo com 2 criticalidades TLS e 2 highs de email antes exibia `C=0 A=0` no terminal; agora exibe `C=2 A=2` corretamente.
-
-**CI/CD — fix de pipeline:**
-
-- **`pytest` ausente no job `unit-tests`** — o step `Install dependencies` usava `pip install requests 2>/dev/null || true`, silenciando o erro de instalação; `pytest` nunca foi instalado, fazendo o job falhar com `No module named pytest`.
-- **`requirements-dev.txt` criado** — lista `pytest>=7.0` e `requests>=2.28`; workflow atualizado para `pip install -r requirements-dev.txt` sem supressão de erros.
-
----
-
-### v7.2 — Cobertura de superfície expandida + SWARM RED melhorias (Mai 2026)
-
-**`swarm.sh` — 4 novos módulos de detecção:**
-
-- **Scan de serviços perigosos** — nmap agora inclui portas de infraestrutura sensível: Redis (6379), MongoDB (27017), Elasticsearch (9200/9300), Kubernetes API (6443), etcd (2379), CouchDB (5984), Memcached (11211), MSSQL (1433), PostgreSQL (5432), MySQL (3306). Portas abertas de bancos expostos são destacadas em vermelho no terminal.
-- **PYSECSCAN — security.txt (RFC-9116)** — verifica presença de `/.well-known/security.txt` e `/security.txt`; gera finding `SECSCAN-001` (info) quando ausente e salva o arquivo quando presente.
-- **PYSECSCAN — exposição de IPs internos** — varre respostas HTTP de 9 endpoints padrão (/, /health, /metrics, /actuator/health etc.) buscando endereços RFC-1918 em body e headers; gera finding `SECSCAN-002` (medium) quando encontrado.
-- **Wordlist ffuf expandida** — adicionados `phpinfo.php`, `info.php`, `test.php`, `phpinfo/`, `.well-known/security.txt`, `security.txt`, `robots.txt`, `sitemap.xml`, `crossdomain.xml`, `elmah.axd`, `trace.axd`, `_profiler`, `telescope`, `horizon` (cobertura de PHP debug, .NET ELMAH, Laravel e Symfony).
-
-**`swarm_red.sh` — melhorias:**
-
-- **HTTP Form Brute Force** — nova função `_run_http_form_brute()` dentro de `run_brute()`: detecta automaticamente endpoints `/login`, `/signin`, `/auth`, `/logon` no crawl e executa hydra `http-post-form` / `https-post-form` com wordlists do sistema.
-- **Timing e logging em todas as fases** — `run_xss()`, `run_brute()`, `run_services()` e `run_report()` agora registram tempo de execução e contagem de resultados no `swarm_red.log` (trilha de auditoria).
-- **Filtro de URLs advisory** — `_build_scored_targets` filtra domínios de advisories (github.com/security, nvd.nist.gov, vercel.com/changelog, cve.org etc.) da lista de alvos SQLi/XSS, eliminando falso-positivos.
-
-**`lib/report_generator.py`:**
-
-- Nova flag `--swarm-dir <path>`: integra os findings do scan SWARM de origem no relatório RED, exibindo seção separada "Contexto SWARM — Scan de Origem" com badge visual distinto.
-
-**`lib/evidence.py`:**
-
-- Corrigido falso-positivo: heurística "might not be injectable" e "not injectable" do sqlmap agora excluem o parâmetro de ser marcado como vulnerável.
-
----
-
-### v7.1 — Ferramentas atualizadas + correções de relatório (Mai 2026)
-
-- **`swarm_batch.sh`** — removidos os cards "Risco Máximo" e "Risco Médio" do relatório batch; o score agregado de múltiplos alvos não é representativo por natureza e induzia leituras incorretas
-- **Go 1.22.2 → 1.26.3** — runtime atualizado; todos os binários Go recompilados com o novo toolchain (`nuclei`, `httpx`, `katana`, `subfinder`, `ffuf`, `dalfox`, `waybackurls`)
-- **katana 1.5.0 → 1.6.1** — via `go install @latest` com Go 1.26.3
-- **sqlmap 1.8.4 → 1.10.5** — instalado via `pip3 install --user --upgrade sqlmap`; `~/.local/bin` tem precedência sobre `/usr/bin`
-- **nikto → 2.6.0** — atualizado do repositório oficial; wrapper `~/.local/bin/nikto` configurado com `PERL5LIB` para módulos userspace
-- **hydra 9.5 → 9.8-dev** — compilado a partir do fonte
-- **trufflehog 3.95.2 → 3.95.3**
-- **amass**: mantido em v3.19.2 intencionalmente — a v5 quebra a interface de linha de comando (`amass enum -passive` deixa de existir); atualização requer reescrita dos scripts de uso
-
-### v7.0 — Blackbox Engine + CI/CD + Pipeline Completo (Mai 2026)
-
-- **`swarm_full.sh` adicionado** — orquestrador end-to-end que encadeia osint.sh → swarm.sh → swarm_red.sh → pci_scan.sh com gate único de autorização, índice HTML consolidado e métricas por fase
-- **`swarm_red.sh` refatorado em arquitetura modular** — orquestrador thin de 845 linhas delegando para 7 módulos independentes em `lib/` (recon, crawl, sqli, xss, brute, msf, web)
-- **Notificações ao finalizar scan** — suporte a Telegram, Slack e Microsoft Teams via variáveis de ambiente; disparadas ao término de `swarm.sh`, `swarm_red.sh` e `swarm_full.sh`
-- **`swarm_diff.py` integrado ao pipeline** — ao finalizar cada scan, `swarm_red.sh` detecta automaticamente o scan anterior do mesmo domínio e gera relatório de diff (novos/corrigidos/persistentes)
-- **CI/CD com GitHub Actions** — syntax check (`bash -n`) em todos os scripts incluindo `swarm_full.sh` + 42 testes unitários Python em cada push/PR
-- **Testes expandidos de 18 para 42** — adicionadas classes `TestIngest` (11 testes) e `TestPocGenerator` (10 testes); bug real corrigido em `evidence.py` (falso-positivo de tabela sqlmap)
-- **`osint.sh` e `pci_scan.sh` publicados** no repositório principal
-- **`swarm_batch.sh` e `swarm_diff.py`** incorporados da branch de desenvolvimento
-- **`lib/evidence.py`** — adicionadas funções `is_valid_url` e `strip_ansi`; filtro de timestamps falsos na extração de tabelas
-
----
-
-## `osint.sh` — Inteligência Pré-Engajamento
-
-Coleta passiva/semi-ativa executada **antes** do `swarm.sh`. Produz um mapa de superfície completo sem disparar alertas no alvo.
-
-### Pipeline de 10 Fases
-
-| Fase | Módulo | O que faz |
-|---|---|---|
-| 1 | Domain Intelligence | WHOIS, DNS, crt.sh, SPF/DMARC/DKIM, ASN |
-| 2 | Subdomain Discovery | subfinder + amass + crt.sh + dnsx |
-| 3 | Email & Employee Harvesting | theHarvester + Hunter.io |
-| 4 | Historical URLs | waybackurls + gau + endpoints dinâmicos |
-| 5 | GitHub Dorking | trufflehog + GitHub Search API |
-| 6 | Leaked Credentials | HaveIBeenPwned API v3 |
-| 7 | Shodan Intelligence | hostname search + CVEs por IP |
-| 8 | Cloud Surface | S3/Azure buckets + subdomain takeover |
-| 9 | Build outputs | targets_enriched.txt + osint_summary.json |
-| 10 | Relatório HTML | osint_report.html |
-
-```bash
-# Básico
-bash osint.sh alvo.com
-
-# Com APIs externas
-bash osint.sh alvo.com \
-    --shodan-key $SHODAN_KEY \
-    --hibp-key $HIBP_KEY \
-    --github-token $GITHUB_TOKEN
-
-# Pular confirmação RoE (CI/CD)
-bash osint.sh alvo.com --no-roe
-```
-
-**Arquivos gerados:**
-
-| Arquivo | Uso |
-|---|---|
-| `targets_enriched.txt` | Subdomínios + IPs para `--osint-dir` no swarm.sh |
-| `leaked_creds.csv` | Contas vazadas para hydra no swarm_red.sh |
-| `osint_summary.json` | Metadados legíveis por máquina |
-| `osint_report.html` | Relatório completo |
-
----
-
-## `swarm.sh` — Reconhecimento e Varredura
-
-Pipeline de 11 fases que mapeia a superfície de ataque completa, valida vulnerabilidades e gera relatório HTML.
-
-### Pipeline de 11 Fases
+## The scan pipeline
 
 ```
-  ┌──────────────────────────────────────────────────────────────┐
-  │                    SWARM — Consultant Edition                │
-  │                                                              │
-  │  [1]    Subdomain Discovery  subfinder                       │
-  │  [2]    Surface Mapping      httpx (tech-detect) + nmap      │
-  │  [2.5]  WAF + Tech Profile   wafw00f + PYTECHPROFILE *       │
-  │  [3]    TLS Analysis         testssl (paralelo com nuclei)   │
-  │  [4]    Vulnerability Scan   nuclei (tags adaptativas) *     │
-  │  [5]    PoC Confirmation     poc_validator.py (min 60%)      │
-  │  [6]    CVE Enrichment       NVD API v2 + EPSS + CISA KEV    │
-  │  [7]    WAF Detection        wafw00f + evasão passiva        │
-  │  [8]    Email Security       SPF / DMARC / DKIM              │
-  │  [9]    ZAP Active Scan      Spider + Ajax + Active Scan     │
-  │  [10]   JS Analysis          katana + trufflehog             │
-  │  [10.5] Testes Extras        ffuf (wordlist adaptativa) *    │
-  │                              wpscan/joomscan/droopescan *    │
-  │  [11]   Relatório            HTML + inventário de tech *     │
-  └──────────────────────────────────────────────────────────────┘
-  * novo em v7.3
+[1]    Subdomain discovery    subfinder
+[2]    Surface mapping        httpx (tech-detect) + nmap
+[2.5]  WAF + tech profile     wafw00f + adaptive stack detection
+[3]    TLS analysis           testssl (parallel with nuclei)
+[4]    Vulnerability scan     nuclei (adaptive tags)
+[5]    PoC confirmation       active re-execution (min 60% confidence)
+[6]    CVE enrichment         NVD API v2 + EPSS + CISA KEV
+[7]    WAF detection          wafw00f + passive evasion
+[8]    Email security         SPF / DMARC / DKIM
+[9]    ZAP active scan        Spider + Ajax + Active Scan
+[10]   JS analysis            katana + secret detection
+[10.5] Extra checks           ffuf (adaptive wordlist) + wpscan/joomscan/droopescan
+[11]   Report                 HTML + technology inventory + findings.json
 ```
 
-```bash
-# Básico
-bash swarm.sh https://alvo.com
+### Adaptive scanning in action
 
-# Com output OSINT
-bash swarm.sh https://alvo.com --osint-dir osint_alvo.com_*/
-
-# Multi-alvo
-bash swarm_batch.sh -f targets.txt -p staging
-
-# Scan autenticado
-bash swarm.sh https://alvo.com --token "eyJ..."
-
-# Docker
-docker run --rm -v $(pwd)/output:/swarm/output \
-    trickmeister1337/swarm https://alvo.com
-```
-
-**Output gerado:**
-
-| Arquivo | Conteúdo |
-|---|---|
-| `relatorio_swarm.html` | Relatório técnico completo com inventário de tech, evidências e curl reproduzível |
-| `sumario_executivo.html` | Página única de risco para gestão |
-| `findings.json` | Export estruturado para SIEM/Jira |
-| `raw/tech_profile.json` | Perfil tecnológico do alvo (novo v7.3) |
-| `raw/wpscan.json` | Resultado wpscan (se WordPress detectado) |
-| `raw/` | nuclei JSONL, ZAP alerts, TLS issues, JS analysis |
-
----
-
-### Scan Adaptativo por Stack Tecnológica
-
-O SWARM detecta automaticamente o stack do alvo e ajusta as ferramentas sem nenhuma configuração manual.
-
-**Fluxo de detecção (Fase 2.5):**
+Stiglitz fingerprints the stack and reshapes the scan automatically:
 
 ```
 httpx -tech-detect → "[WordPress:6.3, PHP:8.1, Nginx:1.18.0]"
-       +
-katana URLs → /wp-admin/, /actuator/, /_next/ → CMS fingerprint
-       +
-PROBES (HTTP) → /feed/, /CHANGELOG.txt, /actuator → versão confirmada
-       ↓
-tech_profile.json → nuclei_extra_tags, ffuf_profile, cms_scanner
+katana URLs        → /wp-admin/, /actuator/, /_next/   (CMS/framework fingerprint)
+HTTP probes        → /feed/, /CHANGELOG.txt, /actuator (confirmed version)
+        ↓
+tech_profile.json  → nuclei tags · ffuf wordlist · CMS scanner
 ```
 
-**Exemplo de `raw/tech_profile.json` para um alvo WordPress:**
-
-```json
-{
-  "detected": {
-    "WordPress": {"version": "6.3.1", "source": "httpx", "confidence": "high"},
-    "PHP":       {"version": "8.1.0", "source": "httpx", "confidence": "high"},
-    "Nginx":     {"version": "1.18.0","source": "httpx", "confidence": "high"},
-    "jQuery":    {"version": "3.6.0", "source": "httpx", "confidence": "high"}
-  },
-  "categories": {"cms": ["WordPress"], "language": ["PHP"], "webserver": ["Nginx"]},
-  "nuclei_extra_tags": ["wordpress", "wp"],
-  "ffuf_profile": "wordpress",
-  "cms_scanner":  "wpscan",
-  "total_detected": 4
-}
-```
-
-**Mapeamento tech → comportamento:**
-
-| Stack detectada | Tags Nuclei extras | ffuf wordlist | Scanner CMS |
+| Detected stack | Extra Nuclei tags | ffuf wordlist | CMS scanner |
 |---|---|---|---|
 | WordPress | `wordpress, wp` | wp-admin, xmlrpc.php, wp-config backups | wpscan |
 | Drupal | `drupal` | CHANGELOG.txt, sites/default, modules/ | droopescan |
 | Joomla | `joomla` | administrator/, components/ | joomscan |
-| Spring Boot | `spring, springboot, actuator` | /actuator/* (heapdump, env, shutdown) | — |
+| Spring Boot | `spring, actuator` | /actuator/* (heapdump, env, shutdown) | — |
 | Laravel | `laravel` | .env, telescope/, horizon/, storage/logs | — |
 | Django | `django` | admin/, __debug__/, api/v1/ | — |
 | Apache Struts | `struts` | *.action, struts2-showcase/ | — |
-| Nginx | `nginx` | — | — |
-| PHP | `php` | phpinfo.php, adminer/, phpmyadmin/ | — |
 
-**Para usar WPSCAN_API_TOKEN (base de vulnerabilidades premium):**
+## What you get
 
-```bash
-export WPSCAN_API_TOKEN="seu_token_aqui"
-bash swarm.sh https://alvo-wordpress.com
-```
-
----
-
-## `swarm_red.sh` — Exploração Automatizada
-
-Motor de exploração que opera em dois modos: **Blackbox** (standalone a partir de uma URL) ou **Integração** (consumindo output do `swarm.sh`).
-
-### Pipeline de 8 Fases
-
-```
-  ┌──────────────────────────────────────────────────────────────┐
-  │                    SWARM RED v7.0                            │
-  │                                                              │
-  │  [1] RECON       subfinder → subdomínios                     │
-  │       ↓          httpx    → hosts ativos                     │
-  │  [2] SURFACE     nmap     → portas/serviços/versões          │
-  │       ↓                                                      │
-  │  [3] CRAWL       katana   → endpoints + JS                   │
-  │       ↓          ffuf     → directory fuzzing                │
-  │  [4] INGEST      Scorer   → priorização por parâmetros       │
-  │       ↓          CVEs     → extração de nuclei/ZAP           │
-  │  [5] SQLi        sqlmap   → testes com tamper adaptativo     │
-  │       ↓                                                      │
-  │  [6] XSS         dalfox   → paralelo por URL                 │
-  │       ↓                                                      │
-  │  [7] BRUTE       hydra    → SSH/FTP/MySQL/RDP/SMB            │
-  │                  hydra    → HTTP/HTTPS form brute (auto)     │
-  │       ↓                                                      │
-  │  [8] SERVICES    nikto + msfconsole + searchsploit           │
-  │       ↓                                                      │
-  │  [REL] RELATÓRIO HTML Big4-style + auto-diff com scan anterior│
-  └──────────────────────────────────────────────────────────────┘
-```
-
-```bash
-# Blackbox standalone
-bash swarm_red.sh -t https://alvo.com -p staging
-
-# Integração com output do swarm.sh
-bash swarm_red.sh -d scan_alvo.com_20260514_120000/
-
-# Com escopo e autenticação
-bash swarm_red.sh -t https://alvo.com \
-    --scope-file escopo.txt \
-    --auth-cookie "session=abc123" \
-    --auth-header "Authorization: Bearer <token>"
-
-# Apenas SQLi e XSS, sem brute force
-bash swarm_red.sh -t https://alvo.com --only sqli,xss
-
-# Simulação sem executar
-bash swarm_red.sh -t https://alvo.com --dry-run
-
-# Retomar scan interrompido
-bash swarm_red.sh -t https://alvo.com --resume \
-    --output-dir swarm_red_alvo_20260514_120000
-```
-
-### Perfis de Execução
-
-| Parâmetro | `lab` | `staging` | `production` |
-|---|---|---|---|
-| sqlmap level/risk | 5 / 3 | 3 / 2 | 1 / 1 |
-| sqlmap threads | 10 | 5 | 1 |
-| Brute force | ✅ | ✅ | ❌ |
-| Nikto | ✅ | ✅ | ❌ |
-| MSF payload | reverse_tcp | reverse_tcp | NONE |
-| XSS workers | 5 | 3 | 1 |
-| Max exploits | 999 | 50 | 10 |
-
-**`lab`** — Ambiente descartável. Sem restrições.  
-**`staging`** — Homologação/pré-produção. Agressividade alta com limites razoáveis.  
-**`production`** — Janela de manutenção aprovada. Impacto mínimo, sem dump, sem brute force.
-
----
-
-## `pci_scan.sh` — Conformidade PCI DSS 4.0.1
-
-Scanner de conformidade que cobre requisitos 1.3, 2.2, 3.5, 4.2.1, 6.x, 8.x, 11.x e 12.5.2.
-
-> **Não substitui** ASV scan externo (Req 11.3.2) nem pentest humano (Req 11.4).
-
-```bash
-bash pci_scan.sh https://alvo.com
-```
-
----
-
-## `swarm_full.sh` — Pipeline Completo em Um Comando
-
-Orquestrador que encadeia toda a suite em sequência com um único gate de autorização e gera um índice HTML consolidando os relatórios de todas as fases.
-
-```
-  osint.sh  →  swarm.sh  →  swarm_red.sh
-     ↓              ↓              ↓
-  OSINT          Recon          Exploit
-     └──────────────┴──────────────┘
-              full_<alvo>_<ts>/index.html
-```
-
-```bash
-# Pipeline completo (padrão)
-bash swarm_full.sh -t https://alvo.com
-
-# Com perfil de produção, apenas recon (sem exploração)
-bash swarm_full.sh -t https://alvo.com -p production --skip-red
-
-# Pular OSINT (quando já foi executado antes)
-bash swarm_full.sh -t https://alvo.com --skip-osint
-
-# Simulação completa sem executar ferramentas
-bash swarm_full.sh -t https://alvo.com --dry-run
-
-# Com autenticação e escopo
-bash swarm_full.sh -t https://alvo.com \
-    --scope-file escopo.txt \
-    --auth-cookie "session=abc123" \
-    --auth-header "Authorization: Bearer <token>"
-```
-
-### Flags disponíveis
-
-| Flag | Descrição |
+| File | Contents |
 |---|---|
-| `-t, --target URL` | URL do alvo (obrigatório) |
-| `-p, --profile` | `lab` / `staging` / `production` (padrão: `staging`) |
-| `--skip-osint` | Pular fase OSINT |
-| `--skip-scan` | Pular fase swarm.sh |
-| `--skip-red` | Pular fase swarm_red.sh |
-| `--dry-run` | Simular pipeline sem executar ferramentas |
-| `--scope-file FILE` | Arquivo com domínios/IPs em escopo |
-| `--auth-cookie` | Cookie de autenticação |
-| `--auth-header` | Header de autenticação (ex: `Authorization: Bearer …`) |
-| `--output-dir DIR` | Diretório base customizado |
+| `relatorio_swarm.html` | Full technical report — exec summary, methodology, tech inventory, prioritization matrix, scan diff, reproducible evidence |
+| `sumario_executivo.html` | One-page risk summary for management |
+| `findings.json` | Structured export for SIEM / Jira |
+| `raw/` | nuclei JSONL, ZAP alerts, TLS issues, tech_profile.json, JS analysis, CVE enrichment |
 
-### Output gerado
-
-```
-full_alvo.com_20260514_120000/
-├── index.html              # Índice consolidado com links e métricas por fase
-├── osint_alvo.com_*/       # Diretório OSINT
-├── scan_alvo.com_*/        # Diretório swarm.sh
-└── swarm_red_alvo.com_*/   # Diretório swarm_red.sh
-```
-
-O `index.html` exibe métricas por fase (subdomínios, findings, exploits confirmados), tempo de execução de cada etapa e links diretos para os relatórios individuais.
-
-> Os scripts individuais continuam funcionando normalmente de forma independente — `swarm_full.sh` é uma opção adicional para quando você quer o relatório completo end-to-end de um único engajamento.
->
-> Para scan PCI DSS, use `pci_scan.sh` separadamente após o pipeline.
-
----
-
-## `swarm_diff.py` — Rastreamento de Remediação
-
-Compara dois diretórios de scan e classifica vulnerabilidades em novas, corrigidas e persistentes. Integrado automaticamente ao final de cada execução do `swarm_red.sh`.
+## Usage
 
 ```bash
-# Manual
-python3 swarm_diff.py scan_alvo_anterior/ scan_alvo_novo/
+# Recon + adaptive scan (most common)
+bash swarm.sh https://target.com
 
-# Com relatório HTML
-python3 swarm_diff.py scan_anterior/ scan_novo/ --html
+# Reuse OSINT discovery (skips subfinder, feeds historical endpoints)
+bash osint.sh target.com --shodan-key $KEY --github-token $TOKEN
+bash swarm.sh target.com --osint-dir osint_target.com_*/
+
+# Authenticated scan
+bash swarm.sh https://target.com --token "eyJ..."
+
+# Automated exploitation from a scan's output
+bash swarm_red.sh -d scan_target.com_*/ -p staging
+
+# Full engagement in one command
+bash swarm_full.sh target.com
+
+# Multiple targets
+bash swarm_batch.sh -f targets.txt -p staging
 ```
 
-Output:
-- Terminal colorido com contadores por severidade
-- `swarm_diff_<timestamp>.html` com tabelas e KPIs de remediação
+### Execution profiles
 
----
+| Profile | sqlmap level/risk | Brute force | Use |
+|---|---|---|---|
+| `staging` | 3 / 2 | Yes | Homolog / QA |
+| `lab` | 5 / 3 | Yes | Disposable lab |
+| `production` | 1 / 1 | No | Production (approved window) |
 
-## Notificações
+## Installation
 
-`swarm.sh` e `swarm_red.sh` enviam notificação ao finalizar. Configure via variáveis de ambiente:
-
-```bash
-# Telegram
-export SWARM_TELEGRAM_TOKEN="<bot_token>"
-export SWARM_TELEGRAM_CHAT="<chat_id>"
-
-# Microsoft Teams (legacy connector ou Power Automate Workflow)
-export SWARM_TEAMS_WEBHOOK="https://outlook.office.com/webhook/..."
-
-# Slack / webhook genérico
-export SWARM_NOTIFY_WEBHOOK="https://hooks.slack.com/..."
-```
-
-Todos os canais são independentes — você pode ter Telegram **e** Teams ativos ao mesmo tempo.
-
-**Como obter a URL do Teams:**  
-Canal → `⋯` → `Connectors` → `Incoming Webhook` (legacy)  
-ou Canal → `Workflows` → `Post to a channel when a webhook request is received` (Power Automate)
-
----
-
-## Instalação
-
-### Requisitos
-
-- Linux (Ubuntu 22.04+, Debian 12, Kali) ou WSL2
-- bash ≥ 4.4, Python 3.8+, Go 1.26+
-
-### Automática (recomendado)
+**Requirements:** Linux (Ubuntu 22.04+, Debian 12, Kali) or WSL2 · bash ≥ 4.4 · Python 3.8+ · Go 1.26+
 
 ```bash
-git clone https://github.com/trickMeister1337/SWARM.git
-cd SWARM
 bash setup.sh
 ```
 
-O `setup.sh` detecta a distribuição (apt / dnf / pacman / zypper) e instala:
+`setup.sh` detects the distro (apt/dnf/pacman/zypper) and installs nmap, hydra, nikto, sqlmap, testssl.sh, the ProjectDiscovery Go tools (subfinder, httpx, katana, nuclei, ffuf, dalfox), Python tooling (wafw00f, trufflehog), Metasploit, OWASP ZAP and SecLists.
 
-- Sistema: `nmap`, `hydra`, `nikto`, `sqlmap`, `curl`, `jq`, `testssl.sh`
-- Go tools: `subfinder`, `httpx`, `katana`, `nuclei`, `ffuf`, `dalfox`, `waybackurls`
-- Python: `wafw00f`, `trufflehog`, `arjun`
-- Metasploit Framework (repositório oficial)
-- OWASP ZAP (snap)
-- SecLists em `/opt/SecLists`
-
-### Atualizar ferramentas
+## Recommended workflow
 
 ```bash
-nuclei -update && nuclei -update-templates
-go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-go install -v github.com/projectdiscovery/katana/cmd/katana@latest
-go install -v github.com/hahwul/dalfox/v2@latest
-```
+bash osint.sh target.com --shodan-key $KEY --github-token $TOKEN   # 1. passive OSINT
+bash swarm.sh https://target.com --osint-dir osint_target.com_*/   # 2. recon + scan
+bash swarm_red.sh -d scan_target.com_*/ -p staging                 # 3. exploitation
+bash swarm_red.sh -d scan_target.com_*/ -p staging                 # 4. re-run → auto diff
 
----
-
-## Fluxo completo recomendado
-
-```bash
-# 1. OSINT pré-engajamento
-bash osint.sh alvo.com --shodan-key $KEY --github-token $TOKEN
-
-# 2. Recon e varredura com contexto OSINT
-bash swarm.sh https://alvo.com --osint-dir osint_alvo.com_*/
-
-# 3. Exploração dirigida pelos findings do scan
-bash swarm_red.sh -d scan_alvo.com_*/ -p staging
-
-# 4. Segunda rodada → swarm_diff gerado automaticamente
-bash swarm_red.sh -d scan_alvo.com_*/ -p staging
-
-# 5. Higiene pós-scan
-tar czf resultados.tar.gz swarm_red_*/ scan_*/ osint_*/
-gpg -c resultados.tar.gz
-shred -vfz resultados.tar.gz
+# 5. post-engagement hygiene
+tar czf results.tar.gz swarm_red_*/ scan_*/ osint_*/
+gpg -c results.tar.gz && shred -vfz results.tar.gz
 rm -rf swarm_red_*/ scan_*/ osint_*/
 ```
 
----
+## Notifications
 
-## Arquitetura
+Set any of these and Stiglitz pings on scan completion: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`.
 
-```
-SWARM/
-├── swarm.sh                  # Scanner principal (11 fases)
-├── swarm_red.sh              # Engine de exploração (8 fases)
-├── osint.sh                  # OSINT pré-engajamento (10 fases)
-├── pci_scan.sh               # Conformidade PCI DSS 4.0.1 (independente)
-├── swarm_full.sh             # Orquestrador end-to-end (osint → swarm → red)
-├── swarm_batch.sh            # Wrapper multi-alvo
-├── swarm_diff.py             # Comparação entre scans
-├── setup.sh                  # Instalador universal
-├── test_lib.py               # 42 testes unitários Python
-├── test_swarm_red.sh         # Testes de integração bash
-├── lib/
-│   ├── recon.sh              # subfinder + httpx
-│   ├── crawl.sh              # katana + ffuf
-│   ├── sqli.sh               # sqlmap
-│   ├── xss.sh                # dalfox
-│   ├── brute.sh              # hydra
-│   ├── msf.sh                # metasploit
-│   ├── web.sh                # nikto
-│   ├── ingest.py             # Priorização de URLs por score
-│   ├── evidence.py           # Extração de evidências sqlmap/ZAP
-│   ├── parsers.py            # Parse de nuclei JSONL e ZAP JSON
-│   ├── poc_generator.py      # Geração de PoCs reproduzíveis
-│   ├── poc_validator.py      # Validação ativa (min 60% confiança)
-│   ├── report_generator.py   # Relatório HTML Big4-style
-│   ├── cve_enricher.py       # NVD API v2 + EPSS + CISA KEV
-│   ├── header_check.py       # Verificação de security headers
-│   └── profiles.conf         # Perfis de execução (arrays bash)
-├── profiles/
-│   ├── lab.conf
-│   ├── staging.conf
-│   └── production.conf
-└── .github/
-    └── workflows/
-        └── ci.yml            # Syntax check + pytest em cada push
-```
-
-### Módulos Python — responsabilidades
-
-| Módulo | Responsabilidade |
-|---|---|
-| `ingest.py` | Lê output do swarm.sh (findings.json, nuclei, ZAP, nmap) e produz listas priorizadas por score para cada fase de exploração |
-| `evidence.py` | Extrai evidência estruturada dos logs sqlmap; exclui falsos-positivos "not injectable" / "might not be injectable" |
-| `parsers.py` | Parse de nuclei JSONL, ZAP JSON, extração de URLs e CVEs com filtros de domínio externo e parâmetros HTTP |
-| `poc_generator.py` | Gera PoCs reproduzíveis (curl time-based, boolean, CORS) e `poc/verify.sh` para times de desenvolvimento |
-| `poc_validator.py` | Reexecuta cada finding via curl com threshold mínimo de 60% de confiança |
-| `report_generator.py` | Gera `relatorio_swarm_red.html` no padrão Big4; aceita `--swarm-dir` para integrar findings do scan de origem |
-| `cve_enricher.py` | Enriquecimento NVD/EPSS/KEV com cache diário |
-
----
-
-## CI/CD
-
-Cada push ou PR para `main` dispara dois jobs em paralelo:
-
-```yaml
-syntax:       bash -n em swarm.sh, swarm_red.sh, osint.sh, pci_scan.sh,
-              setup.sh, swarm_batch.sh, swarm_full.sh e todos os lib/*.sh
-unit-tests:   python3 -m pytest test_lib.py (42 testes)
-```
-
-Status visível em: `https://github.com/trickMeister1337/SWARM/actions`
-
----
-
-## Testes
-
-```bash
-# Testes unitários Python (42 testes)
-python3 -m pytest test_lib.py -v
-
-# Suite bash (integração)
-bash test_swarm_red.sh
-
-# Syntax check manual
-bash -n swarm.sh && bash -n swarm_red.sh && bash -n osint.sh
-
-# Dry-run completo
-echo "EU AUTORIZO" | bash swarm_red.sh -t https://example.com --dry-run
-```
-
----
-
-## Estrutura de Output
-
-### `swarm_red.sh`
+## Project layout
 
 ```
-swarm_red_alvo.com_20260514_120000/
-├── data/
-│   ├── live_hosts.txt          # Hosts ativos
-│   ├── nmap.txt                # Output nmap completo
-│   ├── open_services.txt       # Portas abertas
-│   ├── targets_scored.txt      # URLs priorizadas (score|url)
-│   └── cves_found.txt          # CVEs extraídos
-├── crawl/                      # URLs katana + ffuf
-├── sqlmap/                     # Logs por URL testada
-├── xss/                        # XSS confirmados
-├── hydra/                      # Logs hydra por serviço
-├── metasploit/                 # Resource script + outputs
-├── searchsploit/               # Lookup por CVE
-├── exploits_confirmed.csv      # Todos os findings confirmados
-├── swarm_red.log               # Log cronológico (trilha de auditoria)
-└── relatorio_swarm_red.html    # Relatório HTML final
+swarm.sh            Main scanner (11 phases)
+swarm_red.sh        Exploitation engine (8 phases)
+osint.sh            Pre-engagement OSINT (10 phases)
+swarm_full.sh       End-to-end orchestrator
+pci_scan.sh         PCI DSS 4.0.1 compliance
+swarm_report.py     HTML/JSON report generator
+swarm_diff.py       Scan comparison
+lib/                Python modules (parsers, evidence, poc_validator, cve_enrich, …)
+                    + bash modules (recon, crawl, sqli, xss, brute, msf, web)
+.github/workflows/  CI: bash syntax + Python compile + unit tests
 ```
 
-### `swarm.sh`
+Full version history in [CHANGELOG.md](CHANGELOG.md).
 
-```
-scan_alvo.com_20260514_120000/
-├── raw/
-│   ├── nuclei.json             # Findings nuclei (JSONL)
-│   ├── zap_alerts.json         # Alerts ZAP
-│   ├── nmap.txt                # Output nmap (web + serviços perigosos)
-│   ├── tls_issues.txt          # Problemas TLS (testssl)
-│   ├── monitoring_findings.json # Endpoints /metrics expostos
-│   ├── ratelimit_findings.json  # Rate limiting ausente em /login
-│   ├── secscan_findings.json    # security.txt + IPs internos expostos
-│   └── security_txt.txt        # Conteúdo do security.txt (quando presente)
-├── relatorio_swarm.html        # Relatório técnico completo
-├── sumario_executivo.html      # Sumário de risco para gestão
-└── findings.json               # Export para SIEM/Jira
-```
+## Contributing
 
----
+Issues and PRs welcome. CI runs bash syntax checks, `py_compile` on all Python, and the unit-test suite on every push — keep it green.
 
-## Metodologia de Classificação de Criticidades
+## License
 
-O SWARM usa um modelo de classificação em camadas: cada finding passa por múltiplas fontes de severidade, e a mais alta prevalece. O score de risco final do alvo é calculado a partir da contagem ponderada de findings por nível.
-
-### 1. Fontes de severidade (ordem de precedência)
-
-| Fonte | Como é usada | Onde entra no pipeline |
-|---|---|---|
-| **Nuclei — severidade nativa do template** | Templates do ProjectDiscovery já classificam cada finding em `critical / high / medium / low / info` | Fase 4 (`swarm.sh`) — resultado direto do scan |
-| **NVD CVSS v3 via API** | Para CVEs identificados pelo nuclei, a fase de enriquecimento consulta a NVD API v2 e obtém o score CVSS 3.x oficial | Fase 6 (`swarm.sh`) — enriquecimento CVE |
-| **Mapa CWE → severidade** | `swarm.sh` mantém um mapa de ~40 CWEs com score CVSS base e nível associado para findings com CWE mas sem CVE direto | Fase 11 — montagem do relatório |
-| **ZAP Active Scan** | Alerts classificados pelo próprio ZAP como `Critical / High / Medium / Low` | Fase 9 (`swarm.sh`) |
-| **Security Headers** | `header_check.py` mapeia cada header ausente para um nível: CSP ausente = critical; HSTS ausente = high; X-Frame-Options = medium | Fase 10 (`swarm.sh`) |
-| **PoC Validator** | Apenas findings com confiança ≥ 60% são marcados como `confirmed=True` | Fase 5 (`swarm.sh`) / `lib/poc_validator.py` |
-
-### 2. Mapeamento CVSS → severidade (padrão NVD)
-
-```
-CVSS  9.0 – 10.0  →  Critical
-CVSS  7.0 –  8.9  →  High
-CVSS  4.0 –  6.9  →  Medium
-CVSS  0.1 –  3.9  →  Low
-CVSS  0.0          →  Info
-```
-
-Função no código: `cvss_to_sev(score)` em `swarm.sh` (fase 11).
-
-### 3. Escalada automática — CISA KEV
-
-CVEs presentes no catálogo **Known Exploited Vulnerabilities (CISA KEV)** são escalados automaticamente na interface, independente do CVSS, com flag `[🔴 KEV — exploração ativa]`. O CVSS não é alterado, mas o finding recebe destaque máximo no relatório e o campo `in_kev: true` no `findings.json`.
-
-> O cache KEV tem validade de 24 horas. Renovado automaticamente na próxima execução.
-
-### 4. EPSS — probabilidade de exploração
-
-Para cada CVE enriquecido, o SWARM consulta a [FIRST.org EPSS API](https://www.first.org/epss/) e armazena:
-
-- `epss_score` — probabilidade de exploração nos próximos 30 dias (0.0 a 1.0)
-- `epss_percentile` — posição percentual entre todos os CVEs conhecidos
-
-O EPSS **não altera o nível de severidade**, mas é exibido no relatório como dado complementar para priorização de remediação.
-
-```
-EPSS > 0.5   → Alta probabilidade de exploração ativa
-EPSS > 0.1   → Probabilidade relevante — priorizar remediação
-EPSS < 0.01  → Exploração improvável no curto prazo
-```
-
-### 5. Score de risco do alvo
-
-Calculado em `lib/report_generator.py` ao final de cada scan. Agrega todos os findings confirmados e ponderados:
-
-```
-risk_score = min(100,  Critical × 30
-                     + High     × 15
-                     + Medium   × 5
-                     + Low      × 1)
-```
-
-| Faixa | Nível | Cor |
-|---|---|---|
-| 70 – 100 | CRÍTICO | `#7a2e2e` |
-| 40 –  69 | ALTO    | `#b34e4e` |
-| 15 –  39 | MÉDIO   | `#d4833a` |
-|  0 –  14 | BAIXO   | `#4a7c8c` |
-
-> O mesmo cálculo é usado no `swarm_batch.sh` para o score por alvo individual. O relatório batch exibe contagem de findings por nível — **não exibe score agregado** entre alvos, pois médias de scores de segurança são métricas sem significado operacional.
-
-### 6. Confiança do PoC (`poc_validator.py`)
-
-O validador reexecuta cada finding com requisições ativas e atribui um percentual de confiança:
-
-| Confiança | Significado | Aparece como |
-|---|---|---|
-| ≥ 95% | Exploração ativa demonstrada (time-based, diff de conteúdo) | `confirmed: true` |
-| 70 – 94% | Resposta consistente com a vulnerabilidade | `confirmed: true` |
-| 60 – 69% | Comportamento anômalo detectado — confiança mínima aceita | `confirmed: true` |
-| < 60% | Sem evidência suficiente | `confirmed: false` — não entra no relatório como confirmado |
-
-Limiar configurável em `lib/poc_validator.py`: `MIN_CONFIRM_CONFIDENCE = 60`.
-
-### 7. Mapa de impacto prático por CWE
-
-O relatório traduz CWEs para linguagem de negócio. Exemplos do mapa interno:
-
-| CWE | Severidade base | Impacto resumido |
-|---|---|---|
-| CWE-89 (SQLi) | Critical — CVSS 9.8 | Leitura, modificação ou destruição do banco de dados |
-| CWE-78 (OS Command Injection) | Critical — CVSS 9.8 | Execução de comandos arbitrários no servidor |
-| CWE-918 (SSRF) | Critical — CVSS 9.8 | Acesso a serviços internos via servidor (AWS metadata, DBs) |
-| CWE-287 (Improper Auth) | Critical — CVSS 9.1 | Acesso não autorizado — personificação de qualquer usuário |
-| CWE-79 (XSS) | Medium — CVSS 6.1 | Roubo de sessão via script no browser da vítima |
-| CWE-352 (CSRF) | High — CVSS 8.8 | Ações não autorizadas em nome de usuário autenticado |
-| CWE-326 (Weak Crypto) | High — CVSS 7.5 | Comunicações interceptáveis e decifráveis |
-| CWE-693 (Missing Headers) | Varia por header | Browser do usuário sem proteções contra XSS e injeção |
-
-O mapa completo (24 entradas) está em `swarm.sh` — seção `CWE_MAP` e `IMPACT_MAP`.
-
----
-
-## Dependências
-
-### Obrigatórias
-
-| Ferramenta | Versão mínima |
-|---|---|
-| bash | 4.4 |
-| python3 | 3.8 |
-| curl | qualquer |
-
-### Opcionais por fase
-
-| Ferramenta | Fase | Instalação |
-|---|---|---|
-| subfinder | Recon | `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` |
-| httpx | Recon / Surface | `go install github.com/projectdiscovery/httpx/cmd/httpx@latest` |
-| nmap | Surface | `apt install nmap` |
-| katana ≥ 1.6.1 | Crawl | `go install github.com/projectdiscovery/katana/cmd/katana@latest` |
-| nuclei | Varredura | `go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest` |
-| ffuf | Crawl | `go install github.com/ffuf/ffuf/v2@latest` |
-| sqlmap ≥ 1.10.5 | SQLi | `pip3 install --user --upgrade sqlmap` |
-| dalfox | XSS | `go install github.com/hahwul/dalfox/v2@latest` |
-| hydra ≥ 9.8 | Brute Force | compilar do fonte ou `apt install hydra` (9.5+) |
-| nikto ≥ 2.6.0 | Web Scanner | `apt install nikto` ou [fonte oficial](https://github.com/sullo/nikto) |
-| msfconsole | Metasploit | `bash setup.sh` |
-| testssl.sh | TLS | `apt install testssl` |
-| wafw00f | WAF Detection | `pip3 install wafw00f` |
-| zaproxy | ZAP Active Scan | `snap install zaproxy --classic` |
-| trufflehog ≥ 3.95.3 | Secrets | `pip3 install --user trufflehog` |
-| amass **v3.x** | Subdomain Discovery | manter em v3 — v5 quebra interface (`amass enum -passive`) |
-| searchsploit | CVE lookup | `apt install exploitdb` |
-
----
-
-## Licença
-
-MIT — veja [LICENSE](LICENSE).
-
----
-
-*Para uso exclusivo em atividades de segurança ofensiva autorizadas.*
+MIT — see [LICENSE](LICENSE). Use responsibly and only where you are authorized.
