@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/stiglitz_logo.png" alt="Stiglitz" width="420">
+</p>
+
 <h1 align="center">Stiglitz</h1>
 
 <p align="center">
