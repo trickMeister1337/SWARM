@@ -930,10 +930,28 @@ elif risk >= 15:
     stxt, scol = "MÉDIO — Correção Planejada",   "#d4833a"
 else:
     stxt, scol = "BAIXO — Monitoramento",        "#4a7c8c"
-rdate = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 import time as _time
-duration_secs = int(_time.time()) - SCAN_START_TS if SCAN_START_TS else 0
-duration_str = f"{duration_secs//3600}h {(duration_secs%3600)//60}m {duration_secs%60}s" if duration_secs > 0 else "N/A"
+# Janela real do scan a partir de raw/.phase_times (estável mesmo se o
+# relatório for regerado depois — não usa a hora de geração do relatório).
+_ph_starts, _ph_ends = [], []
+_ptf2 = os.path.join(OUTDIR, "raw", ".phase_times")
+if os.path.exists(_ptf2):
+    for _l in open(_ptf2):
+        _p = _l.strip().split(":")
+        if len(_p) >= 3 and _p[1] == "start":
+            try: _ph_starts.append(int(_p[2]))
+            except Exception: pass
+        elif len(_p) >= 3 and _p[1] == "end":
+            try: _ph_ends.append(int(_p[2]))
+            except Exception: pass
+_scan_start = min(_ph_starts) if _ph_starts else SCAN_START_TS
+_scan_end   = max(_ph_ends) if _ph_ends else (int(_time.time()) if SCAN_START_TS else 0)
+duration_secs = (_scan_end - _scan_start) if (_scan_start and _scan_end > _scan_start) else 0
+duration_str = (f"{duration_secs//3600}h {(duration_secs%3600)//60}m {duration_secs%60}s"
+                if duration_secs > 0 else "N/A")
+# Data do scan = início real do scan (não a hora de geração do relatório)
+rdate = (datetime.fromtimestamp(_scan_start).strftime("%Y-%m-%d %H:%M")
+         if _scan_start else datetime.now().strftime("%Y-%m-%d %H:%M"))
 
 def badge(sev):
     labels = {"critical":"CRÍTICO","high":"ALTO","medium":"MÉDIO","low":"BAIXO","info":"INFO"}
