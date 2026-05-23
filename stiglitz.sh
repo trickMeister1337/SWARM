@@ -316,16 +316,16 @@ phase_skip() {
 clear 2>/dev/null || true
 echo -e "${CYAN}"
 cat << 'ASCIIART'
-  ███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
-  ██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
-  ███████╗██║ █╗ ██║███████║██████╔╝██╔████╔██║
-  ╚════██║██║███╗██║██╔══██║██╔══██╗██║╚██╔╝██║
-  ███████║╚███╔███╔╝██║  ██║██║  ██║██║ ╚═╝ ██║
-  ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝
+  ███████╗████████╗██╗ ██████╗ ██╗     ██╗████████╗███████╗
+  ██╔════╝╚══██╔══╝██║██╔════╝ ██║     ██║╚══██╔══╝╚══███╔╝
+  ███████╗   ██║   ██║██║  ███╗██║     ██║   ██║     ███╔╝ 
+  ╚════██║   ██║   ██║██║   ██║██║     ██║   ██║    ███╔╝  
+  ███████║   ██║   ██║╚██████╔╝███████╗██║   ██║   ███████╗
+  ╚══════╝   ╚═╝   ╚═╝ ╚═════╝ ╚══════╝╚═╝   ╚═╝   ╚══════╝
 ASCIIART
 echo -e "${NC}"
-echo -e "  ${BOLD}Security Web Assessment & Recon Module${NC}"
-echo -e "  ${BLUE}Metodologia: KEV + EPSS + CVSS · Pipeline de 11 Fases${NC}"
+echo -e "  ${BOLD}Stiglitz — All-in-One Offensive Security Pipeline${NC}"
+echo -e "  ${BLUE}Methodology: KEV + EPSS + CVSS · 11-phase pipeline${NC}"
 echo ""
 echo -e "  ${GREEN}▸${NC} Alvo     ${BOLD}$TARGET${NC}"
 echo -e "  ${GREEN}▸${NC} Domínio  ${BOLD}$DOMAIN${NC}"
