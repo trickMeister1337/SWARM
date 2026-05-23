@@ -52,4 +52,4 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: python3 -m pytest test_lib.py -v --tb=short
+        run: python3 -m pytest test_lib.py test_swarm_modules.py -v --tb=short
