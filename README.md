@@ -2,7 +2,6 @@
   <img src="assets/stiglitz_logo.png" alt="Stiglitz" width="600">
 </p>
 
-<h1 align="center">Stiglitz</h1>
 
 <p align="center">
   <b>The all-in-one offensive security pipeline.</b><br>
