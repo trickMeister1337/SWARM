@@ -88,7 +88,7 @@ SECRET_PATTERNS = [
     (r'(?i)(?:mongodb|postgres|mysql|redis|amqp)://[^\s"\'<>]{10,}', "DB Connection String"),
     (r'(?i)(?:password|passwd|pwd)\s*[:=]\s*["\']([^"\']{8,64})["\']', "Hardcoded Password"),
     (r'(?i)(?:secret[_\-]?key|client[_-]?secret)\s*[:=]\s*["\']([A-Za-z0-9_\-]{16,})["\']', "Secret Key"),
-    (r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----', "Private Key"),
+    (r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[A-Za-z0-9+/=\s]{40,5000}-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----', "Private Key"),
     (r'xox[baprs]-[A-Za-z0-9\-]{10,}', "Slack Token"),
     (r'https?://(?:localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})[^\s"\'<>]*', "URL Rede Interna"),
     (r'https?://[a-zA-Z0-9\-\.]+\.(?:internal|local|corp|lan|intranet|dev|staging|hml)[^\s"\'<>]*', "Domínio Interno"),
@@ -112,6 +112,24 @@ VULN_VERSIONS = {
 }
 FP_WORDS = {"example","placeholder","your-key","your_key","xxx","dummy","test","sample","foo","bar","changeme"}
 
+# Vocabulário de UI/i18n que aparece após "password:" mas NÃO é credencial
+# (ex: 'password:"Password input field"', placeholders, labels, validações).
+_PWD_UI_WORDS = {"input","field","label","placeholder","enter","confirm","required",
+                 "invalid","forgot","reset","change","current","again","match","hint",
+                 "show","hide","toggle","strength","minimum","maximum","characters",
+                 "must","least","contain","empty","wrong","incorrect","new","old","please"}
+
+def _looks_like_password(v):
+    """Heurística de precisão: credenciais reais não têm espaços nem
+    vocabulário de UI. Reduz falsos-positivos de labels/placeholders."""
+    v = (v or "").strip()
+    if not v or " " in v:
+        return False
+    low = v.lower()
+    if any(w in low for w in _PWD_UI_WORDS):
+        return False
+    return True
+
 all_secrets, all_endpoints, all_frameworks, all_comments, js_stats = [], set(), [], [], []
 
 for js_url in js_list:
@@ -127,6 +145,10 @@ for js_url in js_list:
         for m in re.finditer(pattern, content, re.IGNORECASE|re.MULTILINE):
             val = m.group(0)
             if any(fp in val.lower() for fp in FP_WORDS): continue
+            # Validação de precisão por tipo — descarta labels/placeholders de UI
+            if label == "Hardcoded Password" and not _looks_like_password(
+                    m.group(1) if m.lastindex else val):
+                continue
             line_start = content.rfind("\n", 0, m.start())+1
             line_end = content.find("\n", m.end()); line_end = len(content) if line_end==-1 else line_end
             ctx = content[line_start:line_end].strip()[:200]
