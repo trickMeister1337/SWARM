@@ -1,66 +1,40 @@
-# Stiglitz outputs (resultados de scan — dados sensíveis)
-stiglitz_red_*/
-stiglitz_red_tmp_*/
-scan_*/
-osint_*/
-pci_scan_*/
-swarm_output/
-swarm_refactored/
-swarm_refactored.tar.gz
+# ─────────────────────────────────────────────────────────────────────────
+# This repository lives in $HOME, alongside many unrelated files and other
+# projects (CNPJ-STATUS, PCI-GAP, SWARM-PCI, venvs, caches, downloads, …).
+# Strategy: ignore EVERYTHING by default, then explicitly allow only the
+# Stiglitz project files. This prevents `git add -A` from ever staging junk.
+# (Note: already-tracked files stay tracked regardless of these rules.)
+# ─────────────────────────────────────────────────────────────────────────
+/*
 
-# Arquivos de alvo/endereços de clientes (nunca subir ao git)
-subdomains*.txt
-targets_opt*.txt
-cde_targets.txt
-*_targets.txt
-relatorio_*.html
-sumario_*.txt
-relatorio_consolidado.html
+# ── Allowed: Stiglitz project files ──────────────────────────────────────
+!/.gitignore
+!/.github
+!/CHANGELOG.md
+!/LICENSE
+!/README.md
+!/requirements-dev.txt
+!/lib
+!/profiles
+!/nuclei-custom-templates
+!/osint.sh
+!/pci_scan.sh
+!/setup.sh
+!/stiglitz.sh
+!/stiglitz_batch.sh
+!/stiglitz_diff.py
+!/stiglitz_full.sh
+!/stiglitz_red.sh
+!/stiglitz_report.py
+!/test_lib.py
+!/test_swarm_modules.py
+!/test_swarm_red.sh
 
-# Scan results (sensitive)
-*.csv
-*.log
-*.json
-!package.json
-
-# Metasploit
-*.rc
-msf_output.log
-hosts.csv
-services.csv
-vulns.csv
-creds.csv
-
-# sqlmap
-sqlmap/
-
-# Hydra
-hydra/
-
-# Nikto
-nikto/
-
-# Python
+# ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/
 *.pyc
-.venv/
-*.egg-info/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Windows alternate data streams
 *:Zone.Identifier
-*:Zone.Identifier:Zone.Identifier
 
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Faraday
-.faraday-cli.yml
-.faraday-cli_history
+# nuclei-custom-templates: keep only the project's own template
+nuclei-custom-templates/*
+!nuclei-custom-templates/grafana-version-outdated.yaml
