@@ -19,7 +19,7 @@ unset _dir
 for _tool in subfinder httpx nuclei katana; do
     if ! command -v "$_tool" &>/dev/null; then
         # Busca ampla — find é lento mas só roda quando o comando não é encontrado
-        _found=$(find "$HOME" /usr/local /snap 2>/dev/null \
+        _found=$(find "$HOME" /usr/local /snap \
             -name "$_tool" -type f -perm /111 2>/dev/null | head -1)
         if [ -n "$_found" ]; then
             _found_dir=$(dirname "$_found")
@@ -406,7 +406,7 @@ if [ ${#_missing_go[@]} -gt 0 ]; then
     echo -e "${YELLOW}    PATH atual: $PATH${NC}"
     # Tentar diagnosticar onde o binário está
     for _t in "${_missing_go[@]}"; do
-        _loc=$(find "$HOME" /usr/local /usr/bin /snap 2>/dev/null \
+        _loc=$(find "$HOME" /usr/local /usr/bin /snap \
             -name "$_t" -type f -perm /111 2>/dev/null | head -1)
         if [ -n "$_loc" ]; then
             echo -e "${YELLOW}    Binário $( basename "$_t") encontrado em: $_loc${NC}"

@@ -716,11 +716,13 @@ phase_leaked_creds() {
             2>/dev/null)
 
         if [ -n "$result" ] && echo "$result" | python3 -c "import sys,json; json.load(sys.stdin)" &>/dev/null; then
-            echo "$result" | python3 << PYEOF
-import sys, json
-email = "$email"
-domain = "$DOMAIN"
-data = json.load(sys.stdin)
+            # Passa o resultado via env var (heredoc não pode receber via pipe — o
+            # heredoc sobrescreve o stdin). Heredoc quoted evita injeção.
+            HIBP_RESULT="$result" HIBP_EMAIL="$email" HIBP_DOMAIN="$DOMAIN" python3 << 'PYEOF'
+import os, json
+email  = os.environ["HIBP_EMAIL"]
+domain = os.environ["HIBP_DOMAIN"]
+data = json.loads(os.environ["HIBP_RESULT"])
 for breach in data:
     name    = breach.get('Name','')
     date    = breach.get('BreachDate','')
