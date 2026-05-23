@@ -78,47 +78,46 @@ def cwe_enrich(cweid_str):
 
 # ── Mapa de impacto prático por CWE (linguagem para tech lead) ──
 IMPACT_MAP = {
-    "89":  "Um atacante pode ler, modificar ou apagar dados do banco de dados, incluindo dados de usuários e transações.",
-    "78":  "Um atacante pode executar comandos arbitrários no servidor, comprometendo toda a infraestrutura.",
-    "79":  "Scripts maliciosos podem ser executados no navegador de usuários, roubando sessões e credenciais.",
-    "352": "Um atacante pode forçar usuários autenticados a executar ações não autorizadas (ex: transferências, alteração de dados).",
-    "22":  "Um atacante pode acessar arquivos arbitrários do servidor, incluindo configurações e chaves privadas.",
-    "287": "Acesso não autorizado à aplicação, permitindo personificar qualquer usuário incluindo administradores.",
-    "306": "Endpoints críticos acessíveis sem autenticação, expondo dados e funcionalidades a qualquer pessoa.",
-    "284": "Usuários podem acessar recursos ou dados de outros usuários (IDOR, escalada de privilégios).",
-    "918": "O servidor pode ser usado como proxy para acessar serviços internos protegidos (AWS metadata, bancos de dados).",
-    "611": "Processamento de XML externo pode vazar arquivos do servidor ou causar denial of service.",
-    "502": "Deserialização de dados não confiáveis pode resultar em execução remota de código.",
-    "326": "Comunicações criptografadas podem ser interceptadas e decifradas por atacantes na rede.",
-    "327": "Algoritmos criptográficos fracos podem ser quebrados, expondo dados sensíveis.",
-    "295": "Comunicações TLS podem ser interceptadas por ataques man-in-the-middle.",
-    "1021":"Usuários podem ser induzidos a clicar em elementos invisíveis sobrepostos (clickjacking).",
-    "319": "Dados transmitidos em texto claro podem ser interceptados por qualquer observador na rede.",
-    "200": "Informações sobre tecnologias, versões ou estrutura interna expostas a atacantes.",
-    "693": "Ausência de cabeçalhos de segurança deixa o browser do usuário sem proteções básicas contra XSS e injeção.",
-    "1004":"Cookies de sessão acessíveis via JavaScript podem ser roubados por scripts maliciosos (XSS).",
-    "1395":"Biblioteca JavaScript com vulnerabilidade conhecida e exploit público disponível.",
-    "312": "Dados sensíveis armazenados sem criptografia podem ser acessados diretamente no banco de dados.",
-    "384": "Um atacante pode fixar o identificador de sessão de um usuário e assumir sua conta após login.",
+    "89":  "An attacker can read, modify or delete database data, including user and transaction data.",
+    "78":  "An attacker can execute arbitrary commands on the server, compromising the entire infrastructure.",
+    "79":  "Malicious scripts can run in users' browsers, stealing sessions and credentials.",
+    "352": "An attacker can force authenticated users to perform unauthorized actions (e.g. transfers, data changes).",
+    "22":  "An attacker can access arbitrary server files, including configurations and private keys.",
+    "287": "Unauthorized access to the application, allowing impersonation of any user including administrators.",
+    "306": "Critical endpoints accessible without authentication, exposing data and functionality to anyone.",
+    "284": "Users can access other users' resources or data (IDOR, privilege escalation).",
+    "918": "The server can be used as a proxy to reach protected internal services (AWS metadata, databases).",
+    "611": "Processing external XML can leak server files or cause denial of service.",
+    "502": "Deserialization of untrusted data can result in remote code execution.",
+    "326": "Encrypted communications can be intercepted and decrypted by attackers on the network.",
+    "327": "Weak cryptographic algorithms can be broken, exposing sensitive data.",
+    "295": "TLS communications can be intercepted by man-in-the-middle attacks.",
+    "1021":"Users can be tricked into clicking invisible overlaid elements (clickjacking).",
+    "319": "Data transmitted in cleartext can be intercepted by any observer on the network.",
+    "200": "Information about technologies, versions or internal structure exposed to attackers.",
+    "693": "Missing security headers leave the user's browser without basic protections against XSS and injection.",
+    "1004":"Session cookies accessible via JavaScript can be stolen by malicious scripts (XSS).",
+    "1395":"JavaScript library with a known vulnerability and publicly available exploit.",
+    "312": "Sensitive data stored without encryption can be accessed directly in the database.",
+    "384": "An attacker can fixate a user's session identifier and take over their account after login.",
 }
 
 # ── Mapa de remediação específica por CWE ────────────────────
 REMEDIATION_MAP = {
-    "89":  "Use prepared statements (parametrized queries) em todas as queries SQL. Nunca concatene dados do usuário diretamente.",
-    "79":  "Escape de output em contexto HTML/JS. Implemente Content-Security-Policy. Use bibliotecas como DOMPurify.",
-    "352": "Implemente tokens CSRF (ex: SameSite=Strict em cookies, token por formulário). Frameworks como Spring, Django e Rails têm suporte nativo.",
-    "22":  "Valide e normalize caminhos de arquivo. Use allowlist de diretórios permitidos. Evite concatenar input do usuário em caminhos.",
-    "287": "Implemente autenticação forte com MFA. Use sessões seguras com expiração adequada.",
-    "306": "Adicione autenticação a todos os endpoints. Use middleware de auth centralizado.",
-    "284": "Valide no servidor que o usuário tem permissão para acessar o recurso solicitado. Não confie apenas no ID da URL.",
-    "918": "Valide e filtre URLs de destino em qualquer funcionalidade de proxy/redirect. Use allowlist de hosts permitidos.",
-    "693": "Configure cabeçalhos: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security.",
-    "1004":"Adicione flag HttpOnly em todos os cookies de sessão. Use também Secure e SameSite=Strict.",
-    "1395":"Atualize a biblioteca para a versão mais recente. Verifique release notes para breaking changes.",
-    "326": "Use TLS 1.2+ com cipher suites modernas. Desabilite SSLv3, TLS 1.0, TLS 1.1 e RC4.",
-    "319": "Force HTTPS em toda a aplicação. Implemente HSTS. Redirecione HTTP para HTTPS.",
-    "352": "Tokens CSRF em formulários e headers X-CSRF-Token para APIs. Verifique Origin/Referer como camada adicional.",
-    "312": "Criptografe dados sensíveis em repouso. Use bcrypt/Argon2 para senhas. Nunca armazene em texto claro.",
+    "89":  "Use prepared statements (parametrized queries) in all SQL queries. Never concatenate user data directly.",
+    "79":  "Escape output in HTML/JS context. Implement Content-Security-Policy. Use libraries like DOMPurify.",
+    "352": "Implement CSRF tokens (e.g. SameSite=Strict cookies, per-form token). Frameworks like Spring, Django and Rails have native support.",
+    "22":  "Validate and normalize file paths. Use an allowlist of permitted directories. Avoid concatenating user input into paths.",
+    "287": "Implement strong authentication with MFA. Use secure sessions with proper expiration.",
+    "306": "Add authentication to all endpoints. Use centralized auth middleware.",
+    "284": "Validate server-side that the user is allowed to access the requested resource. Do not rely solely on the URL ID.",
+    "918": "Validate and filter destination URLs in any proxy/redirect functionality. Use an allowlist of permitted hosts.",
+    "693": "Configure headers: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security.",
+    "1004":"Add the HttpOnly flag to all session cookies. Also use Secure and SameSite=Strict.",
+    "1395":"Update the library to the latest version. Check release notes for breaking changes.",
+    "326": "Use TLS 1.2+ with modern cipher suites. Disable SSLv3, TLS 1.0, TLS 1.1 and RC4.",
+    "319": "Enforce HTTPS across the application. Implement HSTS. Redirect HTTP to HTTPS.",
+    "312": "Encrypt sensitive data at rest. Use bcrypt/Argon2 for passwords. Never store in cleartext.",
 }
 
 def cvss_to_sev(score):
@@ -379,159 +378,159 @@ if os.path.exists(nf):
 # Mapeamento de IDs testssl → nome legível, descrição e remediação
 TLS_ID_INFO = {
     "cipherlist_NULL": {
-        "name": "Cipher Suites NULL Habilitadas (Sem Criptografia)",
-        "desc": "O servidor aceita cipher suites do tipo NULL, que não aplicam nenhuma criptografia ao tráfego. Qualquer atacante com acesso à rede pode ler e modificar os dados em trânsito sem barreiras.",
-        "rem":  "Desabilitar todas as cipher suites NULL na configuração TLS do servidor. Em Nginx: ssl_ciphers 'HIGH:!NULL:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5'; em Apache: SSLCipherSuite HIGH:!NULL:!aNULL. Reiniciar o servidor após a mudança.",
+        "name": "NULL Cipher Suites Enabled (No Encryption)",
+        "desc": "The server accepts NULL cipher suites, which apply no encryption to traffic. Any attacker with network access can read and modify data in transit without barriers.",
+        "rem":  "Disable all NULL cipher suites in the server's TLS configuration. Nginx: ssl_ciphers 'HIGH:!NULL:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5'; Apache: SSLCipherSuite HIGH:!NULL:!aNULL. Restart the server after the change.",
     },
     "cipherlist_aNULL": {
-        "name": "Cipher Suites Anônimas Habilitadas (Sem Autenticação)",
-        "desc": "O servidor aceita cipher suites anônimas (aNULL/DH anônimo), que não autenticam o servidor. Isso permite ataques Man-in-the-Middle onde um atacante se passa pelo servidor legítimo sem que o cliente perceba.",
-        "rem":  "Desabilitar cipher suites aNULL e DH anônimo. Em Nginx: ssl_ciphers 'HIGH:!aNULL:!NULL:!eNULL'; em Apache: SSLCipherSuite HIGH:!aNULL:!NULL. Também remover ciphers EXPORT, DES e RC4 da configuração.",
+        "name": "Anonymous Cipher Suites Enabled (No Authentication)",
+        "desc": "The server accepts anonymous cipher suites (aNULL/anonymous DH), which do not authenticate the server. This enables Man-in-the-Middle attacks where an attacker impersonates the legitimate server without the client noticing.",
+        "rem":  "Disable aNULL and anonymous DH cipher suites. Nginx: ssl_ciphers 'HIGH:!aNULL:!NULL:!eNULL'; Apache: SSLCipherSuite HIGH:!aNULL:!NULL. Also remove EXPORT, DES and RC4 ciphers from the configuration.",
     },
     "cipherlist_EXPORT": {
-        "name": "Cipher Suites EXPORT Habilitadas (Criptografia Fraca — FREAK/LogJam)",
-        "desc": "O servidor aceita cipher suites de exportação (40-56 bits), criadas nos anos 90 para contornar regulações de exportação dos EUA. São vulneráveis aos ataques FREAK (CVE-2015-0204) e LOGJAM.",
-        "rem":  "Remover cipher suites EXPORT: ssl_ciphers '!EXPORT' (Nginx) / SSLCipherSuite !EXPORT (Apache). Atualizar para TLS 1.2+ com ciphers modernos (AES-256-GCM, CHACHA20).",
+        "name": "EXPORT Cipher Suites Enabled (Weak Encryption — FREAK/LogJam)",
+        "desc": "The server accepts export-grade cipher suites (40-56 bits), created in the 1990s to bypass US export regulations. They are vulnerable to the FREAK (CVE-2015-0204) and LOGJAM attacks.",
+        "rem":  "Remove EXPORT cipher suites: ssl_ciphers '!EXPORT' (Nginx) / SSLCipherSuite !EXPORT (Apache). Upgrade to TLS 1.2+ with modern ciphers (AES-256-GCM, CHACHA20).",
     },
     "cipherlist_LOW": {
-        "name": "Cipher Suites de Baixa Segurança Habilitadas",
-        "desc": "O servidor aceita cipher suites com criptografia fraca (DES, RC2, 56-bit). Essas cifras podem ser quebradas por força bruta com hardware moderno.",
-        "rem":  "Remover todos os ciphers LOW e MEDIUM: ssl_ciphers 'HIGH:!LOW:!MEDIUM:!EXPORT:!aNULL:!NULL' (Nginx). Manter apenas AES-128-GCM, AES-256-GCM e CHACHA20-POLY1305.",
+        "name": "Low-Security Cipher Suites Enabled",
+        "desc": "The server accepts cipher suites with weak encryption (DES, RC2, 56-bit). These ciphers can be brute-forced with modern hardware.",
+        "rem":  "Remove all LOW and MEDIUM ciphers: ssl_ciphers 'HIGH:!LOW:!MEDIUM:!EXPORT:!aNULL:!NULL' (Nginx). Keep only AES-128-GCM, AES-256-GCM and CHACHA20-POLY1305.",
     },
     "cipherlist_3DES_IDEA": {
-        "name": "3DES/IDEA Habilitado (Vulnerável ao SWEET32)",
-        "desc": "O servidor aceita 3DES ou IDEA, vulneráveis ao ataque SWEET32 (CVE-2016-2183) que permite descriptografar sessões longas após ~768 GB de dados trocados.",
-        "rem":  "Desabilitar 3DES e IDEA: adicionar '!3DES:!IDEA' à diretiva ssl_ciphers. Priorizar AES-GCM e CHACHA20.",
+        "name": "3DES/IDEA Enabled (Vulnerable to SWEET32)",
+        "desc": "The server accepts 3DES or IDEA, vulnerable to the SWEET32 attack (CVE-2016-2183) which allows decrypting long sessions after ~768 GB of data exchanged.",
+        "rem":  "Disable 3DES and IDEA: add '!3DES:!IDEA' to the ssl_ciphers directive. Prioritize AES-GCM and CHACHA20.",
     },
     "cipherlist_OBSOLETED": {
-        "name": "Cipher Suites Obsoletas Habilitadas",
-        "desc": "O servidor aceita cipher suites consideradas obsoletas (RC4, DES, IDEA, SEED ou similar). Essas cifras possuem fraquezas conhecidas e não devem ser usadas em ambientes de produção.",
-        "rem":  "Restringir o servidor a cipher suites modernas: TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256 (TLS 1.3) e ECDHE-ECDSA-AES256-GCM-SHA384, ECDHE-RSA-AES256-GCM-SHA384 (TLS 1.2).",
+        "name": "Obsolete Cipher Suites Enabled",
+        "desc": "The server accepts cipher suites considered obsolete (RC4, DES, IDEA, SEED or similar). These ciphers have known weaknesses and should not be used in production environments.",
+        "rem":  "Restrict the server to modern cipher suites: TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256 (TLS 1.3) and ECDHE-ECDSA-AES256-GCM-SHA384, ECDHE-RSA-AES256-GCM-SHA384 (TLS 1.2).",
     },
     "cipherlist_STRONG_NOFS": {
-        "name": "Ausência de Forward Secrecy em Ciphers Fortes",
-        "desc": "Cipher suites fortes sem Perfect Forward Secrecy (PFS) estão habilitadas. Se a chave privada do servidor for comprometida no futuro, sessões passadas gravadas podem ser descriptografadas retroativamente.",
-        "rem":  "Priorizar cipher suites ECDHE/DHE: ssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305'. Desativar RSA key exchange estático.",
+        "name": "Lack of Forward Secrecy in Strong Ciphers",
+        "desc": "Strong cipher suites without Perfect Forward Secrecy (PFS) are enabled. If the server's private key is compromised in the future, recorded past sessions can be decrypted retroactively.",
+        "rem":  "Prioritize ECDHE/DHE cipher suites: ssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305'. Disable static RSA key exchange.",
     },
     "fallback_SCSV": {
-        "name": "TLS Fallback SCSV Não Suportado (Vulnerável a Downgrade)",
-        "desc": "O servidor não suporta TLS Fallback SCSV (RFC 7507), mecanismo que impede ataques de downgrade de protocolo. Sem isso, um atacante MITM pode forçar a conexão a usar uma versão TLS mais antiga e menos segura.",
-        "rem":  "Atualizar a biblioteca TLS do servidor (OpenSSL 1.0.1j+, NSS 3.17.1+). O suporte a SCSV é automático em versões modernas. Também desabilitar TLS 1.0 e 1.1 para eliminar o vetor de downgrade.",
+        "name": "TLS Fallback SCSV Not Supported (Vulnerable to Downgrade)",
+        "desc": "The server does not support TLS Fallback SCSV (RFC 7507), a mechanism that prevents protocol downgrade attacks. Without it, a MITM attacker can force the connection to use an older, less secure TLS version.",
+        "rem":  "Update the server's TLS library (OpenSSL 1.0.1j+, NSS 3.17.1+). SCSV support is automatic in modern versions. Also disable TLS 1.0 and 1.1 to eliminate the downgrade vector.",
     },
     "BEAST": {
-        "name": "Vulnerabilidade BEAST (CVE-2011-3389)",
-        "desc": "O servidor está vulnerável ao ataque BEAST via CBC em TLS 1.0. Um atacante MITM pode injetar texto plano e realizar um ataque chosen-plaintext para recuperar partes do tráfego.",
-        "rem":  "Desabilitar TLS 1.0: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Como mitigação adicional, priorizar ciphers RC4 foi sugerido no passado, mas RC4 também é fraco — a solução correta é desativar TLS 1.0.",
+        "name": "BEAST Vulnerability (CVE-2011-3389)",
+        "desc": "The server is vulnerable to the BEAST attack via CBC in TLS 1.0. A MITM attacker can inject plaintext and perform a chosen-plaintext attack to recover portions of the traffic.",
+        "rem":  "Disable TLS 1.0: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Prioritizing RC4 ciphers was once suggested as mitigation, but RC4 is also weak — the correct fix is to disable TLS 1.0.",
     },
     "LUCKY13": {
-        "name": "Vulnerabilidade LUCKY13 (CVE-2013-0169)",
-        "desc": "O servidor está potencialmente vulnerável ao LUCKY13, um timing attack contra CBC em TLS/DTLS que pode permitir recuperação parcial de texto plano.",
-        "rem":  "Priorizar ciphers GCM (AEAD) em vez de CBC: ssl_ciphers 'ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:!CBC'. Em TLS 1.3, LUCKY13 não se aplica.",
+        "name": "LUCKY13 Vulnerability (CVE-2013-0169)",
+        "desc": "The server is potentially vulnerable to LUCKY13, a timing attack against CBC in TLS/DTLS that may allow partial plaintext recovery.",
+        "rem":  "Prioritize GCM (AEAD) ciphers over CBC: ssl_ciphers 'ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:!CBC'. In TLS 1.3, LUCKY13 does not apply.",
     },
     "POODLE_SSL": {
-        "name": "Vulnerabilidade POODLE (CVE-2014-3566) — SSLv3",
-        "desc": "O servidor suporta SSLv3, vulnerável ao ataque POODLE que permite recuperar bytes individuais do texto plano em sessões HTTPS através de ataques de padding oracle.",
-        "rem":  "Desabilitar SSLv3 imediatamente: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol TLSv1.2 TLSv1.3 (Apache). SSLv3 não deve ser usado em nenhum cenário de produção.",
+        "name": "POODLE Vulnerability (CVE-2014-3566) — SSLv3",
+        "desc": "The server supports SSLv3, vulnerable to the POODLE attack which allows recovering individual plaintext bytes in HTTPS sessions through padding oracle attacks.",
+        "rem":  "Disable SSLv3 immediately: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol TLSv1.2 TLSv1.3 (Apache). SSLv3 must not be used in any production scenario.",
     },
     "POODLE_TLS": {
-        "name": "Vulnerabilidade POODLE-TLS — Padding Oracle em TLS",
-        "desc": "Implementação TLS vulnerável ao POODLE via padding oracle em TLS (não apenas SSLv3). Alguns stacks TLS aceitam padding inválido sem reportar erro, permitindo ataque similar ao POODLE original.",
-        "rem":  "Atualizar o servidor/biblioteca TLS para versão que corrige o padding oracle. Habilitar apenas TLS 1.2 e 1.3 que são resistentes a este ataque.",
+        "name": "POODLE-TLS Vulnerability — Padding Oracle in TLS",
+        "desc": "TLS implementation vulnerable to POODLE via a padding oracle in TLS (not only SSLv3). Some TLS stacks accept invalid padding without reporting an error, enabling an attack similar to the original POODLE.",
+        "rem":  "Update the server/TLS library to a version that fixes the padding oracle. Enable only TLS 1.2 and 1.3, which are resistant to this attack.",
     },
     "DROWN": {
-        "name": "Vulnerabilidade DROWN (CVE-2016-0800)",
-        "desc": "O servidor ou um servidor com a mesma chave privada suporta SSLv2, vulnerável ao DROWN. Um atacante pode descriptografar sessões TLS modernas usando o oráculo SSLv2.",
-        "rem":  "Desabilitar SSLv2 em todos os servidores que compartilham a chave privada. Revogar e renegociar certificados se a chave foi exposta. Nunca reutilizar a mesma chave privada em serviços com configurações TLS diferentes.",
+        "name": "DROWN Vulnerability (CVE-2016-0800)",
+        "desc": "The server, or a server sharing the same private key, supports SSLv2, vulnerable to DROWN. An attacker can decrypt modern TLS sessions using the SSLv2 oracle.",
+        "rem":  "Disable SSLv2 on all servers sharing the private key. Revoke and reissue certificates if the key was exposed. Never reuse the same private key across services with different TLS configurations.",
     },
     "LOGJAM": {
-        "name": "Vulnerabilidade LOGJAM — DH Fraco (CVE-2015-4000)",
-        "desc": "O servidor aceita parâmetros Diffie-Hellman com tamanho insuficiente (< 2048 bits), vulneráveis ao ataque LOGJAM que permite downgrade para export-grade DH e descriptografia offline.",
-        "rem":  "Gerar parâmetros DH fortes: openssl dhparam -out dhparam.pem 2048. Configurar ssl_dhparam /etc/nginx/dhparam.pem. Preferir ECDHE sobre DHE para eliminar este vetor.",
+        "name": "LOGJAM Vulnerability — Weak DH (CVE-2015-4000)",
+        "desc": "The server accepts Diffie-Hellman parameters of insufficient size (< 2048 bits), vulnerable to the LOGJAM attack which allows downgrade to export-grade DH and offline decryption.",
+        "rem":  "Generate strong DH parameters: openssl dhparam -out dhparam.pem 2048. Configure ssl_dhparam /etc/nginx/dhparam.pem. Prefer ECDHE over DHE to eliminate this vector.",
     },
     "SWEET32": {
-        "name": "Vulnerabilidade SWEET32 (CVE-2016-2183)",
-        "desc": "O servidor suporta cifras com bloco de 64 bits (3DES, DES, IDEA, Blowfish), vulneráveis ao SWEET32. Após ~768 GB de dados com a mesma chave de sessão, colisões de bloco permitem recuperação parcial de texto.",
-        "rem":  "Desabilitar 3DES, DES, IDEA e Blowfish: adicionar '!3DES:!DES:!IDEA' ao ssl_ciphers. Limitar duração de sessões TLS (ssl_session_timeout 1h) como mitigação adicional.",
+        "name": "SWEET32 Vulnerability (CVE-2016-2183)",
+        "desc": "The server supports 64-bit block ciphers (3DES, DES, IDEA, Blowfish), vulnerable to SWEET32. After ~768 GB of data with the same session key, block collisions allow partial plaintext recovery.",
+        "rem":  "Disable 3DES, DES, IDEA and Blowfish: add '!3DES:!DES:!IDEA' to ssl_ciphers. Limit TLS session duration (ssl_session_timeout 1h) as additional mitigation.",
     },
     "ROBOT": {
-        "name": "Vulnerabilidade ROBOT — Return of Bleichenbacher Oracle Threat",
-        "desc": "O servidor é vulnerável ao ROBOT, uma variação do ataque Bleichenbacher de 1998 que permite descriptografar sessões RSA e gerar assinaturas RSA forjadas usando RSA PKCS#1 v1.5.",
-        "rem":  "Desabilitar RSA key exchange (static RSA): remover !RSA (sem ECDHE) dos ciphers. Habilitar apenas ciphers com forward secrecy (ECDHE). Atualizar a biblioteca TLS se o fornecedor lançou patch específico.",
+        "name": "ROBOT Vulnerability — Return of Bleichenbacher Oracle Threat",
+        "desc": "The server is vulnerable to ROBOT, a variation of the 1998 Bleichenbacher attack that allows decrypting RSA sessions and forging RSA signatures using RSA PKCS#1 v1.5.",
+        "rem":  "Disable static RSA key exchange: remove non-ECDHE RSA ciphers. Enable only forward-secrecy ciphers (ECDHE). Update the TLS library if the vendor released a specific patch.",
     },
     "HEARTBLEED": {
-        "name": "Vulnerabilidade Heartbleed (CVE-2014-0160) — CRÍTICA",
-        "desc": "O servidor está vulnerável ao Heartbleed, falha crítica no OpenSSL que permite ler até 64 KB da memória do processo por request. Dados como chaves privadas, senhas e tokens de sessão podem ser extraídos remotamente sem autenticação.",
-        "rem":  "Atualizar OpenSSL para 1.0.1g+ / 1.0.2+ IMEDIATAMENTE. Revogar todos os certificados e gerar novos após o patch. Invalidar todas as sessões ativas e forçar troca de senhas de usuários.",
+        "name": "Heartbleed Vulnerability (CVE-2014-0160) — CRITICAL",
+        "desc": "The server is vulnerable to Heartbleed, a critical OpenSSL flaw that allows reading up to 64 KB of process memory per request. Data such as private keys, passwords and session tokens can be extracted remotely without authentication.",
+        "rem":  "Update OpenSSL to 1.0.1g+ / 1.0.2+ IMMEDIATELY. Revoke all certificates and generate new ones after patching. Invalidate all active sessions and force user password resets.",
     },
     "CCS": {
         "name": "OpenSSL CCS Injection (CVE-2014-0224)",
-        "desc": "O servidor está vulnerável à injeção ChangeCipherSpec do OpenSSL. Permite a um atacante MITM inserir uma chave de sessão nula, descriptografando e modificando o tráfego TLS em tempo real.",
-        "rem":  "Atualizar OpenSSL para versão 0.9.8za, 1.0.0m ou 1.0.1h e superiores. Esta vulnerabilidade exige patch na biblioteca — não há workaround de configuração.",
+        "desc": "The server is vulnerable to OpenSSL's ChangeCipherSpec injection. It allows a MITM attacker to inject a null session key, decrypting and modifying TLS traffic in real time.",
+        "rem":  "Update OpenSSL to version 0.9.8za, 1.0.0m or 1.0.1h and above. This vulnerability requires a library patch — there is no configuration workaround.",
     },
     "CRIME_TLS": {
-        "name": "Vulnerabilidade CRIME (CVE-2012-4929) — Compressão TLS",
-        "desc": "O servidor suporta compressão TLS, vulnerável ao CRIME. Um atacante que injeta texto no tráfego pode inferir cookies de sessão e tokens por análise de variação no tamanho comprimido.",
-        "rem":  "Desabilitar compressão TLS: ssl_comp_add_compression_method() não deve ser chamado; em OpenSSL, compilar com -DOPENSSL_NO_COMP. Em Nginx moderno a compressão TLS já é desabilitada por padrão.",
+        "name": "CRIME Vulnerability (CVE-2012-4929) — TLS Compression",
+        "desc": "The server supports TLS compression, vulnerable to CRIME. An attacker injecting text into the traffic can infer session cookies and tokens by analyzing variation in compressed size.",
+        "rem":  "Disable TLS compression: ssl_comp_add_compression_method() must not be called; in OpenSSL, compile with -DOPENSSL_NO_COMP. In modern Nginx, TLS compression is already disabled by default.",
     },
     "BREACH": {
-        "name": "Vulnerabilidade BREACH — Compressão HTTP",
-        "desc": "O servidor usa compressão HTTP (gzip) em respostas que contêm segredos (CSRF tokens, dados de sessão), vulnerável ao BREACH. Similar ao CRIME mas explora a compressão na camada HTTP.",
-        "rem":  "Desabilitar compressão em respostas que contêm segredos: não comprimir endpoints com CSRF token ou dados sensíveis. Implementar CSRF tokens variáveis por request (masked tokens). A compressão HTTP geral pode ser mantida em recursos estáticos.",
+        "name": "BREACH Vulnerability — HTTP Compression",
+        "desc": "The server uses HTTP compression (gzip) on responses that contain secrets (CSRF tokens, session data), vulnerable to BREACH. Similar to CRIME but exploiting compression at the HTTP layer.",
+        "rem":  "Disable compression on responses containing secrets: do not compress endpoints with CSRF tokens or sensitive data. Implement per-request variable CSRF tokens (masked tokens). General HTTP compression can be kept on static assets.",
     },
     "TICKETBLEED": {
-        "name": "Vulnerabilidade Ticketbleed (CVE-2016-9244)",
-        "desc": "O servidor F5/Citrix está vulnerável ao Ticketbleed, falha em session tickets TLS que vaza até 31 bytes de memória não inicializada por conexão.",
-        "rem":  "Aplicar patch do fornecedor (F5 BIG-IP, Citrix). Desabilitar TLS session tickets como mitigação temporária: ssl_session_tickets off (Nginx).",
+        "name": "Ticketbleed Vulnerability (CVE-2016-9244)",
+        "desc": "The F5/Citrix server is vulnerable to Ticketbleed, a flaw in TLS session tickets that leaks up to 31 bytes of uninitialized memory per connection.",
+        "rem":  "Apply the vendor patch (F5 BIG-IP, Citrix). Disable TLS session tickets as a temporary mitigation: ssl_session_tickets off (Nginx).",
     },
     "TLS1": {
-        "name": "TLS 1.0 Habilitado (Protocolo Deprecado)",
-        "desc": "O servidor suporta TLS 1.0, depreciado pelo IETF (RFC 8996) e proibido pelo PCI DSS desde 2018. Está sujeito a múltiplos ataques (BEAST, POODLE, CRIME) e usa funções hash fracas (MD5/SHA-1).",
-        "rem":  "Desabilitar TLS 1.0 e 1.1: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol -all +TLSv1.2 +TLSv1.3 (Apache). Verificar compatibilidade com clientes legítimos antes de aplicar.",
+        "name": "TLS 1.0 Enabled (Deprecated Protocol)",
+        "desc": "The server supports TLS 1.0, deprecated by the IETF (RFC 8996) and prohibited by PCI DSS since 2018. It is subject to multiple attacks (BEAST, POODLE, CRIME) and uses weak hash functions (MD5/SHA-1).",
+        "rem":  "Disable TLS 1.0 and 1.1: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol -all +TLSv1.2 +TLSv1.3 (Apache). Verify compatibility with legitimate clients before applying.",
     },
     "TLS1_1": {
-        "name": "TLS 1.1 Habilitado (Protocolo Deprecado)",
-        "desc": "O servidor suporta TLS 1.1, depreciado pelo IETF (RFC 8996) junto com TLS 1.0. Não suporta cipher suites AEAD e usa construções de MAC legadas vulneráveis a timing attacks.",
-        "rem":  "Desabilitar TLS 1.1: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Manter apenas TLS 1.2 (com ciphers GCM) e TLS 1.3.",
+        "name": "TLS 1.1 Enabled (Deprecated Protocol)",
+        "desc": "The server supports TLS 1.1, deprecated by the IETF (RFC 8996) along with TLS 1.0. It does not support AEAD cipher suites and uses legacy MAC constructions vulnerable to timing attacks.",
+        "rem":  "Disable TLS 1.1: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Keep only TLS 1.2 (with GCM ciphers) and TLS 1.3.",
     },
     "SSLv2": {
-        "name": "SSLv2 Habilitado (Protocolo Severamente Vulnerável)",
-        "desc": "O servidor suporta SSLv2, protocolo completamente quebrado que usa criptografia de 40-bit, sem proteção contra replay e vulnerável ao DROWN. Deve ser desabilitado em qualquer ambiente.",
-        "rem":  "Desabilitar SSLv2 imediatamente: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). Se o servidor não permitir desabilitar SSLv2, trocar o servidor/biblioteca TLS.",
+        "name": "SSLv2 Enabled (Severely Vulnerable Protocol)",
+        "desc": "The server supports SSLv2, a completely broken protocol using 40-bit encryption, with no replay protection and vulnerable to DROWN. It must be disabled in any environment.",
+        "rem":  "Disable SSLv2 immediately: ssl_protocols TLSv1.2 TLSv1.3 (Nginx). If the server does not allow disabling SSLv2, replace the server/TLS library.",
     },
     "SSLv3": {
-        "name": "SSLv3 Habilitado (Vulnerável ao POODLE)",
-        "desc": "O servidor suporta SSLv3, vulnerável ao POODLE (CVE-2014-3566) e sem suporte a TLS extensions. Todas as comunicações via SSLv3 podem ser descriptografadas por um atacante MITM.",
-        "rem":  "Desabilitar SSLv3: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol -SSLv3 (Apache). Não há uso legítimo para SSLv3 em 2024+.",
+        "name": "SSLv3 Enabled (Vulnerable to POODLE)",
+        "desc": "The server supports SSLv3, vulnerable to POODLE (CVE-2014-3566) and lacking TLS extensions support. All SSLv3 communications can be decrypted by a MITM attacker.",
+        "rem":  "Disable SSLv3: ssl_protocols TLSv1.2 TLSv1.3 (Nginx) / SSLProtocol -SSLv3 (Apache). There is no legitimate use for SSLv3 in 2024+.",
     },
     "HSTS": {
-        "name": "HTTP Strict Transport Security (HSTS) Ausente",
-        "desc": "O servidor não envia o header Strict-Transport-Security, permitindo que conexões HTTP não criptografadas sejam aceitas e que ataques de downgrade SSL stripping redirecionem usuários para HTTP.",
-        "rem":  "Adicionar header HSTS: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload (Nginx: add_header Strict-Transport-Security). Após estabilidade, submeter domínio ao HSTS preload list.",
+        "name": "HTTP Strict Transport Security (HSTS) Missing",
+        "desc": "The server does not send the Strict-Transport-Security header, allowing unencrypted HTTP connections to be accepted and SSL stripping downgrade attacks to redirect users to HTTP.",
+        "rem":  "Add the HSTS header: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload (Nginx: add_header Strict-Transport-Security). Once stable, submit the domain to the HSTS preload list.",
     },
     "OCSP_stapling": {
-        "name": "OCSP Stapling Não Configurado",
-        "desc": "O servidor não usa OCSP stapling, fazendo com que browsers consultem o servidor OCSP da CA para verificar revogação de certificado — o que pode vazar o IP do usuário à CA e adicionar latência.",
-        "rem":  "Habilitar OCSP stapling: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 (Nginx). Verificar se a CA suporta OCSP e que o certificado tem extensão OCSP URL.",
+        "name": "OCSP Stapling Not Configured",
+        "desc": "The server does not use OCSP stapling, causing browsers to query the CA's OCSP server to check certificate revocation — which can leak the user's IP to the CA and add latency.",
+        "rem":  "Enable OCSP stapling: ssl_stapling on; ssl_stapling_verify on; resolver 8.8.8.8 (Nginx). Verify that the CA supports OCSP and the certificate has the OCSP URL extension.",
     },
     "DNS_CAArecord": {
-        "name": "Registro CAA DNS Ausente",
-        "desc": "O domínio não possui registro CAA (Certification Authority Authorization), que restringe quais CAs podem emitir certificados para o domínio. Sem CAA, qualquer CA do mundo pode emitir certificados, ampliando o risco de certificados fraudulentos.",
-        "rem":  "Adicionar registro CAA no DNS: exemplo para Let's Encrypt: 0 issue letsencrypt.org; 0 issuewild letsencrypt.org; 0 iodef mailto:security@dominio.com. Verificar com: dig CAA dominio.com",
+        "name": "CAA DNS Record Missing",
+        "desc": "The domain has no CAA (Certification Authority Authorization) record, which restricts which CAs may issue certificates for the domain. Without CAA, any CA in the world can issue certificates, increasing the risk of fraudulent certificates.",
+        "rem":  "Add a CAA record in DNS: example for Let's Encrypt: 0 issue letsencrypt.org; 0 issuewild letsencrypt.org; 0 iodef mailto:security@domain.com. Verify with: dig CAA domain.com",
     },
     "cert_expired": {
-        "name": "Certificado TLS Expirado",
-        "desc": "O certificado TLS do servidor está expirado. Browsers exibirão erro de segurança para todos os usuários, potencialmente tornando a aplicação inacessível.",
-        "rem":  "Renovar o certificado imediatamente. Implementar renovação automática via Let's Encrypt (certbot renew) ou monitoramento de expiração com alertas com 30+ dias de antecedência.",
+        "name": "Expired TLS Certificate",
+        "desc": "The server's TLS certificate is expired. Browsers will show a security error to all users, potentially making the application inaccessible.",
+        "rem":  "Renew the certificate immediately. Implement automatic renewal via Let's Encrypt (certbot renew) or expiration monitoring with alerts 30+ days in advance.",
     },
     "cert_notYetValid": {
-        "name": "Certificado TLS Ainda Não Válido",
-        "desc": "O certificado TLS tem data de início (NotBefore) no futuro. O servidor está apresentando um certificado inválido para todos os clientes.",
-        "rem":  "Verificar se o relógio do sistema está sincronizado (NTP). Renegociar o certificado com datas corretas junto à CA.",
+        "name": "TLS Certificate Not Yet Valid",
+        "desc": "The TLS certificate has a start date (NotBefore) in the future. The server is presenting an invalid certificate to all clients.",
+        "rem":  "Verify that the system clock is synchronized (NTP). Reissue the certificate with correct dates from the CA.",
     },
     "cert_chain_of_trust": {
-        "name": "Cadeia de Certificação Inválida ou Incompleta",
-        "desc": "O servidor não apresenta a cadeia completa de certificados intermediários, impedindo que clientes validem o certificado corretamente. Pode causar erros de SSL em alguns clientes.",
-        "rem":  "Configurar o servidor para enviar os certificados intermediários (chain): ssl_certificate /path/to/fullchain.pem (Nginx). O arquivo fullchain.pem deve conter: certificado do servidor + intermediário(s) + raiz (opcional).",
+        "name": "Invalid or Incomplete Certificate Chain",
+        "desc": "The server does not present the full chain of intermediate certificates, preventing clients from validating the certificate correctly. This may cause SSL errors in some clients.",
+        "rem":  "Configure the server to send the intermediate certificates (chain): ssl_certificate /path/to/fullchain.pem (Nginx). The fullchain.pem file must contain: server certificate + intermediate(s) + root (optional).",
     },
 }
 
@@ -553,9 +552,9 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
                 _cve_raw  = item.get("cve","") or item.get("cwe","")
                 _info     = TLS_ID_INFO.get(_tls_id, {})
                 _name     = _info.get("name") or f"TLS/SSL: {_tls_id}" if _tls_id else "TLS/SSL Issue"
-                _desc     = _info.get("desc") or f"testssl.sh reportou '{_tls_raw}' para o teste '{_tls_id}'."
-                _rem      = _info.get("rem") or "Consultar a documentação do servidor para desabilitar este recurso TLS inseguro."
-                _evidence = f"testssl.sh · teste: {_tls_id} · resultado: {_tls_raw}" if _tls_raw else f"testssl.sh · teste: {_tls_id}"
+                _desc     = _info.get("desc") or f"testssl.sh reported '{_tls_raw}' for the '{_tls_id}' test."
+                _rem      = _info.get("rem") or "Consult the server documentation to disable this insecure TLS feature."
+                _evidence = f"testssl.sh · test: {_tls_id} · result: {_tls_raw}" if _tls_raw else f"testssl.sh · test: {_tls_id}"
                 tls_findings.append({
                     "id":       _tls_id,
                     "name":     _name,
@@ -687,9 +686,9 @@ email_findings = []
 if email_security:
     _EMAIL_CWE   = {'spf':'CWE-349','dmarc':'CWE-349','dkim':'CWE-345'}
     _EMAIL_NAMES = {
-        'spf':   'SPF Ausente — Domínio Vulnerável a E-mail Spoofing',
-        'dmarc': 'DMARC Ausente — Sem Proteção Anti-Spoofing',
-        'dkim':  'DKIM Não Detectado — Autenticidade de E-mail Comprometida',
+        'spf':   'SPF Missing — Domain Vulnerable to Email Spoofing',
+        'dmarc': 'DMARC Missing — No Anti-Spoofing Protection',
+        'dkim':  'DKIM Not Detected — Email Authenticity Compromised',
     }
     for _proto, _edata in email_security.items():
         _esev = _edata.get('severity','info')
@@ -732,13 +731,13 @@ _HDR_CWE = {
     "x-xss-protection":         ("CWE-693", "info"),
 }
 _HDR_REM = {
-    "content-security-policy":   "Adicionar: Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' — ajustar para a stack da aplicação.",
-    "strict-transport-security": "Adicionar: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
-    "x-frame-options":           "Adicionar: X-Frame-Options: SAMEORIGIN (ou DENY se não há iframes legítimos)",
-    "x-content-type-options":    "Adicionar: X-Content-Type-Options: nosniff",
-    "referrer-policy":           "Adicionar: Referrer-Policy: strict-origin-when-cross-origin",
-    "permissions-policy":        "Adicionar: Permissions-Policy: camera=(), microphone=(), geolocation=()",
-    "x-xss-protection":          "Remover ou substituir por Content-Security-Policy — X-XSS-Protection é legado e ignorado em browsers modernos.",
+    "content-security-policy":   "Add: Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' — adjust to the application stack.",
+    "strict-transport-security": "Add: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
+    "x-frame-options":           "Add: X-Frame-Options: SAMEORIGIN (or DENY if there are no legitimate iframes)",
+    "x-content-type-options":    "Add: X-Content-Type-Options: nosniff",
+    "referrer-policy":           "Add: Referrer-Policy: strict-origin-when-cross-origin",
+    "permissions-policy":        "Add: Permissions-Policy: camera=(), microphone=(), geolocation=()",
+    "x-xss-protection":          "Remove or replace with Content-Security-Policy — X-XSS-Protection is legacy and ignored by modern browsers.",
 }
 header_findings = []
 for _shd in security_headers_data:
@@ -748,13 +747,13 @@ for _shd in security_headers_data:
         _sev = _hinfo.get("severity", _sev_default)
         header_findings.append({
             "id":   f"missing-header-{_hdr}",
-            "name": f"Security Header Ausente: {_hdr}",
+            "name": f"Missing Security Header: {_hdr}",
             "severity": _sev, "severity_orig": _sev, "severity_reclassified": False,
             "source": "Security Headers",
             "url": _url,
             "cve": _cwe, "cve_ids": [],
-            "description": _hinfo.get("description", f"Header {_hdr} ausente"),
-            "remediation": _HDR_REM.get(_hdr, f"Configurar o header {_hdr} no servidor web ou proxy reverso."),
+            "description": _hinfo.get("description", f"Header {_hdr} missing"),
+            "remediation": _HDR_REM.get(_hdr, f"Configure the {_hdr} header on the web server or reverse proxy."),
             "evidence": "", "param": "", "attack": "", "other": "",
         })
 
@@ -923,13 +922,13 @@ if stats["critical"] == 0 and kev_count == 0:
 # Classificação baseada no risk score (KEV+EPSS+CVSS) — não apenas contagem
 # Faixas: 70-100=CRÍTICO, 40-69=ALTO, 15-39=MÉDIO, 0-14=BAIXO
 if risk >= 70:
-    stxt, scol = "CRÍTICO — Ação Imediata",     "#7a2e2e"
+    stxt, scol = "CRITICAL — Immediate Action",   "#7a2e2e"
 elif risk >= 40:
-    stxt, scol = "ALTO — Atenção Urgente",       "#b34e4e"
+    stxt, scol = "HIGH — Urgent Attention",       "#b34e4e"
 elif risk >= 15:
-    stxt, scol = "MÉDIO — Correção Planejada",   "#d4833a"
+    stxt, scol = "MEDIUM — Planned Remediation",  "#d4833a"
 else:
-    stxt, scol = "BAIXO — Monitoramento",        "#4a7c8c"
+    stxt, scol = "LOW — Monitoring",              "#4a7c8c"
 import time as _time
 # Janela real do scan a partir de raw/.phase_times (estável mesmo se o
 # relatório for regerado depois — não usa a hora de geração do relatório).
@@ -954,11 +953,11 @@ rdate = (datetime.fromtimestamp(_scan_start).strftime("%Y-%m-%d %H:%M")
          if _scan_start else datetime.now().strftime("%Y-%m-%d %H:%M"))
 
 def badge(sev):
-    labels = {"critical":"CRÍTICO","high":"ALTO","medium":"MÉDIO","low":"BAIXO","info":"INFO"}
+    labels = {"critical":"CRITICAL","high":"HIGH","medium":"MEDIUM","low":"LOW","info":"INFO"}
     c={"critical":"#7a2e2e","high":"#b34e4e","medium":"#d4833a","low":"#4a7c8c","info":"#6e8f72"}.get(sev,"#999")
     return f'<span style="background:{c};color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">{labels.get(sev, labels.get(sev.lower(), sev.upper()))}</span>'
 
-def trows(items,empty="Sem resultados"):
+def trows(items,empty="No results"):
     if not items: return f'<tr><td style="color:#999;font-style:italic">{empty}</td></tr>'
     return "".join(f'<tr><td style="font-family:monospace;font-size:12px">{html.escape(i)}</td></tr>' for i in items[:50])
 
@@ -967,15 +966,15 @@ def _decode_cvss_vector(vec):
     if not vec:
         return ""
     parts = dict(p.split(":") for p in vec.split("/") if p.count(":") == 1)
-    av = {"N":"Rede","A":"Adjacente","L":"Local","P":"Físico"}.get(parts.get("AV",""), "")
-    ac = {"L":"Baixa","H":"Alta"}.get(parts.get("AC",""), "")
-    pr = {"N":"Nenhum","L":"Baixo","H":"Alto"}.get(parts.get("PR",""), "")
-    ui = {"N":"Nenhuma","R":"Requerida"}.get(parts.get("UI",""), "")
+    av = {"N":"Network","A":"Adjacent","L":"Local","P":"Physical"}.get(parts.get("AV",""), "")
+    ac = {"L":"Low","H":"High"}.get(parts.get("AC",""), "")
+    pr = {"N":"None","L":"Low","H":"High"}.get(parts.get("PR",""), "")
+    ui = {"N":"None","R":"Required"}.get(parts.get("UI",""), "")
     bits = []
-    if av: bits.append(f"Vetor: {av}")
-    if ac: bits.append(f"Complexidade: {ac}")
-    if pr: bits.append(f"Privilégio: {pr}")
-    if ui: bits.append(f"Interação: {ui}")
+    if av: bits.append(f"Vector: {av}")
+    if ac: bits.append(f"Complexity: {ac}")
+    if pr: bits.append(f"Privileges: {pr}")
+    if ui: bits.append(f"Interaction: {ui}")
     return " · ".join(bits)
 
 def render_finding(f):
@@ -1007,11 +1006,11 @@ def render_finding(f):
                 enrich_rows += (f'<span style="background:#7a0000;color:white;padding:2px 10px;'
                     f'border-radius:4px;font-size:12px;font-weight:bold;'
                     f'border:2px solid #ff4444;letter-spacing:.3px">'
-                    f'🔴 EXPLORAÇÃO ATIVA — CISA KEV</span> ')
-                if kev_due: enrich_rows += f'<span style="background:#b34e4e;color:white;padding:1px 6px;border-radius:3px;font-size:11px">Prazo CISA: {html.escape(kev_due)}</span> '
-                if kev_prod: enrich_rows += f'<br><small style="color:#7a0000;font-weight:bold">Adicionado ao KEV em {html.escape(kev_added)} — {html.escape(kev_prod)}</small> '
+                    f'🔴 ACTIVE EXPLOITATION — CISA KEV</span> ')
+                if kev_due: enrich_rows += f'<span style="background:#b34e4e;color:white;padding:1px 6px;border-radius:3px;font-size:11px">CISA Due: {html.escape(kev_due)}</span> '
+                if kev_prod: enrich_rows += f'<br><small style="color:#7a0000;font-weight:bold">Added to KEV on {html.escape(kev_added)} — {html.escape(kev_prod)}</small> '
             if cvss: enrich_rows += f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS {cvss} {html.escape(sev_pt)}</span> '
-            if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}° percentil)</span> '
+            if epss is not None: enrich_rows += f'<span style="background:{epss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px">EPSS {epss:.4f} ({epss_pct*100:.1f}th percentile)</span> '
             # Vetor CVSS — exibe a string e decodifica os campos de exploitabilidade
             _vec = ev.get("cvss_vector", "")
             if _vec:
@@ -1037,7 +1036,7 @@ def render_finding(f):
                 cvss_color = '#7a2e2e' if cvss>=9 else '#b34e4e' if cvss>=7 else '#d4833a' if cvss>=4 else '#27ae60'
                 enrich_rows += (f'<tr><th>CWE-{cwe_match.group(1)}</th><td>'
                     f'<span style="background:{cvss_color};color:white;padding:1px 6px;border-radius:3px;font-size:12px;font-weight:bold">CVSS ~{cvss} {sev_label}</span> '
-                    f'<span style="background:#636e72;color:white;padding:1px 6px;border-radius:3px;font-size:11px">Estimativa baseada em CWE</span>'
+                    f'<span style="background:#636e72;color:white;padding:1px 6px;border-radius:3px;font-size:11px">CWE-based estimate</span>'
                     f'<br><small style="color:#555">{html.escape(cwe_name)}</small>'
                     f'</td></tr>')
     # Badge de reclassificação — mostrar quando severidade original difere da atual
@@ -1045,31 +1044,31 @@ def render_finding(f):
     was_reclassified = f.get('severity_reclassified', False)
     reclassify_badge = ''
     if was_reclassified and sev_orig and sev_orig != f.get('severity',''):
-        labels = {'critical':'CRÍTICO','high':'ALTO','medium':'MÉDIO','low':'BAIXO','info':'INFO'}
+        labels = {'critical':'CRITICAL','high':'HIGH','medium':'MEDIUM','low':'LOW','info':'INFO'}
         orig_label = labels.get(sev_orig, sev_orig.upper())
         reclassify_badge = (f'<span style="background:#2d3436;color:#dfe6e9;'
             f'padding:2px 7px;border-radius:4px;font-size:10px;margin-left:6px">'
-            f'↑ Reclassificado de {orig_label} (CVE/CWE)</span>')
+            f'↑ Reclassified from {orig_label} (CVE/CWE)</span>')
 
     rows = f"""
     <tr><th style="width:120px">CVE/CWE</th><td>{html.escape(str(f.get('cve','N/A')))}</td></tr>
     {enrich_rows}
     <tr><th>URL</th><td><code>{html.escape(f.get('url',''))}</code></td></tr>
-    <tr><th>Descrição</th><td>{html.escape(f.get('description',''))}</td></tr>"""
+    <tr><th>Description</th><td>{html.escape(f.get('description',''))}</td></tr>"""
     # Impacto prático — extrair CWE do campo cve para lookup no IMPACT_MAP
     _cwe_for_impact = re.search(r'CWE-?(\d+)', f.get("cve",""), re.IGNORECASE)
     _impact = IMPACT_MAP.get(_cwe_for_impact.group(1), "") if _cwe_for_impact else ""
     _remediation_specific = REMEDIATION_MAP.get(_cwe_for_impact.group(1), "") if _cwe_for_impact else ""
     if _impact:
-        rows += (f'\n    <tr><th style="background:#fff3cd;color:#856404">⚠ Impacto</th>'
+        rows += (f'\n    <tr><th style="background:#fff3cd;color:#856404">⚠ Impact</th>'
             f'<td style="background:#fff3cd;color:#856404;font-weight:500">{html.escape(_impact)}</td></tr>')
     if _remediation_specific:
-        rows += (f'\n    <tr><th style="background:#d4edda;color:#155724">✓ Como Corrigir</th>'
+        rows += (f'\n    <tr><th style="background:#d4edda;color:#155724">✓ How to Fix</th>'
             f'<td style="background:#d4edda;color:#155724">{html.escape(_remediation_specific)}</td></tr>')
     if f.get('param'):
-        rows += f"\n    <tr><th>Parâmetro</th><td><code>{html.escape(f['param'])}</code></td></tr>"
+        rows += f"\n    <tr><th>Parameter</th><td><code>{html.escape(f['param'])}</code></td></tr>"
     if f.get('attack'):
-        rows += f"\n    <tr><th>Ataque</th><td><code>{html.escape(f['attack'])}</code></td></tr>"
+        rows += f"\n    <tr><th>Attack</th><td><code>{html.escape(f['attack'])}</code></td></tr>"
     # Exibir evidência dividida em blocos legíveis
     _ev_full = f.get("evidence","")
     if _ev_full:
@@ -1077,21 +1076,21 @@ def render_finding(f):
         _res_match  = re.search(r"--- RESPOSTA HTTP ---\n(.*?)(?=---|$)", _ev_full, re.DOTALL)
         _ev_other   = re.sub(r"--- (REQUISIÇÃO|RESPOSTA) HTTP ---\n.*?(?=---|$)", "", _ev_full, flags=re.DOTALL).strip()
         if _ev_other:
-            rows += f'\n    <tr><th>Evidência</th><td><div class="evidence-box">{html.escape(_ev_other)}</div></td></tr>'
+            rows += f'\n    <tr><th>Evidence</th><td><div class="evidence-box">{html.escape(_ev_other)}</div></td></tr>'
         if _req_match:
-            rows += f'\n    <tr><th>Requisição HTTP</th><td><div class="evidence-box">{html.escape(_req_match.group(1).strip())}</div></td></tr>'
+            rows += f'\n    <tr><th>HTTP Request</th><td><div class="evidence-box">{html.escape(_req_match.group(1).strip())}</div></td></tr>'
         if _res_match:
-            rows += f'\n    <tr><th>Resposta HTTP</th><td><div class="evidence-box">{html.escape(_res_match.group(1).strip())}</div></td></tr>'
+            rows += f'\n    <tr><th>HTTP Response</th><td><div class="evidence-box">{html.escape(_res_match.group(1).strip())}</div></td></tr>'
     if f.get('affected_count', 0) > 1:
         n = f['affected_count']
         urls_sample = f.get('affected_urls', [])
         url_list = ''.join(f'<li><code>{html.escape(u)}</code></li>' for u in urls_sample)
-        rows += (f'\n    <tr><th>URLs Afetadas</th>'
-            f'<td><strong>{n} ocorrência(s)</strong> do mesmo tipo de alerta:<ul style="margin:6px 0 0;padding-left:18px">{url_list}</ul></td></tr>')
+        rows += (f'\n    <tr><th>Affected URLs</th>'
+            f'<td><strong>{n} occurrence(s)</strong> of the same alert type:<ul style="margin:6px 0 0;padding-left:18px">{url_list}</ul></td></tr>')
     other_val = f.get('other','')
     if other_val and '[URLs afetadas]' not in other_val:
-        rows += f"\n    <tr><th>Detalhe</th><td>{html.escape(other_val)}</td></tr>"
-    rows += f"\n    <tr><th>Recomendação</th><td>{html.escape(f.get('remediation',''))}</td></tr>"
+        rows += f"\n    <tr><th>Detail</th><td>{html.escape(other_val)}</td></tr>"
+    rows += f"\n    <tr><th>Recommendation</th><td>{html.escape(f.get('remediation',''))}</td></tr>"
     _src = f.get('source','')
     src_cls = ('source-nuclei'  if _src == 'Nuclei'              else
                'source-headers' if _src == 'Security Headers'    else
@@ -1102,11 +1101,11 @@ def render_finding(f):
     if _cat == "exploit":
         confirmed_badge = ('<span style="background:#7a0000;color:white;padding:2px 8px;'
             'border-radius:4px;font-size:10px;font-weight:bold;margin-left:6px;'
-            'border:1px solid #ff4444">✓ EXPLOIT CONFIRMADO</span>')
+            'border:1px solid #ff4444">✓ EXPLOIT CONFIRMED</span>')
     elif _cat == "verified":
         confirmed_badge = ('<span style="background:#1b5e20;color:white;padding:2px 8px;'
             'border-radius:4px;font-size:10px;font-weight:bold;margin-left:6px;'
-            'border:1px solid #2e7d32">✓ VERIFICADO</span>')
+            'border:1px solid #2e7d32">✓ VERIFIED</span>')
     return f'''<div class="vuln {f['severity']}">
   <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}{reclassify_badge}{confirmed_badge}</h3>
   <table>{rows}
@@ -1117,7 +1116,7 @@ _DEDICATED_SOURCES = {"testssl.sh", "Email Security"}
 # Only render critical / high / medium as detailed cards
 _main_findings = [f for f in all_f if f["severity"] in ("critical","high","medium") and f.get("source") not in _DEDICATED_SOURCES]
 vhtml = (
-    '<div class="info-box"><p>✅ Nenhuma vulnerabilidade encontrada no escopo analisado.</p></div>'
+    '<div class="info-box"><p>✅ No vulnerabilities found within the analyzed scope.</p></div>'
     if not _main_findings
     else "".join(render_finding(f) for f in _main_findings)
 )
@@ -1172,12 +1171,12 @@ if _low_info_findings or zap_low_groups:
             f'</tr>'
         )
     _total_low = len(_low_info_findings) + len(zap_low_groups)
-    low_table_html = f'''<h2>4. Achados Baixo / Informativo ({_total_low} item(ns))</h2>
-    <p style="color:#666;font-size:13px">Itens de baixa/info prioridade consolidados. Validar e endereçar após as correções críticas.</p>
+    low_table_html = f'''<h2>4. Low / Informational Findings ({_total_low} item(s))</h2>
+    <p style="color:#666;font-size:13px">Consolidated low/info priority items. Validate and address after the critical fixes.</p>
     <table>
       <tr style="background:#f5f5f5">
-        <th>Achado</th><th style="width:80px">Sev</th><th style="width:120px">Fonte</th>
-        <th style="width:130px">CVE / CWE</th><th>Descrição</th><th>Recomendação</th>
+        <th>Finding</th><th style="width:80px">Sev</th><th style="width:120px">Source</th>
+        <th style="width:130px">CVE / CWE</th><th>Description</th><th>Recommendation</th>
       </tr>
       {rows_low}
     </table>'''
@@ -1189,16 +1188,16 @@ waf_email_html = ''
 if WAF_DETECTED and WAF_NAME:
     waf_email_html += (f'<div style="background:#fff3cd;border-left:5px solid #d4833a;'
         f'padding:14px 16px;border-radius:4px;margin:16px 0">'
-        f'<strong style="color:#856404">🛡 WAF Detectado: {html.escape(WAF_NAME)}</strong>'
+        f'<strong style="color:#856404">🛡 WAF Detected: {html.escape(WAF_NAME)}</strong>'
         f'<p style="margin:6px 0 0;font-size:13px;color:#555">'
-        f'O alvo está protegido por um Web Application Firewall. Achados do active scan '
-        f'podem ter falsos negativos — vulnerabilidades de injeção podem ter sido bloqueadas '
-        f'durante o scan sem serem detectadas.</p></div>')
+        f'The target is protected by a Web Application Firewall. Active scan findings '
+        f'may have false negatives — injection vulnerabilities may have been blocked '
+        f'during the scan without being detected.</p></div>')
 
 # Email security
 if email_security:
     sev_color = {'high':'#b34e4e','medium':'#d4833a','low':'#4a7c8c','none':'#27ae60'}
-    sev_label = {'high':'ALTO','medium':'MÉDIO','low':'BAIXO','none':'OK','NOT_FOUND':'INFO'}
+    sev_label = {'high':'HIGH','medium':'MEDIUM','low':'LOW','none':'OK','NOT_FOUND':'INFO'}
     email_rows = ''
     for proto, data in [('SPF', email_security.get('spf',{})),
                          ('DMARC', email_security.get('dmarc',{})),
@@ -1217,13 +1216,13 @@ if email_security:
             f'<td>{html.escape(det)}</td>'
             f'<td style="font-size:11px;color:#555">{html.escape(rec) if rec else ("<code>"+html.escape(val)+"</code>" if val else "—")}</td>'
             f'</tr>')
-    waf_email_html += (f'<h3>Segurança de Email — {html.escape(DOMAIN)}</h3>'
+    waf_email_html += (f'<h3>Email Security — {html.escape(DOMAIN)}</h3>'
         '<table><tr style="background:#f5f5f5">'
-        '<th>Protocolo</th><th>Status</th><th>Detalhe</th><th>Recomendação / Valor</th></tr>'
+        '<th>Protocol</th><th>Status</th><th>Detail</th><th>Recommendation / Value</th></tr>'
         + email_rows + '</table>')
 
 if waf_email_html:
-    waf_email_html = f'<h2>Infraestrutura & Segurança DNS</h2>' + waf_email_html
+    waf_email_html = f'<h2>Infrastructure & DNS Security</h2>' + waf_email_html
 
 # ── Gerar HTML: Comportamento do Scan ─────────────────────────
 scan_behavior_html = ""
@@ -1239,12 +1238,12 @@ if scan_meta:
     zap_count      = scan_meta.get("zap_results_after_evasion")
 
     TECH_LABELS = {
-        "rate_limit_reduced":     ("🐢", "Rate limit reduzido",     f"Nuclei: {rl} req/s com delay randômico — imita tráfego humano"),
-        "user_agent_rotation":    ("🔄", "User-Agent rotation",     f"UA de browser real: {ua[:60]}..." if len(ua)>60 else f"UA: {ua}"),
-        "origin_spoofing":        ("🎭", "Origin spoofing",         "X-Forwarded-For: 127.0.0.1 + X-Real-IP: 127.0.0.1 injetados"),
-        "payload_alterations":    ("🔀", "Payload alterations",     "Nuclei testou variações de encoding automaticamente (-pa)"),
-        "waf_response_bypass":    ("⏭", "WAF response bypass",     "Respostas 403/406/429 ignoradas — scan não interrompe em bloqueios"),
-        "zap_threads_reduced":    ("🧵", "ZAP threads reduzidas",   "Active scan com 2 threads — reduz assinatura de scan automatizado"),
+        "rate_limit_reduced":     ("🐢", "Rate limit reduced",      f"Nuclei: {rl} req/s with random delay — mimics human traffic"),
+        "user_agent_rotation":    ("🔄", "User-Agent rotation",     f"Real browser UA: {ua[:60]}..." if len(ua)>60 else f"UA: {ua}"),
+        "origin_spoofing":        ("🎭", "Origin spoofing",         "X-Forwarded-For: 127.0.0.1 + X-Real-IP: 127.0.0.1 injected"),
+        "payload_alterations":    ("🔀", "Payload alterations",     "Nuclei automatically tested encoding variations (-pa)"),
+        "waf_response_bypass":    ("⏭", "WAF response bypass",     "403/406/429 responses ignored — scan does not stop on blocks"),
+        "zap_threads_reduced":    ("🧵", "ZAP threads reduced",     "Active scan with 2 threads — reduces automated-scan signature"),
     }
 
     if evasion_active:
@@ -1254,7 +1253,7 @@ if scan_meta:
             f'<td style="font-weight:600;width:180px">{label}</td>'
             f'<td style="color:#555;font-size:13px">{desc}</td>'
             f'<td style="text-align:center"><span style="background:#27ae60;color:white;'
-            f'padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">ATIVO</span></td>'
+            f'padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold">ACTIVE</span></td>'
             f'</tr>'
             for t in techniques for icon, label, desc in [TECH_LABELS.get(t, ("","",""))]
             if label
@@ -1265,48 +1264,48 @@ if scan_meta:
             results_row += (f'<div style="display:inline-block;background:#f0f7ff;'
                 f'border:1px solid #388bfd;border-radius:8px;padding:12px 20px;margin:6px 8px 6px 0">'
                 f'<div style="font-size:28px;font-weight:bold;color:#1a3a4f">{nuc_count}</div>'
-                f'<div style="font-size:12px;color:#555">achados Nuclei\ncom evasão</div></div>')
+                f'<div style="font-size:12px;color:#555">Nuclei findings\nwith evasion</div></div>')
         if zap_count is not None:
             results_row += (f'<div style="display:inline-block;background:#f0f7ff;'
                 f'border:1px solid #388bfd;border-radius:8px;padding:12px 20px;margin:6px 8px 6px 0">'
                 f'<div style="font-size:28px;font-weight:bold;color:#1a3a4f">{zap_count}</div>'
-                f'<div style="font-size:12px;color:#555">alertas ZAP\ncom evasão</div></div>')
+                f'<div style="font-size:12px;color:#555">ZAP alerts\nwith evasion</div></div>')
 
         scan_behavior_html = (
-            f'<h2>🔬 Comportamento do Scan & Evasão Passiva</h2>'
+            f'<h2>🔬 Scan Behavior & Passive Evasion</h2>'
             f'<div style="background:#fff8e6;border-left:5px solid #d4833a;'
             f'padding:16px;border-radius:4px;margin-bottom:16px">'
-            f'<strong style="color:#856404">⚠ WAF Detectado: {html.escape(waf_n)}</strong>'
+            f'<strong style="color:#856404">⚠ WAF Detected: {html.escape(waf_n)}</strong>'
             f'<p style="margin:6px 0 0;font-size:13px;color:#555">'
-            f'O scanner detectou um WAF e ativou automaticamente o modo de evasão passiva. '
-            f'As técnicas abaixo foram aplicadas para maximizar a cobertura e reduzir falsos negativos.</p></div>'
-            f'<h3 style="color:#1a3a4f;margin-bottom:8px">Técnicas de Evasão Passiva Aplicadas</h3>'
+            f'The scanner detected a WAF and automatically enabled passive evasion mode. '
+            f'The techniques below were applied to maximize coverage and reduce false negatives.</p></div>'
+            f'<h3 style="color:#1a3a4f;margin-bottom:8px">Passive Evasion Techniques Applied</h3>'
             f'<table style="margin-bottom:16px"><tr style="background:#f5f5f5">'
-            f'<th></th><th style="text-align:left">Técnica</th>'
-            f'<th style="text-align:left">Detalhe</th><th>Status</th></tr>'
+            f'<th></th><th style="text-align:left">Technique</th>'
+            f'<th style="text-align:left">Detail</th><th>Status</th></tr>'
             + tech_rows +
             f'</table>'
-            + (f'<h3 style="color:#1a3a4f;margin-bottom:8px">Resultados com Evasão Ativa</h3>'
+            + (f'<h3 style="color:#1a3a4f;margin-bottom:8px">Results with Active Evasion</h3>'
                f'<div style="margin-bottom:8px">{results_row}</div>'
-               f'<p style="font-size:12px;color:#888;margin:4px 0">Resultados obtidos após aplicação das técnicas de evasão. '
-               f'Comparar com scans sem evasão não é aplicável pois o WAF teria bloqueado requests anteriores.</p>'
+               f'<p style="font-size:12px;color:#888;margin:4px 0">Results obtained after applying the evasion techniques. '
+               f'Comparing with non-evasion scans is not applicable since the WAF would have blocked earlier requests.</p>'
                if results_row else "")
         )
     else:
         # Sem WAF — registrar que scan foi direto
         scan_behavior_html = (
-            f'<h2>🔬 Comportamento do Scan</h2>'
+            f'<h2>🔬 Scan Behavior</h2>'
             f'<div style="background:#f0fff4;border-left:5px solid #27ae60;'
             f'padding:14px 16px;border-radius:4px">'
-            f'<strong style="color:#1a7a4a">✓ Nenhum WAF Detectado — Scan Direto</strong>'
+            f'<strong style="color:#1a7a4a">✓ No WAF Detected — Direct Scan</strong>'
             f'<p style="margin:6px 0 0;font-size:13px;color:#555">'
-            f'O alvo não possui WAF identificado. O scan rodou com configurações padrão '
+            f'The target has no identified WAF. The scan ran with default settings '
             f'(Nuclei {rl} req/s, concurrency {conc}). '
-            f'Resultados têm alta confiança — sem filtros intermediários.</p></div>'
+            f'Results have high confidence — no intermediate filters.</p></div>'
         )
 
 errsec = "" if not errors else \
-    '<h2>⚠ Avisos de Processamento</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
+    '<h2>⚠ Processing Warnings</h2><div class="info-box" style="border-left-color:#d4833a"><ul>' + \
     "".join(f"<li><code>{html.escape(e)}</code></li>" for e in errors) + "</ul></div>"
 
 # ── Gerar HTML: Análise JS ───────────────────────────────────
@@ -1326,14 +1325,14 @@ if js_analysis:
     js_accessible = [p for p in js_probes if p.get("status")==200]
     js_exposed_api = [p for p in js_probes if p.get("status")==200 and p.get("is_json")]
     js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
-    js_html = f'''<h2>JS / Frontend — Análise de Segurança</h2>
+    js_html = f'''<h2>JS / Frontend — Security Analysis</h2>
     <div class="info-box">
       <table>
-        <tr><th style="width:200px">Arquivos JS analisados</th><td>{len(js_files_list)}</td></tr>
-        <tr><th>Secrets / credenciais</th><td><span style="color:#b34e4e;font-weight:bold">{sum(1 for s in js_secrets if js_sev(s["type"])=="high")}</span> alto &nbsp;|&nbsp; <span style="color:#d4833a">{sum(1 for s in js_secrets if js_sev(s["type"])=="medium")}</span> médio</td></tr>
-        <tr><th>Endpoints descobertos</th><td>{len(js_endpoints)} &nbsp;|&nbsp; {len(js_accessible)} acessíveis sem autenticação</td></tr>
-        <tr><th>Frameworks detectados</th><td>{len(js_frameworks)} ({len(js_vuln_fw)} com CVE conhecida)</td></tr>
-        <tr><th>Comentários sensíveis</th><td>{len(js_comments)}</td></tr>
+        <tr><th style="width:200px">JS files analyzed</th><td>{len(js_files_list)}</td></tr>
+        <tr><th>Secrets / credentials</th><td><span style="color:#b34e4e;font-weight:bold">{sum(1 for s in js_secrets if js_sev(s["type"])=="high")}</span> high &nbsp;|&nbsp; <span style="color:#d4833a">{sum(1 for s in js_secrets if js_sev(s["type"])=="medium")}</span> medium</td></tr>
+        <tr><th>Endpoints discovered</th><td>{len(js_endpoints)} &nbsp;|&nbsp; {len(js_accessible)} accessible without authentication</td></tr>
+        <tr><th>Frameworks detected</th><td>{len(js_frameworks)} ({len(js_vuln_fw)} with known CVE)</td></tr>
+        <tr><th>Sensitive comments</th><td>{len(js_comments)}</td></tr>
       </table>
     </div>'''
 
@@ -1342,21 +1341,21 @@ if js_analysis:
         from collections import defaultdict
         by_type = defaultdict(list)
         for s in js_secrets: by_type[s["type"]].append(s)
-        js_html += "<h3>Secrets e Credenciais Detectadas</h3>"
+        js_html += "<h3>Detected Secrets and Credentials</h3>"
         for stype, items in sorted(by_type.items(), key=lambda x: 0 if js_sev(x[0])=="high" else 1):
             c = js_sev_color(js_sev(stype))
             js_html += (f'<div style="border-left:5px solid {c};padding:14px 16px;margin:12px 0;'
                 f'background:#ffffff;border-radius:6px;border:1px solid #e0e0e0;box-shadow:0 1px 3px rgba(0,0,0,.06)">'
                 f'<div style="margin-bottom:10px">'
                 f'<strong style="font-size:14px">{html.escape(stype)}</strong> {js_badge(stype)}'
-                f' <span style="color:#888;font-size:12px;margin-left:6px">({len(items)} ocorrência(s))</span>'
+                f' <span style="color:#888;font-size:12px;margin-left:6px">({len(items)} occurrence(s))</span>'
                 f'</div>'
                 f'<table style="width:100%;border-collapse:collapse">'
                 f'<tr>'
                 f'<th style="background:#f5f5f5;color:#1a3a4f;font-weight:700;font-size:12px;'
-                f'padding:8px 12px;text-align:left;border:1px solid #ddd;width:35%">Valor / Pattern</th>'
+                f'padding:8px 12px;text-align:left;border:1px solid #ddd;width:35%">Value / Pattern</th>'
                 f'<th style="background:#f5f5f5;color:#1a3a4f;font-weight:700;font-size:12px;'
-                f'padding:8px 12px;text-align:left;border:1px solid #ddd">Contexto no Código</th>'
+                f'padding:8px 12px;text-align:left;border:1px solid #ddd">Context in Code</th>'
                 f'</tr>')
             for item in items:
                 v    = item["value"]
@@ -1391,8 +1390,8 @@ if js_analysis:
             fw_rows += (f'<tr><td><strong>{html.escape(fw["framework"])}</strong></td>'
                 f'<td><code>{html.escape(fw["version"])}</code></td>'
                 f'<td>{vuln_html}</td></tr>')
-        js_html += ('<h3>Frameworks Detectados</h3>'
-            '<table><tr style="background:#f5f5f5"><th>Framework</th><th>Versão</th><th>Status</th></tr>'
+        js_html += ('<h3>Detected Frameworks</h3>'
+            '<table><tr style="background:#f5f5f5"><th>Framework</th><th>Version</th><th>Status</th></tr>'
             + fw_rows + '</table>')
 
     # Endpoints acessíveis
@@ -1403,8 +1402,8 @@ if js_analysis:
             f'padding:1px 6px;border-radius:3px;font-size:11px">{p["status"]}</span></td>'
             f'<td style="font-size:11px">{"JSON API" if p.get("is_json") else "HTML"}</td></tr>'
             for p in js_accessible[:15])
-        js_html += ('<h3>Endpoints Acessíveis Sem Autenticação</h3>'
-            '<table><tr style="background:#f5f5f5"><th>URL</th><th>HTTP</th><th>Tipo</th></tr>'
+        js_html += ('<h3>Endpoints Accessible Without Authentication</h3>'
+            '<table><tr style="background:#f5f5f5"><th>URL</th><th>HTTP</th><th>Type</th></tr>'
             + ep_rows + '</table>')
 
     # Comentários sensíveis
@@ -1417,7 +1416,7 @@ if js_analysis:
             f'<div style="font-size:10px;color:#888;margin-top:3px">📄 {html.escape(c.get("url",""))}</div>'
             f'</td></tr>'
             for c in js_comments[:10])
-        js_html += ('<h3>Comentários Sensíveis no Código</h3>'
+        js_html += ('<h3>Sensitive Comments in Code</h3>'
             '<table style="width:100%;border-collapse:collapse;border:1px solid #eee;border-radius:6px">'
             + comm_rows + '</table>')
 
@@ -1430,10 +1429,10 @@ if tls_findings:
         _c = _confirmed_category(f)
         if _c == "exploit":
             cell += ('  <span style="background:#7a0000;color:white;padding:1px 6px;'
-                'border-radius:3px;font-size:10px;font-weight:bold">✓ EXPLORÁVEL</span>')
+                'border-radius:3px;font-size:10px;font-weight:bold">✓ EXPLOITABLE</span>')
         elif _c == "verified":
             cell += ('  <span style="background:#1b5e20;color:white;padding:1px 6px;'
-                'border-radius:3px;font-size:10px;font-weight:bold">✓ VERIFICADO</span>')
+                'border-radius:3px;font-size:10px;font-weight:bold">✓ VERIFIED</span>')
         return cell
     tls_rows = "".join(
         f'<tr><td style="font-family:monospace;font-size:12px">{html.escape(f["id"])}</td>'
@@ -1442,9 +1441,9 @@ if tls_findings:
         f'<td>{html.escape(f["cve"] or "—")}</td></tr>'
         for f in tls_findings
     )
-    tls_html = f'''<h2>TLS / SSL — {len(tls_findings)} problema(s) identificado(s)</h2>
+    tls_html = f'''<h2>TLS / SSL — {len(tls_findings)} issue(s) identified</h2>
     <table>
-      <tr style="background:#f5f5f5"><th>Identificador</th><th>Severidade</th><th>Problema</th><th>CVE/CWE</th></tr>
+      <tr style="background:#f5f5f5"><th>Identifier</th><th>Severity</th><th>Issue</th><th>CVE/CWE</th></tr>
       {tls_rows}
     </table>'''
 else:
@@ -1453,7 +1452,7 @@ else:
 # ── Gerar HTML: Confirmação Ativa (Exploits vs Verificações) ─────────
 def _conf_row(c):
     status_color = "#27ae60" if c.get("confirmed") else "#b34e4e"
-    status_label = "✓ CONFIRMADO" if c.get("confirmed") else "✗ NÃO CONFIRMADO"
+    status_label = "✓ CONFIRMED" if c.get("confirmed") else "✗ NOT CONFIRMED"
     sev_colors = {"critical":"#7a2e2e","high":"#b34e4e","medium":"#d4833a","low":"#4a7c8c","info":"#888"}
     sev_c = sev_colors.get(c.get("severity","info"),"#888")
 
@@ -1473,7 +1472,7 @@ def _conf_row(c):
 
     curl_repr = c.get("curl_reproducible") or c.get("curl_command","")
     curl_html = (
-        f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Reproduzir:</div>'
+        f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Reproduce:</div>'
         f'<div class="evidence-box" style="background:#1e3a4f;color:#a8d8ea;font-size:11px">'
         f'{html.escape(curl_repr)}</div>'
     ) if curl_repr else ""
@@ -1499,7 +1498,7 @@ def _conf_row(c):
         f'</td>'
         f'<td style="vertical-align:top">'
         f'<div style="background:#f0f7ff;border-left:3px solid #388bfd;padding:6px 10px;border-radius:3px;font-size:12px;margin-bottom:8px">'
-        f'<strong>Nota:</strong> {html.escape(c.get("poc_note","—"))}</div>'
+        f'<strong>Note:</strong> {html.escape(c.get("poc_note","—"))}</div>'
         f'{evidence_html}{curl_html}'
         f'</td>'
         f'</tr>'
@@ -1512,8 +1511,8 @@ def _conf_table(title, subtitle, items):
         f'<p style="color:#666;font-size:13px">{subtitle}</p>'
         f'<table><tr style="background:#f5f5f5">'
         f'<th style="width:160px">Template</th><th>URL</th>'
-        f'<th style="width:110px">Status</th><th style="width:80px">Confiança</th>'
-        f'<th>Evidência & Nota PoC</th></tr>' + rows + f'</table>'
+        f'<th style="width:110px">Status</th><th style="width:80px">Confidence</th>'
+        f'<th>Evidence & PoC Note</th></tr>' + rows + f'</table>'
     )
 
 if confirmations:
@@ -1521,34 +1520,34 @@ if confirmations:
     _verified = [c for c in confirmations if c.get("confirmed") and c.get("category") == "verified"]
     _notconf  = [c for c in confirmations if not c.get("confirmed")]
     confirm_html = (
-        f'<h2>Confirmação Ativa — {len(_exploits)} exploit(s) · {len(_verified)} verificação(ões)</h2>'
-        f'<p style="color:#666;font-size:13px">Cada achado foi re-executado. '
-        f'<strong>Exploits</strong> são vulnerabilidades abusáveis diretamente; '
-        f'<strong>verificações</strong> confirmam configurações/hardening (ex: header ausente, '
-        f'config TLS) — relevantes, mas não exploráveis por si só.</p>'
+        f'<h2>Active Confirmation — {len(_exploits)} exploit(s) · {len(_verified)} verification(s)</h2>'
+        f'<p style="color:#666;font-size:13px">Each finding was re-executed. '
+        f'<strong>Exploits</strong> are directly abusable vulnerabilities; '
+        f'<strong>verifications</strong> confirm configuration/hardening issues (e.g. missing header, '
+        f'TLS config) — relevant, but not exploitable on their own.</p>'
     )
     if _exploits:
         confirm_html += _conf_table(
-            "🔴 Exploits Confirmados",
-            "Vulnerabilidades abusáveis com PoC reproduzível.", _exploits)
+            "🔴 Confirmed Exploits",
+            "Abusable vulnerabilities with a reproducible PoC.", _exploits)
     if _verified:
         confirm_html += _conf_table(
-            "🔵 Verificações Ativas",
-            "Issues de configuração/hardening confirmados via re-execução.", _verified)
+            "🔵 Active Verifications",
+            "Configuration/hardening issues confirmed via re-execution.", _verified)
     if _notconf:
         confirm_html += _conf_table(
-            "⚪ Não Confirmados",
-            "Achados que não puderam ser confirmados na re-execução.", _notconf)
+            "⚪ Not Confirmed",
+            "Findings that could not be confirmed on re-execution.", _notconf)
 else:
     confirm_html = (
-        f'<h2>Confirmação Ativa de Exploits</h2>'
+        f'<h2>Active Exploit Confirmation</h2>'
         f'<div style="background:#f5f5f5;border-left:4px solid #888;padding:14px 16px;'
         f'border-radius:4px;color:#666;font-size:13px">'
-        f'<strong>Nenhum achado elegível para confirmação ativa.</strong><br>'
-        f'A confirmação ativa roda apenas em achados Nuclei com severidade '
-        f'Crítica, Alta ou Média que incluam curl-command. '
-        f'Se o scan usou apenas o ZAP, os achados aparecem na seção de '
-        f'Vulnerabilidades Identificadas com evidência de request/response completo.'
+        f'<strong>No findings eligible for active confirmation.</strong><br>'
+        f'Active confirmation only runs on Nuclei findings of '
+        f'Critical, High or Medium severity that include a curl-command. '
+        f'If the scan used only ZAP, the findings appear in the '
+        f'Identified Vulnerabilities section with full request/response evidence.'
         f'</div>'
     )
 
@@ -1571,36 +1570,36 @@ def action_card(title, icon, color, bg, items, prazo, descricao):
         seen_names.add(name)
         count = item.get("affected_count",1) if isinstance(item,dict) and "affected_count" in item else item.get("count",1)
         sev_f = item.get("severity","") if "severity" in item else item.get("sev","")
-        count_str = f" <span style='color:#666;font-size:11px'>({count} ocorrência(s))</span>" if count > 1 else ""
+        count_str = f" <span style='color:#666;font-size:11px'>({count} occurrence(s))</span>" if count > 1 else ""
         rows += f"<li style='margin:4px 0'><strong>{html.escape(name)}</strong>{count_str}</li>"
     return f"""<div style="border-left:5px solid {color};padding:16px;margin:12px 0;background:{bg};border-radius:4px">
-  <h3 style="margin:0 0 6px;color:{color}">{icon} {html.escape(title)} <span style="font-size:12px;font-weight:normal;color:#666">— Prazo: {prazo}</span></h3>
+  <h3 style="margin:0 0 6px;color:{color}">{icon} {html.escape(title)} <span style="font-size:12px;font-weight:normal;color:#666">— Timeframe: {prazo}</span></h3>
   <p style="margin:0 0 10px;font-size:13px;color:#555">{descricao}</p>
   <ul style="margin:0;padding-left:20px;font-size:13px">{rows}</ul>
 </div>"""
 
 plan_parts = []
 plan_parts.append(action_card(
-    "Ação Imediata","🔴","#7a2e2e","#fff0f0",
-    imediato,"esta semana",
-    "Vulnerabilidades críticas e altas com potencial de comprometimento direto. Paralisar deploy se necessário."
+    "Immediate Action","🔴","#7a2e2e","#fff0f0",
+    imediato,"this week",
+    "Critical and high vulnerabilities with direct compromise potential. Halt deployment if necessary."
 ))
 plan_parts.append(action_card(
-    "Próximo Sprint","🟡","#d4833a","#fff8f0",
-    sprint,"próximas 2 semanas",
-    "Achados médios que reduzem superfície de ataque. Incluir nas próximas histórias do time."
+    "Next Sprint","🟡","#d4833a","#fff8f0",
+    sprint,"next 2 weeks",
+    "Medium findings that reduce the attack surface. Include in the team's upcoming stories."
 ))
 plan_parts.append(action_card(
-    "Backlog de Segurança","🔵","#4a7c8c","#f0f8ff",
-    backlog,"próximos 30 dias",
-    "Melhorias de hardening e headers. Agendar como dívida técnica de segurança."
+    "Security Backlog","🔵","#4a7c8c","#f0f8ff",
+    backlog,"next 30 days",
+    "Hardening and header improvements. Schedule as security technical debt."
 ))
 
 action_plan_html = ""
 if any(plan_parts):
-    action_plan_html = f"""<h2>Plano de Ação para o Time</h2>
+    action_plan_html = f"""<h2>Action Plan for the Team</h2>
 <div class="info-box">
-  <p>Priorização baseada em CVSS + EPSS. Achados com maior probabilidade de exploração ativa foram priorizados.</p>
+  <p>Prioritization based on CVSS + EPSS. Findings with higher active-exploitation probability were prioritized.</p>
 </div>
 {"".join(plan_parts)}"""
 
@@ -1647,7 +1646,7 @@ def _matrix_cell(imp, eff, highlight=False):
     else:
         body = "<br>".join(f'{badge(s)} {html.escape(n[:46])}' for n, s in items[:7])
         if len(items) > 7:
-            body += f'<br><span style="color:#888;font-size:11px">+{len(items)-7} mais</span>'
+            body += f'<br><span style="color:#888;font-size:11px">+{len(items)-7} more</span>'
     bg = "#eafaf1" if highlight else "#fff"
     tag = ('<div style="font-size:10px;font-weight:bold;color:#1b5e20;margin-bottom:4px">★ QUICK WINS</div>'
            if highlight else "")
@@ -1655,22 +1654,22 @@ def _matrix_cell(imp, eff, highlight=False):
 
 priority_matrix_html = ""
 if _seen_m:
-    priority_matrix_html = f"""<h2>Matriz de Priorização — Esforço × Impacto</h2>
-<div class="info-box"><p style="font-size:13px">Cruza o <strong>impacto</strong> (severidade)
-com o <strong>esforço</strong> estimado de correção. O quadrante <strong>alto impacto + baixo
-esforço</strong> são os <strong>quick wins</strong> — máxima prioridade de execução.</p></div>
+    priority_matrix_html = f"""<h2>Prioritization Matrix — Effort × Impact</h2>
+<div class="info-box"><p style="font-size:13px">Cross-references <strong>impact</strong> (severity)
+with the estimated <strong>remediation effort</strong>. The <strong>high impact + low
+effort</strong> quadrant are the <strong>quick wins</strong> — top execution priority.</p></div>
 <table style="border-collapse:collapse;width:100%">
 <tr style="background:#1a3a4f;color:white">
   <th style="padding:8px;width:90px"></th>
-  <th style="padding:8px">Esforço Baixo<br><span style="font-weight:normal;font-size:11px">config / infra</span></th>
-  <th style="padding:8px">Esforço Médio<br><span style="font-weight:normal;font-size:11px">upgrade / tuning</span></th>
-  <th style="padding:8px">Esforço Alto<br><span style="font-weight:normal;font-size:11px">código / arquitetura</span></th>
+  <th style="padding:8px">Low Effort<br><span style="font-weight:normal;font-size:11px">config / infra</span></th>
+  <th style="padding:8px">Medium Effort<br><span style="font-weight:normal;font-size:11px">upgrade / tuning</span></th>
+  <th style="padding:8px">High Effort<br><span style="font-weight:normal;font-size:11px">code / architecture</span></th>
 </tr>
-<tr><th style="background:#7a2e2e;color:white;padding:8px">Impacto<br>Alto</th>
+<tr><th style="background:#7a2e2e;color:white;padding:8px">High<br>Impact</th>
   {_matrix_cell("alto","baixo",highlight=True)}{_matrix_cell("alto","médio")}{_matrix_cell("alto","alto")}</tr>
-<tr><th style="background:#d4833a;color:white;padding:8px">Impacto<br>Médio</th>
+<tr><th style="background:#d4833a;color:white;padding:8px">Medium<br>Impact</th>
   {_matrix_cell("médio","baixo")}{_matrix_cell("médio","médio")}{_matrix_cell("médio","alto")}</tr>
-<tr><th style="background:#4a7c8c;color:white;padding:8px">Impacto<br>Baixo</th>
+<tr><th style="background:#4a7c8c;color:white;padding:8px">Low<br>Impact</th>
   {_matrix_cell("baixo","baixo")}{_matrix_cell("baixo","médio")}{_matrix_cell("baixo","alto")}</tr>
 </table>"""
 
@@ -1702,13 +1701,13 @@ if tech_detected:
         _is_vuln_fw  = _info.get("vulnerable", False)
 
         if _is_outdated:
-            _sbg, _slbl = "#b34e4e", "⚠ DESATUALIZADO"
+            _sbg, _slbl = "#b34e4e", "⚠ OUTDATED"
         elif _is_vuln_fw:
-            _sbg, _slbl = "#d4833a", "⚠ VULNERÁVEL"
+            _sbg, _slbl = "#d4833a", "⚠ VULNERABLE"
         elif _confidence == "confirmed":
-            _sbg, _slbl = "#27ae60", "✓ CONFIRMADO"
+            _sbg, _slbl = "#27ae60", "✓ CONFIRMED"
         else:
-            _sbg, _slbl = "#6e8f72", "✓ DETECTADO"
+            _sbg, _slbl = "#6e8f72", "✓ DETECTED"
 
         _cves = tech_cve_map.get(_tech_name.lower(), "")
         _src_labels = {"httpx":"httpx","probe":"probe","path_fingerprint":"path","js_analysis":"JS"}
@@ -1733,9 +1732,9 @@ if tech_detected:
 
     # Badges de categoria
     _cat_labels_pt = {
-        "cms":"CMS","webserver":"Servidor Web","language":"Linguagem","framework":"Framework",
-        "database":"Banco de Dados","cdn":"CDN","cloud":"Cloud",
-        "monitoring":"Monitoramento","devops":"DevOps","security":"Segurança"
+        "cms":"CMS","webserver":"Web Server","language":"Language","framework":"Framework",
+        "database":"Database","cdn":"CDN","cloud":"Cloud",
+        "monitoring":"Monitoring","devops":"DevOps","security":"Security"
     }
     _cat_badges = "".join(
         f'<span style="background:#e8f4f8;border:1px solid #1a3a4f;padding:3px 10px;'
@@ -1746,102 +1745,102 @@ if tech_detected:
     _cat_html = f'<div style="margin:10px 0 14px">{_cat_badges}</div>' if _cat_badges else ""
 
     _outdated_badge = (
-        f' — <span style="color:#b34e4e;font-weight:bold">{_outdated_count} desatualizado(s)</span>'
-        if _outdated_count else " — stack atualizada"
+        f' — <span style="color:#b34e4e;font-weight:bold">{_outdated_count} outdated</span>'
+        if _outdated_count else " — up-to-date stack"
     )
     tech_inventory_html = (
-        f'<h2>2.5. Inventário de Tecnologias Detectadas</h2>'
+        f'<h2>2.5. Detected Technology Inventory</h2>'
         f'<div class="info-box">'
-        f'<p><strong>{_total_tech} componente(s) identificado(s)</strong>{_outdated_badge}. '
-        f'Detectados via httpx tech-detect, JS analysis e fingerprinting de endpoints.</p>'
+        f'<p><strong>{_total_tech} component(s) identified</strong>{_outdated_badge}. '
+        f'Detected via httpx tech-detect, JS analysis and endpoint fingerprinting.</p>'
         + _cat_html +
         f'</div>'
         f'<table><tr style="background:#f5f5f5">'
-        f'<th style="width:170px">Componente</th>'
-        f'<th style="width:130px">Versão</th>'
+        f'<th style="width:170px">Component</th>'
+        f'<th style="width:130px">Version</th>'
         f'<th style="width:150px">Status</th>'
-        f'<th>CVEs Conhecidos</th>'
-        f'<th style="width:70px">Fonte</th>'
+        f'<th>Known CVEs</th>'
+        f'<th style="width:70px">Source</th>'
         f'</tr>' + rows + f'</table>'
     )
 
 # ── Big4: Escopo & Metodologia (seção 1.1) ───────────────────
 _auth_token  = os.environ.get("AUTH_TOKEN", "")
 _auth_header = os.environ.get("AUTH_HEADER", "")
-_scan_type   = ("Autenticado (token/header fornecido)"
+_scan_type   = ("Authenticated (token/header provided)"
                 if (_auth_token or _auth_header)
-                else "Não autenticado (caixa-preta)")
+                else "Unauthenticated (black-box)")
 
-# Pipeline canônico — status derivado de raw/.phase_times + artefatos
+# Canonical pipeline — status derived from raw/.phase_times + artifacts
 _PIPELINE = [
-    ("P1",   "Descoberta de subdomínios",     "subfinder + httpx + katana"),
-    ("P2",   "Mapeamento de superfície",      "httpx + nmap + katana"),
-    ("P2_5", "Detecção de WAF & headers",     "wafw00f + security headers"),
-    ("P3",   "Análise TLS/SSL",               "testssl.sh"),
-    ("P4",   "Varredura de vulnerabilidades", "Nuclei (tags adaptativas)"),
-    ("P5",   "Confirmação ativa de exploits", "poc_validator (re-execução)"),
-    ("P6",   "Enriquecimento de CVEs",        "NVD + EPSS + CISA KEV"),
-    ("P8",   "Segurança de e-mail",           "SPF / DMARC / DKIM"),
-    ("P9",   "Scan dinâmico",                 "OWASP ZAP (spider + active)"),
-    ("P10",  "Análise de JavaScript",         "secrets + endpoints + libs"),
-    ("P10_5","Fuzzing complementar",          "ffuf + scanners CMS"),
-    ("P11",  "Geração de relatório",          "swarm_report.py"),
+    ("P1",   "Subdomain discovery",        "subfinder + httpx + katana"),
+    ("P2",   "Surface mapping",            "httpx + nmap + katana"),
+    ("P2_5", "WAF & header detection",     "wafw00f + security headers"),
+    ("P3",   "TLS/SSL analysis",           "testssl.sh"),
+    ("P4",   "Vulnerability scanning",     "Nuclei (adaptive tags)"),
+    ("P5",   "Active exploit confirmation","poc_validator (re-execution)"),
+    ("P6",   "CVE enrichment",             "NVD + EPSS + CISA KEV"),
+    ("P8",   "Email security",             "SPF / DMARC / DKIM"),
+    ("P9",   "Dynamic scan",               "OWASP ZAP (spider + active)"),
+    ("P10",  "JavaScript analysis",        "secrets + endpoints + libs"),
+    ("P10_5","Supplementary fuzzing",      "ffuf + CMS scanners"),
+    ("P11",  "Report generation",          "swarm_report.py"),
 ]
-_phase_artifact = {"P3": "testssl.json"}  # fases que rodam sem registrar 'end' no .phase_times
+_phase_artifact = {"P3": "testssl.json"}  # phases that run without recording 'end' in .phase_times
 _method_rows = ""
 for _pid, _pname, _ptools in _PIPELINE:
     if _pid in phase_times:
         _d = phase_times[_pid]
         if _d > 0:
-            _label, _dur, _color = "✓ Executada", f"{_d//60}m {_d%60:02d}s", "#1b5e20"
+            _label, _dur, _color = "✓ Executed", f"{_d//60}m {_d%60:02d}s", "#1b5e20"
         else:
-            _label, _dur, _color = "✓ Executada", "sem trabalho aplicável", "#4a7c8c"
+            _label, _dur, _color = "✓ Executed", "no applicable work", "#4a7c8c"
     elif _pid == "P11":
-        _label, _dur, _color = "✓ Executada", "—", "#1b5e20"
+        _label, _dur, _color = "✓ Executed", "—", "#1b5e20"
     elif _pid in _phase_artifact and os.path.exists(os.path.join(OUTDIR, "raw", _phase_artifact[_pid])):
-        _label, _dur, _color = "✓ Executada", "—", "#1b5e20"
+        _label, _dur, _color = "✓ Executed", "—", "#1b5e20"
     else:
-        _label, _dur, _color = "○ Não executada", "—", "#888"
+        _label, _dur, _color = "○ Not executed", "—", "#888"
     _method_rows += (f'<tr><td style="font-family:monospace">{_pid.replace("_",".")}</td>'
         f'<td>{html.escape(_pname)}</td>'
         f'<td style="font-size:12px;color:#555">{html.escape(_ptools)}</td>'
         f'<td style="color:{_color};font-weight:600;white-space:nowrap">{_label}</td>'
         f'<td style="white-space:nowrap">{_dur}</td></tr>')
 
-# Narrativa de derivação do índice de risco
+# Risk score derivation narrative
 _total_occ = sum(occurrences.values())
-_risk_narr = (f"O índice <strong>{risk}/100</strong> usa a faixa-base da severidade mais alta "
-    f"presente (crítico→70, alto→40, médio→15, baixo→5) mais um bônus de quantidade com "
-    f"retornos decrescentes sobre <strong>{total}</strong> tipo(s) único(s) de achado")
+_risk_narr = (f"The score <strong>{risk}/100</strong> uses a base tier from the highest severity "
+    f"present (critical→70, high→40, medium→15, low→5) plus a quantity bonus with "
+    f"diminishing returns over <strong>{total}</strong> unique finding type(s)")
 if _total_occ > total:
-    _risk_narr += f" ({_total_occ} ocorrências no total, contadas uma vez por tipo para não saturar)"
-if kev_bonus:  _risk_narr += f", soma <strong>+{kev_bonus}</strong> por CVE(s) em exploração ativa (CISA KEV)"
-if epss_bonus: _risk_narr += f", <strong>+{epss_bonus}</strong> por probabilidade de exploração (EPSS)"
-if js_bonus:   _risk_narr += f", <strong>+{js_bonus}</strong> por exposições em JavaScript"
-_risk_narr += f". Classificação final: <strong style='color:{scol}'>{html.escape(stxt)}</strong>."
+    _risk_narr += f" ({_total_occ} total occurrences, counted once per type to avoid saturation)"
+if kev_bonus:  _risk_narr += f", adds <strong>+{kev_bonus}</strong> for CVE(s) under active exploitation (CISA KEV)"
+if epss_bonus: _risk_narr += f", <strong>+{epss_bonus}</strong> for exploitation probability (EPSS)"
+if js_bonus:   _risk_narr += f", <strong>+{js_bonus}</strong> for JavaScript exposures"
+_risk_narr += f". Final classification: <strong style='color:{scol}'>{html.escape(stxt)}</strong>."
 
-_waf_limit = (f' O alvo está protegido por WAF ({html.escape(WAF_NAME)}): o active scan pode conter '
-    f'falsos negativos.' if WAF_DETECTED and WAF_NAME else '')
+_waf_limit = (f' The target is protected by a WAF ({html.escape(WAF_NAME)}): the active scan may contain '
+    f'false negatives.' if WAF_DETECTED and WAF_NAME else '')
 
-methodology_html = f'''<h2>1.1. Escopo &amp; Metodologia</h2>
+methodology_html = f'''<h2>1.1. Scope &amp; Methodology</h2>
 <table>
-<tr><th style="width:220px">Alvo</th><td><code>{html.escape(TARGET)}</code></td></tr>
-<tr><th>Domínio</th><td>{html.escape(DOMAIN)}</td></tr>
-<tr><th>Data do scan</th><td>{rdate}</td></tr>
-<tr><th>Duração total</th><td>{duration_str}</td></tr>
-<tr><th>Tipo de avaliação</th><td>{_scan_type}</td></tr>
-<tr><th>Autorização</th><td>Execução restrita a ambiente com Rules of Engagement (RoE) assinado.</td></tr>
+<tr><th style="width:220px">Target</th><td><code>{html.escape(TARGET)}</code></td></tr>
+<tr><th>Domain</th><td>{html.escape(DOMAIN)}</td></tr>
+<tr><th>Scan date</th><td>{rdate}</td></tr>
+<tr><th>Total duration</th><td>{duration_str}</td></tr>
+<tr><th>Assessment type</th><td>{_scan_type}</td></tr>
+<tr><th>Authorization</th><td>Execution restricted to environments with a signed Rules of Engagement (RoE).</td></tr>
 </table>
 <div class="info-box" style="margin-top:10px">
-<p><strong>Derivação do risco:</strong> {_risk_narr}</p>
+<p><strong>Risk derivation:</strong> {_risk_narr}</p>
 </div>
-<h3>Pipeline executado</h3>
+<h3>Executed Pipeline</h3>
 <table>
-<tr style="background:#f5f5f5"><th style="width:60px">Fase</th><th>Atividade</th><th>Ferramentas</th><th style="width:150px">Status</th><th style="width:120px">Duração</th></tr>
+<tr style="background:#f5f5f5"><th style="width:60px">Phase</th><th>Activity</th><th>Tools</th><th style="width:150px">Status</th><th style="width:120px">Duration</th></tr>
 {_method_rows}
 </table>
 <div class="info-box" style="margin-top:10px;font-size:12px">
-<p><strong>Limitações:</strong> esta é uma avaliação automatizada e não substitui um pentest manual.{_waf_limit} Achados de severidade crítica/alta devem ser validados manualmente antes da remediação.</p>
+<p><strong>Limitations:</strong> this is an automated assessment and does not replace a manual penetration test.{_waf_limit} Critical/high severity findings must be manually validated before remediation.</p>
 </div>'''
 
 # ── Diff com scan anterior do mesmo domínio ──────────────────
@@ -1879,36 +1878,36 @@ if _prev_dir:
         _pm = re.search(r'_(\d{8})_(\d{6})$', os.path.basename(_prev_dir))
         if _pm:
             _d, _t = _pm.group(1), _pm.group(2)
-            _prev_label = f"{_d[6:8]}/{_d[4:6]}/{_d[0:4]} {_t[0:2]}:{_t[2:4]}"
+            _prev_label = f"{_d[0:4]}-{_d[4:6]}-{_d[6:8]} {_t[0:2]}:{_t[2:4]}"
         else:
             _prev_label = os.path.basename(_prev_dir)
 
         def _diff_group(icon, title, color, keys, src_map):
             if not keys:
                 return (f'<div style="flex:1;min-width:200px"><h4 style="color:{color};margin:0 0 6px">'
-                        f'{icon} {title} (0)</h4><p style="color:#999;font-size:12px;margin:0">Nenhum</p></div>')
+                        f'{icon} {title} (0)</h4><p style="color:#999;font-size:12px;margin:0">None</p></div>')
             rows = "".join(
                 f'<li style="margin:3px 0;font-size:12px">{badge(src_map[k][1])} {html.escape(src_map[k][0][:48])}</li>'
                 for k in sorted(keys, key=lambda k: SEV_ORDER.get(src_map[k][1], 9))[:12])
-            extra = f'<li style="color:#888;font-size:11px">+{len(keys)-12} mais</li>' if len(keys) > 12 else ""
+            extra = f'<li style="color:#888;font-size:11px">+{len(keys)-12} more</li>' if len(keys) > 12 else ""
             return (f'<div style="flex:1;min-width:200px"><h4 style="color:{color};margin:0 0 6px">'
                     f'{icon} {title} ({len(keys)})</h4><ul style="margin:0;padding-left:18px">{rows}{extra}</ul></div>')
 
         diff_html = (
-            f'<h2>1.2. Evolução desde o Último Scan</h2>'
-            f'<div class="info-box"><p style="font-size:13px">Comparado com o scan de '
-            f'<strong>{_prev_label}</strong> (por tipo de achado). '
-            f'<span style="color:#27ae60">{len(_corrigidos)} corrigido(s)</span> · '
-            f'<span style="color:#b34e4e">{len(_novos)} novo(s)</span> · '
-            f'<span style="color:#888">{len(_persist)} persistente(s)</span>.</p></div>'
+            f'<h2>1.2. Evolution Since Last Scan</h2>'
+            f'<div class="info-box"><p style="font-size:13px">Compared with the scan from '
+            f'<strong>{_prev_label}</strong> (by finding type). '
+            f'<span style="color:#27ae60">{len(_corrigidos)} fixed</span> · '
+            f'<span style="color:#b34e4e">{len(_novos)} new</span> · '
+            f'<span style="color:#888">{len(_persist)} persistent</span>.</p></div>'
             f'<div style="display:flex;gap:20px;flex-wrap:wrap;margin:10px 0">'
-            + _diff_group("🆕", "Novos", "#b34e4e", _novos, _cur_map)
-            + _diff_group("✅", "Corrigidos", "#27ae60", _corrigidos, _prev_map)
-            + _diff_group("➡️", "Persistentes", "#888", _persist, _cur_map)
+            + _diff_group("🆕", "New", "#b34e4e", _novos, _cur_map)
+            + _diff_group("✅", "Fixed", "#27ae60", _corrigidos, _prev_map)
+            + _diff_group("➡️", "Persistent", "#888", _persist, _cur_map)
             + '</div>'
         )
 
-page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
+page = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>SWARM — {html.escape(DOMAIN)}</title><style>
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
 .container{{max-width:1200px;margin:0 auto;background:white;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.1)}}
@@ -1937,43 +1936,43 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
     .confirm-yes{{background:#27ae60;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
     .confirm-no{{background:#95a5a6;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
 </style></head><body><div class="container">
-<div class="header"><h1>SWARM — Relatório de Segurança</h1>
-<p>Alvo: <strong>{html.escape(TARGET)}</strong> | Domínio: {html.escape(DOMAIN)}</p>
-<p>Data: {rdate} &nbsp;|&nbsp; Duração: {duration_str} &nbsp;|&nbsp; <strong>CONFIDENCIAL</strong></p></div>
+<div class="header"><h1>SWARM — Security Report</h1>
+<p>Target: <strong>{html.escape(TARGET)}</strong> | Domain: {html.escape(DOMAIN)}</p>
+<p>Date: {rdate} &nbsp;|&nbsp; Duration: {duration_str} &nbsp;|&nbsp; <strong>CONFIDENTIAL</strong></p></div>
 <div class="content">
-<h2>1. Sumário Executivo</h2>
+<h2>1. Executive Summary</h2>
 <div class="stats">
 {f'<div class="stat-card" style="background:#7a0000;border:2px solid #ff4444"><div class="number">{kev_count}</div><div>🔴 KEV</div></div>' if kev_count > 0 else ""}
-<div class="stat-card critical"><div class="number">{stats['critical']}</div><div>CRÍTICO</div></div>
-<div class="stat-card high"><div class="number">{stats['high']}</div><div>ALTO</div></div>
-<div class="stat-card medium"><div class="number">{stats['medium']}</div><div>MÉDIO</div></div>
-<div class="stat-card low"><div class="number">{stats['low']}</div><div>BAIXO</div></div>
+<div class="stat-card critical"><div class="number">{stats['critical']}</div><div>CRITICAL</div></div>
+<div class="stat-card high"><div class="number">{stats['high']}</div><div>HIGH</div></div>
+<div class="stat-card medium"><div class="number">{stats['medium']}</div><div>MEDIUM</div></div>
+<div class="stat-card low"><div class="number">{stats['low']}</div><div>LOW</div></div>
 <div class="stat-card info"><div class="number">{stats['info']}</div><div>INFO</div></div></div>
-{f'<div style="background:#7a0000;color:white;padding:14px 18px;border-radius:6px;margin:12px 0;border-left:6px solid #ff4444"><strong style="font-size:14px">🔴 {kev_count} CVE(S) COM EXPLORAÇÃO ATIVA CONFIRMADA — CISA KEV</strong><br><span style="font-size:12px;opacity:.9">Estes CVEs estão no catálogo Known Exploited Vulnerabilities da CISA. Independente do score CVSS, exigem ação imediata: ' + ", ".join(f"<code style=\'background:rgba(255,255,255,.15);padding:1px 4px;border-radius:3px\'>{html.escape(cid)}</code>" for cid in list(kev_matches.keys())[:10]) + (f" e mais {len(kev_matches)-10}" if len(kev_matches)>10 else "") + "</span></div>" if kev_count > 0 else ""}
+{f'<div style="background:#7a0000;color:white;padding:14px 18px;border-radius:6px;margin:12px 0;border-left:6px solid #ff4444"><strong style="font-size:14px">🔴 {kev_count} CVE(S) WITH CONFIRMED ACTIVE EXPLOITATION — CISA KEV</strong><br><span style="font-size:12px;opacity:.9">These CVEs are in the CISA Known Exploited Vulnerabilities catalog. Regardless of CVSS score, they require immediate action: ' + ", ".join(f"<code style=\'background:rgba(255,255,255,.15);padding:1px 4px;border-radius:3px\'>{html.escape(cid)}</code>" for cid in list(kev_matches.keys())[:10]) + (f" and {len(kev_matches)-10} more" if len(kev_matches)>10 else "") + "</span></div>" if kev_count > 0 else ""}
 <div class="info-box">
-<p><strong>Índice de Risco (0–100):</strong> {risk} <small style="color:#888;font-size:11px">(metodologia: KEV + EPSS + CVSS + JS)</small></p>
+<p><strong>Risk Score (0–100):</strong> {risk} <small style="color:#888;font-size:11px">(methodology: KEV + EPSS + CVSS + JS)</small></p>
 <div class="risk-bar-wrap"><div class="risk-bar"></div></div>
-<p><strong>Total de Achados:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
-<p><strong>Duração total do scan:</strong> {duration_str}</p>
-<p><strong>Ferramentas:</strong> Nuclei + OWASP ZAP{"+ wafw00f" if WAF_DETECTED or os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}{"+ Katana" if KATANA_URLS > 0 else ""}{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}</p>
-<p><strong>Exploits verificados ativamente:</strong> {CONFIRMED_COUNT} re-executados com resposta capturada</p>
-{'<p style="background:#fff3cd;padding:8px 12px;border-radius:4px;margin:8px 0;font-size:13px"><strong style="color:#856404">🛡 WAF: '+html.escape(WAF_NAME)+'</strong> — active scan pode ter falsos negativos.</p>' if WAF_DETECTED and WAF_NAME else ""}
-{'<p style="color:#b34e4e;font-size:13px">⚠ <strong>'+str(EMAIL_ISSUES)+' problema(s) de segurança de email</strong> detectado(s).</p>' if EMAIL_ISSUES > 0 else ""}
+<p><strong>Total Findings:</strong> {total} &nbsp;|&nbsp; <strong>Status:</strong> <span style="color:{scol};font-weight:bold">{stxt}</span></p>
+<p><strong>Total scan duration:</strong> {duration_str}</p>
+<p><strong>Tools:</strong> Nuclei + OWASP ZAP{"+ wafw00f" if WAF_DETECTED or os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}{"+ Katana" if KATANA_URLS > 0 else ""}{"+ JS/Secrets" if js_analysis else ""}{"+ testssl" if TLS_ISSUES >= 0 and os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}{"+ OpenAPI" if OPENAPI_FOUND else ""}</p>
+<p><strong>Actively verified exploits:</strong> {CONFIRMED_COUNT} re-executed with captured response</p>
+{'<p style="background:#fff3cd;padding:8px 12px;border-radius:4px;margin:8px 0;font-size:13px"><strong style="color:#856404">🛡 WAF: '+html.escape(WAF_NAME)+'</strong> — active scan may have false negatives.</p>' if WAF_DETECTED and WAF_NAME else ""}
+{'<p style="color:#b34e4e;font-size:13px">⚠ <strong>'+str(EMAIL_ISSUES)+' email security issue(s)</strong> detected.</p>' if EMAIL_ISSUES > 0 else ""}
 </div>
 {methodology_html}
 {diff_html}
-<h2>2. Superfície de Ataque</h2>
+<h2>2. Attack Surface</h2>
 <table>
-<tr><th style="width:220px">Subdomínios descobertos</th><td>{SUB_COUNT}</td></tr>
-<tr><th>Subdomínios ativos (HTTP)</th><td>{ACTIVE_COUNT}</td></tr>
-<tr><th>Portas abertas</th><td><code>{html.escape(OPEN_PORTS)}</code></td></tr>
-{f'<tr><th>URLs (Katana JS crawl)</th><td>{KATANA_URLS} URL(s) descobertas com rendering JS</td></tr>' if KATANA_URLS > 0 else ""}</table>
-<h3>Hosts Ativos (httpx)</h3><table><tr><th>Resultado</th></tr>{trows(httpx_lines,"httpx não executado ou sem resultados detectados")}</table>
-<h3>Portas Abertas e Serviços (nmap)</h3><table><tr><th>Porta / Serviço</th></tr>{trows(nmap_lines,"nmap não executado ou sem portas abertas")}</table>
+<tr><th style="width:220px">Subdomains discovered</th><td>{SUB_COUNT}</td></tr>
+<tr><th>Active subdomains (HTTP)</th><td>{ACTIVE_COUNT}</td></tr>
+<tr><th>Open ports</th><td><code>{html.escape(OPEN_PORTS)}</code></td></tr>
+{f'<tr><th>URLs (Katana JS crawl)</th><td>{KATANA_URLS} URL(s) discovered with JS rendering</td></tr>' if KATANA_URLS > 0 else ""}</table>
+<h3>Live Hosts (httpx)</h3><table><tr><th>Result</th></tr>{trows(httpx_lines,"httpx not run or no results detected")}</table>
+<h3>Open Ports and Services (nmap)</h3><table><tr><th>Port / Service</th></tr>{trows(nmap_lines,"nmap not run or no open ports")}</table>
 {tech_inventory_html}
-<h2>3. Vulnerabilidades Identificadas</h2>{vhtml}
+<h2>3. Identified Vulnerabilities</h2>{vhtml}
 
-<!-- Comportamento do Scan -->
+<!-- Scan Behavior -->
 {scan_behavior_html}
 
 <!-- WAF + Email Security -->
@@ -1991,46 +1990,46 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {errsec}
 {low_table_html}
 
-<!-- Plano de Ação -->
+<!-- Action Plan -->
 {action_plan_html}
 
-<!-- Matriz de Priorização Esforço × Impacto -->
+<!-- Effort x Impact Prioritization Matrix -->
 {priority_matrix_html}
-<h2>5. Arquivos de Evidência</h2><div class="info-box"><ul>
-<li><code>raw/subdomains.txt</code> — Subdomínios descobertos</li>
-<li><code>raw/httpx_results.txt</code> — Hosts HTTP ativos e tecnologias</li>
-<li><code>raw/nmap.txt</code> — Scan de portas e serviços</li>
-<li><code>raw/nuclei.json</code> — Achados do Nuclei (JSONL bruto)</li>
-<li><code>raw/zap_alerts.json</code> — Alertas do OWASP ZAP (JSON bruto)</li>
-<li><code>raw/zap_evidencias.xml</code> — Relatório completo do ZAP (XML)</li>
-{"<li><code>raw/testssl.json</code> — Análise TLS/SSL (testssl)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}
-{"<li><code>raw/kev_matches.json</code> — CVEs com exploração ativa confirmada (CISA KEV)</li>" if kev_matches else ""}
-{"<li><code>raw/cve_enrichment.json</code> — Dados CVE (CVSS + EPSS) do NVD/FIRST</li>" if cve_enrichment else ""}
-{"<li><code>raw/exploit_confirmations.json</code> — Resultados de confirmação ativa de exploits</li>" if confirmations else ""}
-{"<li><code>raw/openapi_spec.json</code> — Especificação OpenAPI/Swagger importada</li>" if OPENAPI_FOUND else ""}
-{"<li><code>raw/scan_metadata.json</code> — Comportamento e configuração de evasão do scan</li>" if scan_meta else ""}
-{"<li><code>raw/waf.json</code> — Detecção de WAF (wafw00f)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}
+<h2>5. Evidence Files</h2><div class="info-box"><ul>
+<li><code>raw/subdomains.txt</code> — Discovered subdomains</li>
+<li><code>raw/httpx_results.txt</code> — Live HTTP hosts and technologies</li>
+<li><code>raw/nmap.txt</code> — Port and service scan</li>
+<li><code>raw/nuclei.json</code> — Nuclei findings (raw JSONL)</li>
+<li><code>raw/zap_alerts.json</code> — OWASP ZAP alerts (raw JSON)</li>
+<li><code>raw/zap_evidencias.xml</code> — Full ZAP report (XML)</li>
+{"<li><code>raw/testssl.json</code> — TLS/SSL analysis (testssl)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","testssl.json")) else ""}
+{"<li><code>raw/kev_matches.json</code> — CVEs with confirmed active exploitation (CISA KEV)</li>" if kev_matches else ""}
+{"<li><code>raw/cve_enrichment.json</code> — CVE data (CVSS + EPSS) from NVD/FIRST</li>" if cve_enrichment else ""}
+{"<li><code>raw/exploit_confirmations.json</code> — Active exploit confirmation results</li>" if confirmations else ""}
+{"<li><code>raw/openapi_spec.json</code> — Imported OpenAPI/Swagger spec</li>" if OPENAPI_FOUND else ""}
+{"<li><code>raw/scan_metadata.json</code> — Scan behavior and evasion configuration</li>" if scan_meta else ""}
+{"<li><code>raw/waf.json</code> — WAF detection (wafw00f)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","waf.json")) else ""}
 {"<li><code>raw/email_security.json</code> — SPF/DMARC/DKIM</li>" if email_security else ""}
-{"<li><code>raw/katana_urls.txt</code> — URLs descobertas pelo Katana (JS crawl)</li>" if KATANA_URLS > 0 else ""}
-{"<li><code>raw/ffuf.json</code> — Endpoints descobertos por fuzzing (ffuf)</li>" if FFUF_FOUND > 0 else ""}
-{"<li><code>raw/smuggler.txt</code> — Análise HTTP Request Smuggling</li>" if SMUGGLER_FOUND else ""}
-{"<li><code>raw/trufflehog.json</code> — Secrets de alta confiança (trufflehog)</li>" if TRUFFLEHOG_FOUND > 0 else ""}
-{"<li><code>raw/js_analysis.json</code> — Análise JS/Secrets completa</li>" if js_analysis else ""}
-{"<li><code>raw/js_files/</code> — Arquivos JS para análise forense</li>" if js_files_list else ""}
-{"<li><code>raw/tech_profile.json</code> — Inventário de tecnologias detectadas (httpx + JS + probes)</li>" if tech_detected else ""}
+{"<li><code>raw/katana_urls.txt</code> — URLs discovered by Katana (JS crawl)</li>" if KATANA_URLS > 0 else ""}
+{"<li><code>raw/ffuf.json</code> — Endpoints discovered by fuzzing (ffuf)</li>" if FFUF_FOUND > 0 else ""}
+{"<li><code>raw/smuggler.txt</code> — HTTP Request Smuggling analysis</li>" if SMUGGLER_FOUND else ""}
+{"<li><code>raw/trufflehog.json</code> — High-confidence secrets (trufflehog)</li>" if TRUFFLEHOG_FOUND > 0 else ""}
+{"<li><code>raw/js_analysis.json</code> — Full JS/Secrets analysis</li>" if js_analysis else ""}
+{"<li><code>raw/js_files/</code> — JS files for forensic analysis</li>" if js_files_list else ""}
+{"<li><code>raw/tech_profile.json</code> — Detected technology inventory (httpx + JS + probes)</li>" if tech_detected else ""}
 {"<li><code>raw/wpscan.json</code> — WordPress scanner (wpscan)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","wpscan.json")) else ""}
 {"<li><code>raw/joomscan.txt</code> — Joomla scanner (joomscan)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","joomscan.txt")) else ""}
 {"<li><code>raw/droopescan.txt</code> — Drupal scanner (droopescan)</li>" if os.path.exists(os.path.join(OUTDIR,"raw","droopescan.txt")) else ""}
 </ul>
-<p><strong>Nota:</strong> Todos os achados devem ser validados manualmente antes de reportar ao cliente ou equipe de desenvolvimento.</p></div></div>
-<div class="footer"><p><strong>CONFIDENCIAL — USO INTERNO</strong></p>
-<p>SWARM — Scanner Automatizado de Segurança</p></div></div></body></html>"""
+<p><strong>Note:</strong> All findings must be manually validated before reporting to the client or development team.</p></div></div>
+<div class="footer"><p><strong>CONFIDENTIAL — INTERNAL USE</strong></p>
+<p>SWARM — Automated Security Scanner</p></div></div></body></html>"""
 
 out = os.path.join(OUTDIR,"relatorio_swarm.html")
 open(out,"w",encoding="utf-8").write(page)
-print(f"[✓] Relatório: {out}")
-print(f"[✓] {total} vulnerabilidade(s) | C={stats['critical']} A={stats['high']} M={stats['medium']} B={stats['low']} I={stats['info']}")
-if errors: print(f"[!] {len(errors)} aviso(s) — ver relatório")
+print(f"[✓] Report: {out}")
+print(f"[✓] {total} vulnerability(ies) | C={stats['critical']} H={stats['high']} M={stats['medium']} L={stats['low']} I={stats['info']}")
+if errors: print(f"[!] {len(errors)} warning(s) — see report")
 
 # ── findings.json ─────────────────────────────────────────────────
 try:
@@ -2074,26 +2073,26 @@ try:
     }
     fj = os.path.join(OUTDIR,"findings.json")
     json.dump(findings_out, open(fj,"w",encoding="utf-8"), ensure_ascii=False, indent=2, default=str)
-    print(f"[✓] JSON estruturado: {fj}")
+    print(f"[✓] Structured JSON: {fj}")
 except Exception as _e:
     print(f"[!] findings.json: {_e}")
 
 # ── sumario_executivo.html ────────────────────────────────────────
 try:
     rc = "#7a2e2e" if risk>=70 else ("#b34e4e" if risk>=40 else ("#d4833a" if risk>=15 else "#27ae60"))
-    kev_str = ", ".join(list(kev_matches.keys())[:5]) if kev_matches else "Nenhum"
+    kev_str = ", ".join(list(kev_matches.keys())[:5]) if kev_matches else "None"
     risk_level = stxt.split(" — ")[0] if " — " in stxt else stxt
 
     # Top findings table
     sev_bg = {"critical":"#7a2e2e","high":"#b34e4e"}
-    sev_lb = {"critical":"CRÍTICO","high":"ALTO"}
+    sev_lb = {"critical":"CRITICAL","high":"HIGH"}
     top_f = [f for f in all_f if f.get("severity") in ("critical","high")][:8]
     top_rows = ""
     for f in top_f:
         sc = sev_bg.get(f.get("severity",""), "#888")
         sl = sev_lb.get(f.get("severity",""), "?")
         name = html.escape(f.get("name",""))
-        impact = html.escape(f.get("impact","") or "Ver relatório técnico")
+        impact = html.escape(f.get("impact","") or "See technical report")
         rem = html.escape((f.get("remediation","") or "")[:60])
         top_rows += (f'<tr><td><span style="background:{sc};color:white;padding:2px 8px;'
                      f'border-radius:4px;font-size:11px">{sl}</span></td>'
@@ -2101,40 +2100,40 @@ try:
                      f'<td style="color:#555;font-size:12px">{impact}</td>'
                      f'<td style="font-size:11px">{rem}</td></tr>')
     if not top_rows:
-        top_rows = '<tr><td colspan="4" style="text-align:center;color:#888">Sem achados críticos ou altos</td></tr>'
+        top_rows = '<tr><td colspan="4" style="text-align:center;color:#888">No critical or high findings</td></tr>'
 
     # Phase timing table
-    phase_map = {"P1":"Descoberta","P2":"Superfície","P3":"TLS","P4":"Nuclei",
-                 "P5":"Confirmação","P6":"CVE/EPSS","P7":"WAF","P8":"Email",
-                 "P9":"ZAP","P10":"JS/Secrets","P10_5":"Complementar","P11":"Relatório"}
+    phase_map = {"P1":"Discovery","P2":"Surface","P3":"TLS","P4":"Nuclei",
+                 "P5":"Confirmation","P6":"CVE/EPSS","P7":"WAF","P8":"Email",
+                 "P9":"ZAP","P10":"JS/Secrets","P10_5":"Supplementary","P11":"Report"}
     phase_rows = ""
     for pid, dur in phase_times.items():
         pname = phase_map.get(pid, pid)
         phase_rows += f'<tr><td>{pname}</td><td>{int(dur)//60}m {int(dur)%60:02d}s</td></tr>'
     phase_section = ""
     if phase_rows:
-        phase_section = (f'<h2>Tempo por Fase</h2>'
-                        f'<table><tr><th>Fase</th><th>Duração</th></tr>'
+        phase_section = (f'<h2>Time per Phase</h2>'
+                        f'<table><tr><th>Phase</th><th>Duration</th></tr>'
                         f'{phase_rows}</table>')
 
     # Recommendations
     recs = []
     if kev_count > 0:
-        recs.append(f"<li><strong>URGENTE:</strong> Remediar {kev_count} CVE(s) com exploração ativa: {html.escape(kev_str)}</li>")
+        recs.append(f"<li><strong>URGENT:</strong> Remediate {kev_count} CVE(s) under active exploitation: {html.escape(kev_str)}</li>")
     if stats["critical"] > 0:
-        recs.append(f"<li>Corrigir {stats['critical']} achado(s) crítico(s) — prazo imediato</li>")
+        recs.append(f"<li>Fix {stats['critical']} critical finding(s) — immediate</li>")
     if stats["high"] > 0:
-        recs.append(f"<li>Planejar {stats['high']} achado(s) alto(s) — esta sprint</li>")
+        recs.append(f"<li>Plan {stats['high']} high finding(s) — this sprint</li>")
     if stats["medium"] > 0:
-        recs.append(f"<li>Agendar {stats['medium']} achado(s) médio(s) — próxima sprint</li>")
-    recs.append("<li>Consultar relatório técnico para evidências detalhadas</li>")
+        recs.append(f"<li>Schedule {stats['medium']} medium finding(s) — next sprint</li>")
+    recs.append("<li>See the technical report for detailed evidence</li>")
     recs_html = "\n".join(recs)
 
     kev_alert = ""
     if kev_count > 0:
         kev_alert = (f'<p style="background:#fff0f0;padding:10px;border-radius:6px;'
                     f'border-left:4px solid #7a0000;font-size:12px">'
-                    f'<strong>⚠ Exploração Ativa (CISA KEV):</strong> {html.escape(kev_str)}</p>')
+                    f'<strong>⚠ Active Exploitation (CISA KEV):</strong> {html.escape(kev_str)}</p>')
 
     kev_kpi = ""
     if kev_count > 0:
@@ -2144,11 +2143,11 @@ try:
     target_esc = html.escape(TARGET)
     domain_esc = html.escape(DOMAIN)
     stxt_esc   = html.escape(stxt)
-    ts_str     = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ts_str     = rdate
 
     exec_html = f"""<!DOCTYPE html>
-<html lang="pt-br"><head><meta charset="UTF-8">
-<title>Sumário Executivo — {domain_esc}</title>
+<html lang="en"><head><meta charset="UTF-8">
+<title>Executive Summary — {domain_esc}</title>
 <style>
 body{{font-family:"Segoe UI",sans-serif;max-width:850px;margin:0 auto;padding:30px;color:#333}}
 h1{{color:#1a3a4f;font-size:22px;border-bottom:3px solid #1a3a4f;padding-bottom:8px}}
@@ -2163,36 +2162,36 @@ td{{border:1px solid #eee;padding:8px;font-size:12px}}
 @media print{{body{{padding:0}}}}
 </style></head><body>
 <div style="background:#1a3a4f;color:white;padding:18px;border-radius:8px;margin-bottom:20px">
-<h1 style="color:white;border:none;margin:0 0 4px">Sumário Executivo de Segurança</h1>
-<p style="margin:0;opacity:.8;font-size:13px">{target_esc} &nbsp;·&nbsp; {ts_str} &nbsp;·&nbsp; CONFIDENCIAL</p>
+<h1 style="color:white;border:none;margin:0 0 4px">Security Executive Summary</h1>
+<p style="margin:0;opacity:.8;font-size:13px">{target_esc} &nbsp;·&nbsp; {ts_str} &nbsp;·&nbsp; CONFIDENTIAL</p>
 </div>
-<h2>Índice de Risco</h2>
+<h2>Risk Score</h2>
 <div style="margin:8px 0">
 <span style="background:{rc};color:white;font-size:32px;font-weight:bold;padding:10px 22px;border-radius:6px">{risk}/100</span>
 <span style="margin-left:14px;font-size:15px;font-weight:600;color:{rc}">{stxt_esc}</span>
 </div>
-<h2>Achados</h2>
+<h2>Findings</h2>
 <div style="margin:8px 0">
-<div class="kpi"><div class="n" style="color:#7a2e2e">{stats["critical"]}</div><div class="l">CRÍTICO</div></div>
-<div class="kpi"><div class="n" style="color:#b34e4e">{stats["high"]}</div><div class="l">ALTO</div></div>
-<div class="kpi"><div class="n" style="color:#d4833a">{stats["medium"]}</div><div class="l">MÉDIO</div></div>
-<div class="kpi"><div class="n" style="color:#4a7c8c">{stats["low"]}</div><div class="l">BAIXO</div></div>
+<div class="kpi"><div class="n" style="color:#7a2e2e">{stats["critical"]}</div><div class="l">CRITICAL</div></div>
+<div class="kpi"><div class="n" style="color:#b34e4e">{stats["high"]}</div><div class="l">HIGH</div></div>
+<div class="kpi"><div class="n" style="color:#d4833a">{stats["medium"]}</div><div class="l">MEDIUM</div></div>
+<div class="kpi"><div class="n" style="color:#4a7c8c">{stats["low"]}</div><div class="l">LOW</div></div>
 {kev_kpi}
 </div>
 {kev_alert}
-<h2>Principais Vulnerabilidades</h2>
-<table><tr><th>Severidade</th><th>Vulnerabilidade</th><th>Impacto</th><th>Correção</th></tr>
+<h2>Top Vulnerabilities</h2>
+<table><tr><th>Severity</th><th>Vulnerability</th><th>Impact</th><th>Fix</th></tr>
 {top_rows}
 </table>
-<h2>Recomendações</h2>
+<h2>Recommendations</h2>
 <ol style="font-size:13px;line-height:2">{recs_html}</ol>
 {phase_section}
-<div class="footer">Gerado por SWARM · Uso restrito a equipes de segurança autorizadas · CONFIDENCIAL</div>
+<div class="footer">Generated by SWARM · Restricted to authorized security teams · CONFIDENTIAL</div>
 </body></html>"""
 
     ef = os.path.join(OUTDIR,"sumario_executivo.html")
     open(ef,"w",encoding="utf-8").write(exec_html)
-    print(f"[✓] Sumário executivo: {ef}")
+    print(f"[✓] Executive summary: {ef}")
 except Exception as _e:
     print(f"[!] sumario_executivo: {_e}")
 

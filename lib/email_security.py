@@ -24,22 +24,22 @@ spf_records = [l for l in spf_raw.splitlines() if "v=spf1" in l.lower()]
 
 if not spf_records:
     results["spf"] = {"status": "MISSING", "severity": "high",
-        "detail": "Registro SPF ausente — qualquer servidor pode enviar e-mail em nome do domínio.",
-        "recommendation": "Adicione um registro TXT SPF, ex: v=spf1 include:_spf.google.com ~all"}
+        "detail": "SPF record missing — any server can send email on behalf of the domain.",
+        "recommendation": "Add a TXT SPF record, e.g. v=spf1 include:_spf.google.com ~all"}
 elif any("+all" in r for r in spf_records):
     results["spf"] = {"status": "PERMISSIVE", "severity": "high",
-        "detail": f"SPF com '+all' permite QUALQUER servidor enviar e-mail pelo domínio.",
+        "detail": f"SPF with '+all' allows ANY server to send email for the domain.",
         "value": spf_records[0],
-        "recommendation": "Substitua '+all' por '~all' (softfail) ou '-all' (hardfail)."}
+        "recommendation": "Replace '+all' with '~all' (softfail) or '-all' (hardfail)."}
 elif any("?all" in r for r in spf_records):
     results["spf"] = {"status": "NEUTRAL", "severity": "medium",
-        "detail": "SPF com '?all' (neutro) não bloqueia remetentes não autorizados.",
+        "detail": "SPF with '?all' (neutral) does not block unauthorized senders.",
         "value": spf_records[0],
-        "recommendation": "Substitua '?all' por '~all' ou '-all'."}
+        "recommendation": "Replace '?all' with '~all' or '-all'."}
 else:
-    qual = "softfail (~all)" if "~all" in spf_records[0] else "hardfail (-all)" if "-all" in spf_records[0] else "configurado"
+    qual = "softfail (~all)" if "~all" in spf_records[0] else "hardfail (-all)" if "-all" in spf_records[0] else "configured"
     results["spf"] = {"status": "OK", "severity": "none",
-        "detail": f"SPF configurado corretamente ({qual}).",
+        "detail": f"SPF configured correctly ({qual}).",
         "value": spf_records[0]}
 
 # ── DMARC ─────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ dmarc_records = [l for l in dmarc_raw.splitlines() if "v=dmarc1" in l.lower()]
 
 if not dmarc_records:
     results["dmarc"] = {"status": "MISSING", "severity": "high",
-        "detail": "Registro DMARC ausente — sem visibilidade ou controle sobre uso abusivo do domínio.",
+        "detail": "DMARC record missing — no visibility or control over domain abuse.",
         "recommendation": "Adicione: _dmarc."+domain+" TXT \"v=DMARC1; p=quarantine; rua=mailto:dmarc@"+domain+"\""}
 else:
     dmarc = dmarc_records[0]
@@ -56,18 +56,18 @@ else:
     policy = policy_m.group(1).lower() if policy_m else "unknown"
     if policy == "none":
         results["dmarc"] = {"status": "MONITOR_ONLY", "severity": "medium",
-            "detail": "DMARC com p=none apenas monitora — e-mails falsos ainda chegam aos destinatários.",
+            "detail": "DMARC with p=none only monitors — spoofed emails still reach recipients.",
             "value": dmarc,
-            "recommendation": "Evolua para p=quarantine e depois p=reject após validar relatórios."}
+            "recommendation": "Move to p=quarantine and then p=reject after validating reports."}
     elif policy in ("quarantine", "reject"):
         results["dmarc"] = {"status": "OK", "severity": "none",
-            "detail": f"DMARC configurado com p={policy}.",
+            "detail": f"DMARC configured with p={policy}.",
             "value": dmarc}
     else:
         results["dmarc"] = {"status": "INVALID", "severity": "medium",
-            "detail": f"DMARC com política inválida ou não reconhecida: {policy}",
+            "detail": f"DMARC with invalid or unrecognized policy: {policy}",
             "value": dmarc,
-            "recommendation": "Verifique a sintaxe do registro DMARC."}
+            "recommendation": "Check the DMARC record syntax."}
 
 # ── DKIM (heurística: verificar seletores comuns) ─────────────────
 selectors = ["default", "google", "mail", "k1", "s1", "s2", "email", "selector1", "selector2"]
@@ -79,11 +79,11 @@ for sel in selectors:
 
 if dkim_found:
     results["dkim"] = {"status": "OK", "severity": "none",
-        "detail": f"DKIM encontrado para seletores: {', '.join(dkim_found)}"}
+        "detail": f"DKIM found for selectors: {', '.join(dkim_found)}"}
 else:
     results["dkim"] = {"status": "NOT_FOUND", "severity": "low",
-        "detail": "DKIM não detectado nos seletores comuns. Pode estar configurado com seletor personalizado.",
-        "recommendation": "Verifique se o provedor de e-mail configurou DKIM para o domínio."}
+        "detail": "DKIM not detected on common selectors. It may be configured with a custom selector.",
+        "recommendation": "Verify whether the email provider configured DKIM for the domain."}
 
 # ── Salvar e exibir ────────────────────────────────────────────────
 with open(os.path.join(outdir, "raw", "email_security.json"), "w") as f:

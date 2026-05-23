@@ -35,10 +35,10 @@ if not sec_found:
     print("  [!] security.txt ausente (RFC-9116 não implementado)")
     findings.append({
         "id": "SECSCAN-001", "tool": "pysecscan", "type": "secscan",
-        "title": "security.txt ausente (RFC-9116)",
+        "title": "security.txt missing (RFC-9116)",
         "url": f"{target}/.well-known/security.txt",
         "severity": "info",
-        "detail": "O alvo não publica security.txt — dificulta divulgação responsável de vulnerabilidades.",
+        "detail": "The target does not publish security.txt — hinders responsible vulnerability disclosure.",
     })
 
 # ── Internal IP exposure in HTTP responses ────────────────────────
@@ -64,14 +64,14 @@ for path in probe_paths:
 if ip_hits:
     findings.append({
         "id": "SECSCAN-002", "tool": "pysecscan", "type": "secscan",
-        "title": "Exposição de endereços IP internos (RFC-1918)",
+        "title": "Internal IP address exposure (RFC-1918)",
         "url": target,
         "severity": "medium",
-        "detail": f"Respostas HTTP expõem IPs da rede interna: {ip_hits}. "
-                  "Facilita reconhecimento de topologia interna e ataques SSRF.",
+        "detail": f"HTTP responses expose internal network IPs: {ip_hits}. "
+                  "Facilitates internal topology reconnaissance and SSRF attacks.",
     })
 else:
-    print("  [✓] Nenhum IP interno exposto nas respostas HTTP")
+    print("  [✓] No internal IPs exposed in HTTP responses")
 
 out_file = f"{outdir}/raw/secscan_findings.json"
 with open(out_file, "w") as f:

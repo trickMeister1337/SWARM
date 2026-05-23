@@ -74,24 +74,24 @@ for path in LOGIN_PATHS:
         print(f"  [!] {path}: SEM rate limiting — {N_REQUESTS} req em {elapsed:.1f}s, codes={set(codes)}")
         findings.append({
             "id":          f"missing-rate-limit-{path.strip('/').replace('/', '-')}",
-            "name":        f"Login Sem Rate Limiting: {path}",
+            "name":        f"Login Without Rate Limiting: {path}",
             "severity":    "medium",
             "source":      "Rate Limit Check",
             "url":         target + path,
             "cve":         "CWE-307 — Improper Restriction of Excessive Authentication Attempts",
             "cve_ids":     [],
             "description": (
-                f"Endpoint {path} não implementa rate limiting. "
-                f"{N_REQUESTS} requisições POST com credenciais inválidas completadas em {elapsed:.1f}s "
-                f"sem retorno de HTTP 429 ou header Retry-After. "
-                "Permite ataques de força bruta e credential stuffing sem restrição."
+                f"Endpoint {path} does not implement rate limiting. "
+                f"{N_REQUESTS} POST requests with invalid credentials completed in {elapsed:.1f}s "
+                f"without returning HTTP 429 or a Retry-After header. "
+                "Allows brute-force and credential-stuffing attacks without restriction."
             ),
             "remediation": (
-                "Implementar rate limiting no endpoint de login: máximo 5-10 tentativas por IP por minuto. "
-                "Opções: fail2ban, nginx limit_req, Grafana built-in brute_force_login_protection = true "
-                "(grafana.ini [security]), ou WAF com regra de throttling em POST /login."
+                "Implement rate limiting on the login endpoint: max 5-10 attempts per IP per minute. "
+                "Options: fail2ban, nginx limit_req, Grafana built-in brute_force_login_protection = true "
+                "(grafana.ini [security]), or a WAF with a throttling rule on POST /login."
             ),
-            "evidence":    f"POST {path} × {N_REQUESTS} → HTTP {set(codes)} em {elapsed:.1f}s — nenhum bloqueio",
+            "evidence":    f"POST {path} × {N_REQUESTS} → HTTP {set(codes)} in {elapsed:.1f}s — no blocking",
             "param": "", "attack": "", "other": "",
             "severity_orig": "medium",
             "severity_reclassified": False,

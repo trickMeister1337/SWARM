@@ -42,8 +42,8 @@ PROBES = [
         "10.0",
         "high",
         "CVE-2023-3128, CVE-2023-6152, CVE-2023-2183, CVE-2023-1410",
-        "Atualize o Grafana para a versão 10.x ou superior. "
-        "Consulte https://grafana.com/security/security-advisories/ para o changelog de segurança.",
+        "Update Grafana to version 10.x or higher. "
+        "See https://grafana.com/security/security-advisories/ for the security changelog.",
     ),
     (
         "Prometheus",
@@ -52,7 +52,7 @@ PROBES = [
         "2.45",
         "medium",
         "CVE-2022-21698",
-        "Atualize o Prometheus para a versão 2.45+ (LTS atual).",
+        "Update Prometheus to version 2.45+ (current LTS).",
     ),
     (
         "Kibana",
@@ -61,7 +61,7 @@ PROBES = [
         "8.0",
         "high",
         "CVE-2023-31416, CVE-2022-23712",
-        "Atualize o Kibana para a versão 8.x atual.",
+        "Update Kibana to the current 8.x version.",
     ),
     (
         "Jenkins",
@@ -70,7 +70,7 @@ PROBES = [
         "2.440",
         "high",
         "CVE-2024-23897, CVE-2023-27898",
-        "Atualize o Jenkins para a versão LTS mais recente.",
+        "Update Jenkins to the latest LTS version.",
     ),
     (
         "HashiCorp Vault",
@@ -79,7 +79,7 @@ PROBES = [
         "1.15",
         "high",
         "CVE-2023-3774, CVE-2023-0620",
-        "Atualize o Vault para a versão 1.15+ atual.",
+        "Update Vault to the current 1.15+ version.",
     ),
     (
         "Elasticsearch",
@@ -88,7 +88,7 @@ PROBES = [
         "8.0",
         "high",
         "CVE-2023-31418, CVE-2022-23712",
-        "Atualize o Elasticsearch para a versão 8.x atual.",
+        "Update Elasticsearch to the current 8.x version.",
     ),
     (
         "Consul",
@@ -97,7 +97,7 @@ PROBES = [
         "1.17",
         "medium",
         "CVE-2023-3518",
-        "Atualize o Consul para a versão 1.17+ atual.",
+        "Update Consul to the current 1.17+ version.",
     ),
     (
         "Traefik",
@@ -106,7 +106,7 @@ PROBES = [
         "3.0",
         "medium",
         "CVE-2022-46153",
-        "Atualize o Traefik para a versão 3.x atual.",
+        "Update Traefik to the current 3.x version.",
     ),
     # ── Web Application Stacks ──────────────────────────────────────────────────
     (
@@ -118,8 +118,8 @@ PROBES = [
         "6.4",
         "high",
         "CVE-2024-6307, CVE-2023-5561, CVE-2023-2745",
-        "Atualize o WordPress core para 6.4+. Mantenha plugins atualizados: wp plugin list --update=available. "
-        "Desabilite xmlrpc.php se não utilizado. Habilite autenticação de dois fatores para administradores.",
+        "Update WordPress core to 6.4+. Keep plugins updated: wp plugin list --update=available. "
+        "Disable xmlrpc.php if unused. Enable two-factor authentication for administrators.",
     ),
     (
         "Drupal",
@@ -129,8 +129,8 @@ PROBES = [
         "10.0",
         "high",
         "CVE-2023-5256, CVE-2022-25271, SA-CORE-2022-015",
-        "Atualize para Drupal 10.x. Execute: drush updb && drush cr. "
-        "Remova CHANGELOG.txt e INSTALL.txt publicamente acessíveis. Consulte: https://www.drupal.org/security",
+        "Update to Drupal 10.x. Run: drush updb && drush cr. "
+        "Remove publicly accessible CHANGELOG.txt and INSTALL.txt. See: https://www.drupal.org/security",
     ),
     (
         "Joomla",
@@ -139,8 +139,8 @@ PROBES = [
         "4.4",
         "high",
         "CVE-2023-40626, CVE-2023-23752",
-        "Atualize o Joomla para 4.4+. Restrinja /administrator/ por IP/rede. "
-        "Aplique patches em: https://developer.joomla.org/security-centre.html",
+        "Update Joomla to 4.4+. Restrict /administrator/ by IP/network. "
+        "Apply patches from: https://developer.joomla.org/security-centre.html",
     ),
     (
         "Spring Boot Actuator",
@@ -150,9 +150,9 @@ PROBES = [
         "3.2.0",
         "high",
         "CVE-2022-22965, CVE-2023-20883, CVE-2022-22950",
-        "Restrinja /actuator com Spring Security (autenticação obrigatória). "
-        "Nunca exponha /actuator/heapdump, /actuator/env ou /actuator/shutdown publicamente. "
-        "Atualize para Spring Boot 3.2+.",
+        "Restrict /actuator with Spring Security (authentication required). "
+        "Never expose /actuator/heapdump, /actuator/env or /actuator/shutdown publicly. "
+        "Update to Spring Boot 3.2+.",
     ),
     (
         "Django Debug",
@@ -162,8 +162,8 @@ PROBES = [
         "4.2",
         "medium",
         "CVE-2024-27351, CVE-2023-46695, CVE-2022-34265",
-        "Defina DEBUG=False em produção. Remova django-debug-toolbar de ambientes públicos. "
-        "Atualize o Django para 4.2+ (LTS).",
+        "Set DEBUG=False in production. Remove django-debug-toolbar from public environments. "
+        "Update Django to 4.2+ (LTS).",
     ),
     (
         "Laravel Debug",
@@ -174,8 +174,8 @@ PROBES = [
         "10.0",
         "high",
         "CVE-2023-47128, CVE-2021-43996",
-        "Defina APP_DEBUG=false em produção. Proteja /telescope e /horizon com middleware de autenticação. "
-        "Atualize o Laravel para 10.x.",
+        "Set APP_DEBUG=false in production. Protect /telescope and /horizon with authentication middleware. "
+        "Update Laravel to 10.x.",
     ),
     (
         "Apache Struts",
@@ -185,8 +185,8 @@ PROBES = [
         "6.3.0.2",
         "critical",
         "CVE-2024-53677, CVE-2023-50164, CVE-2021-31805, S2-066",
-        "Atualize Apache Struts 2 para 6.3.0.2+ IMEDIATAMENTE — CVE-2023-50164 e S2-066 têm exploits RCE públicos. "
-        "Remova struts2-showcase. Consulte: https://struts.apache.org/security",
+        "Update Apache Struts 2 to 6.3.0.2+ IMMEDIATELY — CVE-2023-50164 and S2-066 have public RCE exploits. "
+        "Remove struts2-showcase. See: https://struts.apache.org/security",
     ),
 ]
 
@@ -222,7 +222,7 @@ for tech, path_specs, version_re, min_ok_version, sev, cves, remediation in PROB
     min_t      = version_tuple(min_ok_version)
     is_outdated = (detected_t < min_t) if detected_t and min_t else False
 
-    status_str = "DESATUALIZADO" if is_outdated else "ok"
+    status_str = "OUTDATED" if is_outdated else "ok"
     print(f"  [version] {tech} {detected_version} → {status_str}")
     # Only emit findings for outdated versions — current versions have no remediation value
     # and may produce false positives from multi-tenant endpoints.
@@ -230,16 +230,16 @@ for tech, path_specs, version_re, min_ok_version, sev, cves, remediation in PROB
         continue
     finding = {
         "id":          f"version-{tech.lower().replace(' ','-').replace('/','-')}",
-        "name":        f"{tech} v{detected_version} — Versão Desatualizada",
+        "name":        f"{tech} v{detected_version} — Outdated Version",
         "severity":    sev,
         "source":      "Version Fingerprint",
         "url":         target,
         "cve":         f"CWE-1104 — {cves}",
         "cve_ids":     [],
         "description": (
-            f"{tech} versão {detected_version} detectada via endpoint não autenticado "
-            f"({hit_path}). Versão desatualizada — mínimo recomendado: {min_ok_version}. "
-            f"CVEs conhecidos nesta linha: {cves}."
+            f"{tech} version {detected_version} detected via unauthenticated endpoint "
+            f"({hit_path}). Outdated version — recommended minimum: {min_ok_version}. "
+            f"Known CVEs for this line: {cves}."
         ),
         "remediation": remediation,
         "evidence":    f"GET {hit_path} → {{\"version\":\"{detected_version}\"}}",

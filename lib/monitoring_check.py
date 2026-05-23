@@ -66,29 +66,29 @@ for path in MONITORING_PATHS:
     sev = "critical" if pci_hits else "high"
 
     desc_parts = [
-        f"Endpoint {path} retorna métricas internas sem autenticação (HTTP 200).",
+        f"Endpoint {path} returns internal metrics without authentication (HTTP 200).",
     ]
     if ds_names:
-        desc_parts.append(f"Datasources expostos ({len(ds_names)}): {', '.join(ds_names[:10])}" +
+        desc_parts.append(f"Exposed datasources ({len(ds_names)}): {', '.join(ds_names[:10])}" +
                           (" ..." if len(ds_names) > 10 else "."))
     if pci_hits:
-        desc_parts.append(f"ATENÇÃO PCI DSS: datasource(s) com nomenclatura de ambiente CDE detectado(s): {', '.join(pci_hits)}.")
+        desc_parts.append(f"PCI DSS WARNING: datasource(s) with CDE environment naming detected: {', '.join(pci_hits)}.")
     if alert_names:
-        desc_parts.append(f"Nomes de alertas expostos: {', '.join(alert_names[:5])}" +
+        desc_parts.append(f"Exposed alert names: {', '.join(alert_names[:5])}" +
                           (" ..." if len(alert_names) > 5 else "."))
     if plugin_ids:
-        desc_parts.append(f"Stack inferida via plugin_id: {', '.join(plugin_ids)}.")
+        desc_parts.append(f"Stack inferred via plugin_id: {', '.join(plugin_ids)}.")
 
     rem = (
-        f"Restringir {path} por IP ou exigir autenticação. "
-        "No Grafana: definir metrics_endpoint_enabled = false em [metrics] no grafana.ini, "
-        "ou proteger via proxy reverso (allow only from monitoring subnet). "
-        "Referência: https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-monitoring/"
+        f"Restrict {path} by IP or require authentication. "
+        "In Grafana: set metrics_endpoint_enabled = false under [metrics] in grafana.ini, "
+        "or protect via reverse proxy (allow only from monitoring subnet). "
+        "Reference: https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-monitoring/"
     )
 
     findings.append({
         "id":          f"exposed-metrics-{path.strip('/').replace('/', '-')}",
-        "name":        f"Endpoint {path} Exposto Sem Autenticação",
+        "name":        f"Endpoint {path} Exposed Without Authentication",
         "severity":    sev,
         "source":      "Version Fingerprint",
         "url":         target + path,
@@ -96,7 +96,7 @@ for path in MONITORING_PATHS:
         "cve_ids":     [],
         "description": " ".join(desc_parts),
         "remediation": rem,
-        "evidence":    f"GET {path} → HTTP 200 ({len(body)} bytes de telemetria interna)",
+        "evidence":    f"GET {path} → HTTP 200 ({len(body)} bytes of internal telemetry)",
         "param": "", "attack": "", "other": "",
         "severity_orig": sev,
         "severity_reclassified": False,
