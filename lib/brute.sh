@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# SWARM RED — Fase Brute Force (hydra)
+# Stiglitz RED — Fase Brute Force (hydra)
 # Testa credenciais fracas em serviços com autenticação.
 # Wordlists progressivas: senhas comuns → expandida.
-# Chamado por: swarm_red.sh run_brute()
+# Chamado por: stiglitz_red.sh run_brute()
 
 set -uo pipefail
 

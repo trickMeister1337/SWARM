@@ -2,7 +2,7 @@
 set -o pipefail
 
 # ==============================================================================
-# SWARM - CONSULTANT EDITION
+# Stiglitz - CONSULTANT EDITION
 # Security Assessment Tool
 # ==============================================================================
 
@@ -32,14 +32,14 @@ unset _tool _found _found_dir
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-# Diretório do script — usado para localizar lib/ e swarm_report.py
+# Diretório do script — usado para localizar lib/ e stiglitz_report.py
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 ZAP_PORT=${ZAP_PORT:-8080}
 ZAP_HOST="127.0.0.1"
 ZAP_STARTED_BY_SCRIPT=0
-# Em modo paralelo (SWARM_BATCH=1), cada worker usa dir ZAP isolado para evitar conflito de lock/config
-if [ "${SWARM_BATCH:-0}" -eq 1 ]; then
+# Em modo paralelo (STIGLITZ_BATCH=1), cada worker usa dir ZAP isolado para evitar conflito de lock/config
+if [ "${STIGLITZ_BATCH:-0}" -eq 1 ]; then
     ZAP_HOME="$HOME/.ZAP_${ZAP_PORT}"
     mkdir -p "$ZAP_HOME"
 else
@@ -195,16 +195,16 @@ fi
 unset _args _i
 
 if [ "$1" = "-f" ] || [ "$1" = "--file" ] || [ "$1" = "--f" ]; then
-    echo -e "${CYAN}[*] Modo multi-target — use swarm_batch.sh para múltiplos alvos:${NC}"
-    echo -e "${YELLOW}    bash swarm_batch.sh targets.txt${NC}"
+    echo -e "${CYAN}[*] Modo multi-target — use stiglitz_batch.sh para múltiplos alvos:${NC}"
+    echo -e "${YELLOW}    bash stiglitz_batch.sh targets.txt${NC}"
     echo ""
-    # Redirecionar automaticamente para swarm_batch.sh se disponível
-    _batch="$(dirname "$0")/swarm_batch.sh"
+    # Redirecionar automaticamente para stiglitz_batch.sh se disponível
+    _batch="$(dirname "$0")/stiglitz_batch.sh"
     if [ -f "$_batch" ]; then
-        echo -e "  ${BLUE}[…] Redirecionando para swarm_batch.sh...${NC}"
+        echo -e "  ${BLUE}[…] Redirecionando para stiglitz_batch.sh...${NC}"
         exec bash "$_batch" "${@:2}"
     else
-        echo -e "  ${RED}[✗] swarm_batch.sh não encontrado em: $_batch${NC}"
+        echo -e "  ${RED}[✗] stiglitz_batch.sh não encontrado em: $_batch${NC}"
         exit 1
     fi
 fi
@@ -212,12 +212,12 @@ fi
 # ── Sem argumento: mostrar uso ──────────────────────────────────────
 if [ -z "$TARGET" ]; then
     echo -e "${RED}Uso:${NC}"
-    echo -e "  ${YELLOW}bash swarm.sh https://target.com${NC}                  — scan único"
-    echo -e "  ${YELLOW}bash swarm.sh -f targets.txt${NC}                      — múltiplos alvos (via swarm_batch.sh)"
-    echo -e "  ${YELLOW}bash swarm.sh target.com --osint-dir osint_*/${NC}     — reaproveita descoberta do osint.sh"
-    echo -e "  ${YELLOW}bash swarm.sh target.com --token <jwt>${NC}            — scan autenticado"
+    echo -e "  ${YELLOW}bash stiglitz.sh https://target.com${NC}                  — scan único"
+    echo -e "  ${YELLOW}bash stiglitz.sh -f targets.txt${NC}                      — múltiplos alvos (via stiglitz_batch.sh)"
+    echo -e "  ${YELLOW}bash stiglitz.sh target.com --osint-dir osint_*/${NC}     — reaproveita descoberta do osint.sh"
+    echo -e "  ${YELLOW}bash stiglitz.sh target.com --token <jwt>${NC}            — scan autenticado"
     echo ""
-    echo -e "  ${YELLOW}Exemplo: bash swarm.sh https://app.exemplo.com${NC}"
+    echo -e "  ${YELLOW}Exemplo: bash stiglitz.sh https://app.exemplo.com${NC}"
     exit 1
 fi
 
@@ -277,8 +277,8 @@ unset _lock_pid
 # Remover lock ao sair (adicionado ao cleanup)
 
 # ── Checkpoint: salvar/verificar estado de cada fase ─────────────
-SWARM_STATE="$OUTDIR/raw/.swarm_state"
-touch "$SWARM_STATE" 2>/dev/null
+STIGLITZ_STATE="$OUTDIR/raw/.stiglitz_state"
+touch "$STIGLITZ_STATE" 2>/dev/null
 
 # ── Timing por fase ─────────────────────────────────────────────
 PHASE_TIMES_FILE="$OUTDIR/raw/.phase_times"
@@ -295,8 +295,8 @@ phase_end() {
     echo "$1:end:$_e:dur:$_dur" >> "$PHASE_TIMES_FILE"
     printf "  ${BLUE}[⏱] Duração da fase: %dm%02ds${NC}\n" $(( _dur/60 )) $(( _dur%60 ))
 }
-if [ -s "$SWARM_STATE" ]; then
-    _done_phases=$(grep "=done:" "$SWARM_STATE" | cut -d= -f1 | tr "\n" " ")
+if [ -s "$STIGLITZ_STATE" ]; then
+    _done_phases=$(grep "=done:" "$STIGLITZ_STATE" | cut -d= -f1 | tr "\n" " ")
     echo -e "  ${YELLOW}[!] Retomando scan — fases já concluídas: ${_done_phases}${NC}"
     echo -e "  ${YELLOW}    Para reiniciar do zero: rm -rf $OUTDIR${NC}"
     unset _done_phases
@@ -304,12 +304,12 @@ fi
 
 phase_done() {
     # Marca fase como concluída: phase_done "FASE_1"
-    echo "$1=done:$(date +%s)" >> "$SWARM_STATE"
+    echo "$1=done:$(date +%s)" >> "$STIGLITZ_STATE"
 }
 
 phase_skip() {
     # Retorna 0 (skip) se fase já concluída, 1 (run) se não
-    grep -q "^$1=done:" "$SWARM_STATE" 2>/dev/null
+    grep -q "^$1=done:" "$STIGLITZ_STATE" 2>/dev/null
 }
 
 # ── Banner ASCII ──────────────────────────────────────────────────────────────
@@ -364,12 +364,12 @@ if [ -z "$HTTP_CODE" ] || ! echo "$HTTP_CODE" | grep -qE "^[2345][0-9][0-9]$"; t
     if [ -n "$_dns" ]; then
         echo -e "  ${BLUE}[…]${NC} DNS resolve → ${_dns} ${GREEN}(OK)${NC}"
         echo -e "  ${YELLOW}    O servidor existe mas não responde HTTP — pode estar em porta não-padrão${NC}"
-        echo -e "  ${YELLOW}    Tente especificar a porta: bash swarm.sh https://$DOMAIN:8080${NC}"
+        echo -e "  ${YELLOW}    Tente especificar a porta: bash stiglitz.sh https://$DOMAIN:8080${NC}"
     else
         echo -e "  ${RED}[✗]${NC} DNS não resolve — verifique o domínio"
     fi
     unset _dns
-    [ "${SWARM_BATCH:-0}" = "1" ] && exit 1
+    [ "${STIGLITZ_BATCH:-0}" = "1" ] && exit 1
     exit 1
 fi
 echo -e "\r  ${GREEN}[✓]${NC} Alvo acessível ${GREEN}(HTTP ${HTTP_CODE})${NC}"
@@ -886,7 +886,7 @@ fi
 # ── Validação de output nuclei ────────────────────────────────────
 if [ ! -s "$OUTDIR/raw/nuclei.json" ]; then
     echo -e "  ${YELLOW}[!] AVISO: nuclei.json vazio ou ausente — resultado da Fase 4 pode estar incompleto.${NC}"
-    echo -e "  ${YELLOW}    Verifique conectividade com o alvo e considere re-executar deletando FASE_4 do .swarm_state${NC}"
+    echo -e "  ${YELLOW}    Verifique conectividade com o alvo e considere re-executar deletando FASE_4 do .stiglitz_state${NC}"
 fi
 phase_end "P4"
 phase_done "FASE_4"
@@ -1307,7 +1307,7 @@ except: print(0)" 2>/dev/null)
 # ── Validação de output ZAP ───────────────────────────────────────
 if [ ! -s "$OUTDIR/raw/zap_alerts.json" ]; then
     echo -e "  ${YELLOW}[!] AVISO: zap_alerts.json vazio ou ausente — resultado da Fase 9 pode estar incompleto.${NC}"
-    echo -e "  ${YELLOW}    Verifique se o ZAP spider completou e considere re-executar deletando FASE_9 do .swarm_state${NC}"
+    echo -e "  ${YELLOW}    Verifique se o ZAP spider completou e considere re-executar deletando FASE_9 do .stiglitz_state${NC}"
 fi
 phase_end "P9"
 phase_done "FASE_9"
@@ -1835,48 +1835,48 @@ WAF_DETECTED="${WAF_DETECTED:-false}"; WAF_NAME="${WAF_NAME:-}"
 WPSCAN_VULNS="${WPSCAN_VULNS:-0}"
 export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER WPSCAN_VULNS
 
-# Usar swarm_report.py externo se disponível (manutenção mais fácil)
-_report_py="$(dirname "$0")/swarm_report.py"
+# Usar stiglitz_report.py externo se disponível (manutenção mais fácil)
+_report_py="$(dirname "$0")/stiglitz_report.py"
 if [ ! -f "$_report_py" ]; then
-    _report_py="$(cd "$(dirname "$0")" && pwd)/swarm_report.py"
+    _report_py="$(cd "$(dirname "$0")" && pwd)/stiglitz_report.py"
 fi
 
 if [ -f "$_report_py" ]; then
-    echo -e "  ${BLUE}[…] Gerando relatório (swarm_report.py)${NC}"
+    echo -e "  ${BLUE}[…] Gerando relatório (stiglitz_report.py)${NC}"
     if ! python3 "$_report_py"; then
-        echo -e "  ${RED}[✗] swarm_report.py falhou — relatório HTML não gerado${NC}"
+        echo -e "  ${RED}[✗] stiglitz_report.py falhou — relatório HTML não gerado${NC}"
     fi
 else
-    echo -e "  ${RED}[✗] swarm_report.py não encontrado — relatório HTML não gerado${NC}"
-    echo -e "  ${YELLOW}    Esperado em: $(dirname "$0")/swarm_report.py${NC}"
+    echo -e "  ${RED}[✗] stiglitz_report.py não encontrado — relatório HTML não gerado${NC}"
+    echo -e "  ${YELLOW}    Esperado em: $(dirname "$0")/stiglitz_report.py${NC}"
 fi
 # ====================== RESUMO FINAL ======================
 echo -e "\n${GREEN}════════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  PROCESSO CONCLUÍDO — $(date '+%d/%m/%Y %H:%M:%S')${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
 echo -e "${CYAN}📁 Resultados  : ${OUTDIR}/${NC}"
-echo -e "${CYAN}📄 Relatório   : ${OUTDIR}/relatorio_swarm.html${NC}"
-echo -e "${CYAN}📊 Exec Summary: ${OUTDIR}/sumario_executivo.html${NC}"
+echo -e "${CYAN}📄 Relatório   : ${OUTDIR}/stiglitz_report.html${NC}"
+echo -e "${CYAN}📊 Exec Summary: ${OUTDIR}/executive_summary.html${NC}"
 echo -e "${CYAN}📦 JSON Export : ${OUTDIR}/findings.json${NC}"
 echo -e "${CYAN}📦 Dados brutos: ${OUTDIR}/raw/${NC}"
 echo ""
 
 # Abrir relatório apenas em modo single-target (batch abre o consolidado no final)
-[ "${SWARM_BATCH:-0}" = "0" ] && \
+[ "${STIGLITZ_BATCH:-0}" = "0" ] && \
     [ -n "$DISPLAY" ] && command -v xdg-open &>/dev/null && \
-    xdg-open "$OUTDIR/relatorio_swarm.html" 2>/dev/null
+    xdg-open "$OUTDIR/stiglitz_report.html" 2>/dev/null
 
 # ── Notificação ao finalizar ──────────────────────────────────────────────────
-# Telegram:      export SWARM_TELEGRAM_TOKEN=<token> SWARM_TELEGRAM_CHAT=<chat_id>
-# Slack/generic: export SWARM_NOTIFY_WEBHOOK=https://hooks.slack.com/...
-# Teams:         export SWARM_TEAMS_WEBHOOK=https://outlook.office.com/webhook/...
+# Telegram:      export STIGLITZ_TELEGRAM_TOKEN=<token> STIGLITZ_TELEGRAM_CHAT=<chat_id>
+# Slack/generic: export STIGLITZ_NOTIFY_WEBHOOK=https://hooks.slack.com/...
+# Teams:         export STIGLITZ_TEAMS_WEBHOOK=https://outlook.office.com/webhook/...
 #                (ou URL do Power Automate Workflow)
 _swarm_notify() {
     local msg="$1"
-    local token="${SWARM_TELEGRAM_TOKEN:-}"
-    local chat="${SWARM_TELEGRAM_CHAT:-}"
-    local webhook="${SWARM_NOTIFY_WEBHOOK:-}"
-    local teams="${SWARM_TEAMS_WEBHOOK:-}"
+    local token="${STIGLITZ_TELEGRAM_TOKEN:-}"
+    local chat="${STIGLITZ_TELEGRAM_CHAT:-}"
+    local webhook="${STIGLITZ_NOTIFY_WEBHOOK:-}"
+    local teams="${STIGLITZ_TEAMS_WEBHOOK:-}"
 
     if [ -n "$token" ] && [ -n "$chat" ]; then
         curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
@@ -1888,7 +1888,7 @@ _swarm_notify() {
         local escaped
         escaped=$(echo "$msg" | sed 's/"/\\"/g' | sed 's/$/\\n/' | tr -d '\n')
         curl -s -X POST "$teams" -H "Content-Type: application/json" \
-            -d "{\"@type\":\"MessageCard\",\"@context\":\"https://schema.org/extensions\",\"themeColor\":\"0078D4\",\"summary\":\"SWARM scan concluído\",\"sections\":[{\"activityTitle\":\"🔍 SWARM\",\"activityText\":\"${escaped}\"}]}" \
+            -d "{\"@type\":\"MessageCard\",\"@context\":\"https://schema.org/extensions\",\"themeColor\":\"0078D4\",\"summary\":\"Stiglitz scan concluído\",\"sections\":[{\"activityTitle\":\"🔍 Stiglitz\",\"activityText\":\"${escaped}\"}]}" \
             --max-time 10 >/dev/null 2>&1 || true
     fi
 
@@ -1900,9 +1900,9 @@ _swarm_notify() {
 }
 
 _n_findings=$(grep -c '"severity":\s*"\(critical\|high\)"' "${OUTDIR}/findings.json" 2>/dev/null || echo 0)
-_swarm_notify "[SWARM] Scan concluído
+_swarm_notify "[Stiglitz] Scan concluído
 Alvo: ${TARGET:-${DOMAIN}}
 Findings críticos/altos: ${_n_findings}
-Relatório: ${OUTDIR}/relatorio_swarm.html"
+Relatório: ${OUTDIR}/stiglitz_report.html"
 
 exit 0

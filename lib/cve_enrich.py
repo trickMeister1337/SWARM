@@ -2,8 +2,8 @@
 """
 cve_enrich.py — Enriquecimento NVD/EPSS/KEV dos CVEs encontrados
 
-Extraído de swarm.sh (heredoc PYCVE). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYCVE). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import json, sys, os, urllib.request, urllib.parse, time, csv, io
 
@@ -38,7 +38,7 @@ if os.path.exists(_kev_cache):
 if not _kev_cached:
     try:
         kev_url = "https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv"
-        req_kev = urllib.request.Request(kev_url, headers={"User-Agent": "SWARM/1.0"})
+        req_kev = urllib.request.Request(kev_url, headers={"User-Agent": "Stiglitz/1.0"})
         with urllib.request.urlopen(req_kev, timeout=15) as r:
             raw = r.read().decode("utf-8")
         reader = csv.DictReader(io.StringIO(raw))
@@ -98,7 +98,7 @@ for cve_id in sorted(cves):
         url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={urllib.parse.quote(cve_id)}"
         for attempt in range(max_retries):
             try:
-                req = urllib.request.Request(url, headers={"User-Agent": "SWARM/1.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "Stiglitz/1.0"})
                 with urllib.request.urlopen(req, timeout=12) as r:
                     if r.status == 200:
                         return json.loads(r.read())
@@ -143,7 +143,7 @@ for cve_id in sorted(cves):
     # EPSS API (FIRST.org)
     try:
         epss_url = f"https://api.first.org/data/v1/epss?cve={urllib.parse.quote(cve_id)}"
-        req2 = urllib.request.Request(epss_url, headers={"User-Agent": "SWARM/1.0"})
+        req2 = urllib.request.Request(epss_url, headers={"User-Agent": "Stiglitz/1.0"})
         with urllib.request.urlopen(req2, timeout=10) as r2:
             epss_data = json.loads(r2.read())
         epss_list = epss_data.get("data", [])

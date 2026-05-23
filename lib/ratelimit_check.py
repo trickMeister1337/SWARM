@@ -2,8 +2,8 @@
 """
 ratelimit_check.py — Teste de rate limiting → ratelimit_findings.json
 
-Extraído de swarm.sh (heredoc PYRATELIMIT). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYRATELIMIT). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, time, urllib.request, urllib.error, ssl
 

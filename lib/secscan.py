@@ -2,8 +2,8 @@
 """
 secscan.py — security.txt (RFC-9116) + exposição de IPs internos → secscan_findings.json
 
-Extraído de swarm.sh (heredoc PYSECSCAN). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYSECSCAN). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, ssl, urllib.request, urllib.error
 
@@ -13,7 +13,7 @@ findings = []
 
 def fetch(url, timeout=10):
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "SWARM-Scanner/2.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Stiglitz-Scanner/2.0"})
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
             return r.status, r.read(65536).decode("utf-8", errors="replace"), dict(r.headers)
     except Exception:

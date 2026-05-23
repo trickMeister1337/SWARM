@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-batch_report.py — Consolidador de relatórios SWARM
+batch_report.py — Consolidador de relatórios Stiglitz
 
 Uso:
   python3 lib/batch_report.py -d scan_batch_*/          # batch dir
@@ -553,14 +553,14 @@ def render_html(targets: list[dict], findings_all: list[dict],
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SWARM — Relatório Consolidado</title>
+<title>Stiglitz — Relatório Consolidado</title>
 <style>{CSS}</style>
 </head>
 <body>
 <div class="wrap">
   <div class="card">
     <div class="header">
-      <h1>SWARM — Relatório Consolidado</h1>
+      <h1>Stiglitz — Relatório Consolidado</h1>
       <div class="sub">
         Severidade mínima exibida: <strong>{sev_filter_label}</strong>
         &nbsp;·&nbsp; Gerado em: {generated_at}
@@ -585,7 +585,7 @@ def render_executive_txt(targets: list[dict], findings_all: list[dict],
 
     lines = [
         "=" * 64,
-        "  SWARM — SUMÁRIO EXECUTIVO",
+        "  Stiglitz — SUMÁRIO EXECUTIVO",
         f"  Gerado: {generated_at}",
         "=" * 64,
         f"  Alvos analisados : {len(targets)}",
@@ -619,7 +619,7 @@ def render_executive_txt(targets: list[dict], findings_all: list[dict],
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Consolida relatórios SWARM em um único HTML filtrado por severidade."
+        description="Consolida relatórios Stiglitz em um único HTML filtrado por severidade."
     )
     parser.add_argument("paths", nargs="*",
                         help="Caminhos para findings.json ou diretórios de scan")
@@ -630,7 +630,7 @@ def main():
                         help="Severidade mínima para exibir (default: high)")
     parser.add_argument("--out", default="relatorio_consolidado_ch.html",
                         help="Arquivo HTML de saída")
-    parser.add_argument("--exec-out", default="sumario_executivo_ch.txt",
+    parser.add_argument("--exec-out", default="executive_summary_ch.txt",
                         help="Arquivo de sumário executivo de saída")
     args = parser.parse_args()
 

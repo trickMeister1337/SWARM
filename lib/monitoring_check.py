@@ -2,8 +2,8 @@
 """
 monitoring_check.py — Checa endpoints de monitoramento expostos → monitoring_findings.json
 
-Extraído de swarm.sh (heredoc PYMONITORING). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYMONITORING). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, urllib.request, urllib.error, ssl
 

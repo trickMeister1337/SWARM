@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SWARM RED — Parsers para resultados do SWARM scan.
+Stiglitz RED — Parsers para resultados do Stiglitz scan.
 
 Módulo independente que pode ser testado isoladamente.
 Uso: python3 parsers.py <command> <args...>
@@ -214,7 +214,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
         except:
             pass
 
-    # Fonte 4b: Katana URLs (crawler do SWARM — URLs reais com parâmetros)
+    # Fonte 4b: Katana URLs (crawler do Stiglitz — URLs reais com parâmetros)
     katana_path = f"{outdir}/input_katana_urls.txt"
     if os.path.exists(katana_path):
         try:
@@ -241,7 +241,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
                         add_url(ep)
                     elif ep.startswith("/"):
                         add_url(f"https://{target}{ep}")
-            # Endpoint probes (já verificados pelo SWARM)
+            # Endpoint probes (já verificados pelo Stiglitz)
             for probe in js_data.get("endpoint_probes", []):
                 if isinstance(probe, dict):
                     add_url(probe.get("url", ""))
@@ -275,7 +275,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
         except:
             pass
 
-    # Fonte 4e: Exploit confirmations do SWARM (URLs já confirmadas vulneráveis)
+    # Fonte 4e: Exploit confirmations do Stiglitz (URLs já confirmadas vulneráveis)
     confirm_path = f"{outdir}/input_exploit_confirmations.json"
     if os.path.exists(confirm_path):
         try:
@@ -296,7 +296,7 @@ def extract_all_urls(outdir: str, target: str) -> Dict[str, int]:
     for rpath in ["/robots.txt", "/sitemap.xml"]:
         try:
             req_url = f"https://{target}{rpath}"
-            req = urllib.request.Request(req_url, headers={"User-Agent": "SWARM-RED/1.0"})
+            req = urllib.request.Request(req_url, headers={"User-Agent": "Stiglitz-RED/1.0"})
             resp = urllib.request.urlopen(req, timeout=10)
             if resp.status == 200:
                 content = resp.read().decode("utf-8", errors="ignore")

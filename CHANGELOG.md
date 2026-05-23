@@ -13,11 +13,11 @@ All notable changes to Stiglitz are documented here. Dates are approximate.
 - **Scheme normalization** — `target.com` without `https://` now assumes HTTPS, fixing an HTTP 000 abort on HTTPS-only targets.
 - **Full English report** — the entire HTML/JSON report and all finding text translated to English.
 
-## v7.4 — swarm.sh modularization
+## v7.4 — stiglitz.sh modularization
 
 The main scanner carried ~2,500 lines of Python embedded in 12 bash heredocs — no syntax check, lint, tests or debugging possible. Extracted into standalone modules, shrinking the scanner from **4,991 → ~1,870 lines**.
 
-- **Report generator → `swarm_report.py`** (1,817 lines). Validated byte-identical HTML/JSON output.
+- **Report generator → `stiglitz_report.py`** (1,817 lines). Validated byte-identical HTML/JSON output.
 - **11 collection heredocs → `lib/*.py`** (scan_metadata, security_headers, version_fingerprint, tech_profile, monitoring_check, secscan, cve_enrich, email_security, zap_config_fix, js_analysis, ratelimit_check). Bodies validated byte-identical to the originals.
 - **`eval` removed** from the Nuclei invocation — flag/input strings became bash arrays, which correctly preserve arguments with spaces (e.g. `-H "User-Agent: ..."`).
 - **Active confirmation linked to cards** — findings with a matching confirmation show a badge in the report.

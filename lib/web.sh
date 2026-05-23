@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SWARM RED — Fase Web Scanner (Nikto)
+# Stiglitz RED — Fase Web Scanner (Nikto)
 # Filtra findings por severidade — descarta informationals e duplicatas.
-# Chamado por: swarm_red.sh run_services()
+# Chamado por: stiglitz_red.sh run_services()
 
 set -uo pipefail
 

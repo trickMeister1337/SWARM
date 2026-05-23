@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-#  SWARM RED v7.0 — Test Suite
+#  Stiglitz RED v7.0 — Test Suite
 # ═══════════════════════════════════════════════════════════════
 set -uo pipefail
 
-SCRIPT="$(cd "$(dirname "$0")" && pwd)/swarm_red.sh"
+SCRIPT="$(cd "$(dirname "$0")" && pwd)/stiglitz_red.sh"
 PASS=0; FAIL=0; TOTAL=0
-TMPDIR_TEST=$(mktemp -d /tmp/swarm_red_test_XXXXXX)
+TMPDIR_TEST=$(mktemp -d /tmp/stiglitz_red_test_XXXXXX)
 
 GRN='\033[0;32m'; RED='\033[0;31m'; YLW='\033[1;33m'; CYN='\033[0;36m'; RST='\033[0m'
 
-cleanup() { rm -rf "$TMPDIR_TEST" swarm_red_*_test_* 2>/dev/null; }
+cleanup() { rm -rf "$TMPDIR_TEST" stiglitz_red_*_test_* 2>/dev/null; }
 trap cleanup EXIT
 
 assert() {
@@ -34,7 +34,7 @@ assert_contains() {
 
 skip() { echo -e "  ${YLW}[SKIP]${RST} $1"; }
 
-# ── Mock SWARM scan dir ───────────────────────────────────────────────────────
+# ── Mock Stiglitz scan dir ───────────────────────────────────────────────────────
 setup_mock_swarm() {
     local dir="$TMPDIR_TEST/scan_testsite.com_20260514_120000"
     mkdir -p "$dir/raw"
@@ -67,14 +67,14 @@ JSON
 # ═══════════════════════════════════════════════════════════════
 echo ""
 echo -e "${CYN}═══════════════════════════════════════════════════════════════${RST}"
-echo -e "${CYN}  SWARM RED v7.0 — Test Suite${RST}"
+echo -e "${CYN}  Stiglitz RED v7.0 — Test Suite${RST}"
 echo -e "${CYN}═══════════════════════════════════════════════════════════════${RST}"
 echo ""
 
 # ─── 1. Syntax check ─────────────────────────────────────────────────────────
 echo -e "${YLW}▸ 1. Syntax${RST}"
 bash -n "$SCRIPT" 2>/dev/null
-assert "swarm_red.sh syntax valid" "$?"
+assert "stiglitz_red.sh syntax valid" "$?"
 
 bash -n "$(dirname "$SCRIPT")/lib/sqli.sh" 2>/dev/null
 assert "lib/sqli.sh syntax valid" "$?"
@@ -103,7 +103,7 @@ assert "setup.sh syntax valid" "$?"
 # ─── 2. Help flag ────────────────────────────────────────────────────────────
 echo -e "${YLW}▸ 2. Help / Usage${RST}"
 out=$(bash "$SCRIPT" --help 2>&1)
-assert_contains "--help shows SWARM RED"         "$out" "SWARM RED"
+assert_contains "--help shows Stiglitz RED"         "$out" "Stiglitz RED"
 assert_contains "--help shows blackbox mode"     "$out" "blackbox|Blackbox"
 assert_contains "--help shows staging profile"   "$out" "staging"
 assert_contains "--help shows --auth-cookie"     "$out" "auth-cookie"
@@ -137,12 +137,12 @@ assert_contains "Blackbox mode shown in banner"      "$out" "BLACKBOX"
 out=$(echo "EU AUTORIZO" | bash "$SCRIPT" -t https://api.company.com:8443/v1 --dry-run 2>&1)
 assert_contains "Blackbox handles port in URL"       "$out" "api.company.com"
 
-# ─── 5. SWARM mode ───────────────────────────────────────────────────────────
-echo -e "${YLW}▸ 5. SWARM integration mode${RST}"
+# ─── 5. Stiglitz mode ───────────────────────────────────────────────────────────
+echo -e "${YLW}▸ 5. Stiglitz integration mode${RST}"
 MOCK_DIR=$(setup_mock_swarm)
 out=$(echo "EU AUTORIZO" | bash "$SCRIPT" -d "$MOCK_DIR" --dry-run 2>&1)
-assert_contains "SWARM derives target from dir"      "$out" "testsite.com"
-assert_contains "SWARM mode shown in banner"         "$out" "SWARM"
+assert_contains "Stiglitz derives target from dir"      "$out" "testsite.com"
+assert_contains "Stiglitz mode shown in banner"         "$out" "Stiglitz"
 
 # ─── 6. Profile validation ───────────────────────────────────────────────────
 echo -e "${YLW}▸ 6. Profiles${RST}"
@@ -183,11 +183,11 @@ assert "data/ subdir exists" "$([ -d "$TMPDIR_TEST/test_outdir/data" ] && echo 0
 assert "sqlmap/ subdir exists" "$([ -d "$TMPDIR_TEST/test_outdir/sqlmap" ] && echo 0 || echo 1)"
 assert "xss/ subdir exists" "$([ -d "$TMPDIR_TEST/test_outdir/xss" ] && echo 0 || echo 1)"
 assert "recon/ subdir exists" "$([ -d "$TMPDIR_TEST/test_outdir/recon" ] && echo 0 || echo 1)"
-assert "log file created" "$([ -f "$TMPDIR_TEST/test_outdir/swarm_red.log" ] && echo 0 || echo 1)"
+assert "log file created" "$([ -f "$TMPDIR_TEST/test_outdir/stiglitz_red.log" ] && echo 0 || echo 1)"
 assert "exploits_confirmed.csv created" "$([ -f "$TMPDIR_TEST/test_outdir/exploits_confirmed.csv" ] && echo 0 || echo 1)"
-assert "state file created" "$([ -f "$TMPDIR_TEST/test_outdir/.swarm_red_state" ] && echo 0 || echo 1)"
+assert "state file created" "$([ -f "$TMPDIR_TEST/test_outdir/.stiglitz_red_state" ] && echo 0 || echo 1)"
 
-# ─── 11. CVE extraction (SWARM mode) ─────────────────────────────────────────
+# ─── 11. CVE extraction (Stiglitz mode) ─────────────────────────────────────────
 echo -e "${YLW}▸ 11. CVE extraction${RST}"
 out_dir="$TMPDIR_TEST/test_cve_out"
 echo "EU AUTORIZO" | bash "$SCRIPT" -d "$MOCK_DIR" --dry-run --output-dir "$out_dir" 2>&1 | head -50 > /dev/null

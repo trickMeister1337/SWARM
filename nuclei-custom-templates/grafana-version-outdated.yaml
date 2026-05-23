@@ -2,7 +2,7 @@ id: grafana-version-outdated
 
 info:
   name: Grafana Outdated Version (< 10.x)
-  author: SWARM
+  author: Stiglitz
   severity: high
   description: |
     Grafana version detected via /api/health (unauthenticated endpoint).

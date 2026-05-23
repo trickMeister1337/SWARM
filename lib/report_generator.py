@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-SWARM RED v7.0 — Gerador de Relatório Red Team (Big4 Style).
+Stiglitz RED v7.0 — Gerador de Relatório Red Team (Big4 Style).
 
 Uso: python3 report_generator.py <outdir> <target> <profile> <total> <success> <failed> <version> [--swarm-dir <scan_dir>]
 
-Lê dados consolidados de evidence.py e gera relatorio_swarm_red.html.
---swarm-dir: integra findings.json do SWARM scan de origem no relatório.
+Lê dados consolidados de evidence.py e gera stiglitz_red_report.html.
+--swarm-dir: integra findings.json do Stiglitz scan de origem no relatório.
 """
 import sys
 import os
@@ -21,7 +21,7 @@ esc = lambda s: H.escape(str(s)) if s else ""
 
 
 def _load_swarm_findings(swarm_dir: str) -> list:
-    """Load and convert findings.json from a SWARM scan directory."""
+    """Load and convert findings.json from a Stiglitz scan directory."""
     fpath = os.path.join(swarm_dir, "findings.json")
     if not os.path.exists(fpath):
         return []
@@ -56,13 +56,13 @@ def _load_swarm_findings(swarm_dir: str) -> list:
         converted.append({
             "sev":    sev,
             "tool":   "swarm",
-            "title":  item.get("name", item.get("id", "Finding SWARM")),
+            "title":  item.get("name", item.get("id", "Finding Stiglitz")),
             "target": item.get("url", ""),
             "type":   "swarm",
             "detail": "\n".join(detail_parts),
             "count":  1,
             "endpoints": [item.get("url", "")] if item.get("url") else [],
-            "source": item.get("source", "SWARM"),
+            "source": item.get("source", "Stiglitz"),
         })
     return converted
 
@@ -92,7 +92,7 @@ def generate_report(
     ssd           = data["searchsploit"]
     subdomains    = data["subdomains"]
 
-    # Merge SWARM findings when scan directory is provided
+    # Merge Stiglitz findings when scan directory is provided
     swarm_findings = []
     if swarm_dir and os.path.isdir(swarm_dir):
         swarm_findings = _load_swarm_findings(swarm_dir)
@@ -117,7 +117,7 @@ def generate_report(
     total_endpoints = sum(f.get("count", 1) for f in findings)
 
     # Detect mode from existence of recon dir
-    mode = "BLACKBOX" if os.path.isdir(f"{outdir}/recon") and subdomains else "SWARM"
+    mode = "BLACKBOX" if os.path.isdir(f"{outdir}/recon") and subdomains else "Stiglitz"
 
     html = _build_html(
         target=target, profile=profile, version=version, now=now, mode=mode,
@@ -131,7 +131,7 @@ def generate_report(
         zap_hc=zap_hc, ssd=ssd, outdir=outdir, pocs=pocs, subdomains=subdomains,
     )
 
-    report_path = f"{outdir}/relatorio_swarm_red.html"
+    report_path = f"{outdir}/stiglitz_red_report.html"
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
     return report_path
@@ -182,10 +182,10 @@ code{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:.85em}
 """
     h = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SWARM RED — {esc(k['target'])}</title><style>{CSS}</style></head>
+<title>Stiglitz RED — {esc(k['target'])}</title><style>{CSS}</style></head>
 <body><div class="ctn">
 <div class="hdr">
-<h1>SWARM RED — Red Team Engagement Report
+<h1>Stiglitz RED — Red Team Engagement Report
 <span class="mode-badge">{k['mode']}</span></h1>
 <div class="sub">{esc(k['target'])}</div>
 <div class="meta">Data: {k['now']} | Perfil: {k['profile'].upper()} ({k['pl'].get(k['profile'],k['profile'])}) | v{k['version']}</div>
@@ -208,7 +208,7 @@ code{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:.85em}
     h += _section_poc(**k)
     h += _section_appendix(**k)
 
-    h += f'</div><div class="ft">SWARM RED v{k["version"]} — Red Team Report | {k["now"]} | <strong>CONFIDENCIAL</strong></div></div></body></html>'
+    h += f'</div><div class="ft">Stiglitz RED v{k["version"]} — Red Team Report | {k["now"]} | <strong>CONFIDENCIAL</strong></div></div></body></html>'
     return h
 
 
@@ -224,7 +224,7 @@ def _section_exec_summary(**k) -> str:
 <div class="ib"><p><strong>Risco:</strong> {k['rs']}/100 — <span style="color:{k['rc_']};font-weight:bold">{k['rl_']}</span></p>
 <div class="rb"><div class="ri" style="background:{k['rc_']};width:{k['rs']}%"></div></div></div>
 <div class="ib n">
-<p>O SWARM RED executou um engagement de Red Team contra <strong>{esc(k['target'])}</strong>
+<p>O Stiglitz RED executou um engagement de Red Team contra <strong>{esc(k['target'])}</strong>
 (modo: {k['mode']}, perfil: {k['pl'].get(k['profile'], k['profile'])}), realizando {k['total']} teste(s).</p>"""
     if k['success'] > 0:
         h += f'\n<p><strong style="color:#7a2e2e">Confirmados {k["success"]} exploit(s)</strong> afetando {k["total_endpoints"]} endpoint(s).</p>'
@@ -241,8 +241,8 @@ def _section_exec_summary(**k) -> str:
 
 
 def _section_scope(**k) -> str:
-    mode = k.get("mode", "SWARM")
-    approach = "Black-box — sem conhecimento prévio do alvo" if mode == "BLACKBOX" else "Grey-box — dados do SWARM scan"
+    mode = k.get("mode", "Stiglitz")
+    approach = "Black-box — sem conhecimento prévio do alvo" if mode == "BLACKBOX" else "Grey-box — dados do Stiglitz scan"
     h = f'''<h2 id="s2">2. Escopo e Metodologia</h2>
 <div class="ib"><p><strong>Alvo:</strong> <code>{esc(k['target'])}</code> | <strong>Abordagem:</strong> {approach} | <strong>Metodologia:</strong> PTES + OWASP Testing Guide + MITRE ATT&CK</p></div>
 <table><tr><th>Ferramenta</th><th>Tática MITRE</th><th>Propósito</th></tr>
@@ -299,7 +299,7 @@ def _section_surface(**k) -> str:
 
 
 def _section_narrative(**k) -> str:
-    mode = k.get("mode", "SWARM")
+    mode = k.get("mode", "Stiglitz")
     h = '<h2 id="s4">4. Narrativa de Ataque</h2><div class="tl">\n'
 
     if mode == "BLACKBOX":
@@ -307,7 +307,7 @@ def _section_narrative(**k) -> str:
         h += f'<div class="ti {"ok" if n_subs>1 else "no"}"><strong>Fase 1 — Reconhecimento</strong><br>'
         h += f'{n_subs} subdomínio(s) descoberto(s).</div>\n'
     else:
-        h += f'<div class="ti ok"><strong>Fase 1 — Ingestão SWARM</strong><br>{len(k["services"])} serviço(s), {len(k["cves"])} CVE(s).</div>\n'
+        h += f'<div class="ti ok"><strong>Fase 1 — Ingestão Stiglitz</strong><br>{len(k["services"])} serviço(s), {len(k["cves"])} CVE(s).</div>\n'
 
     h += f'<div class="ti {"ok" if k["sqli_vc"]>0 else "no"}"><strong>Fase SQLi (sqlmap)</strong><br>'
     if k["sqli_vc"] > 0: h += f'{k["sqli_vc"]} endpoint(s) vulnerável(is).'
@@ -361,7 +361,7 @@ def _render_finding_card(i: int, f: dict, prefix: str = "RED") -> str:
         "xss":        "Roubo de sessão, defacement, phishing, exfiltração de dados via JS.",
         "bruteforce": "Acesso não autorizado. Possível movimentação lateral.",
         "exploit":    "Execução remota de código ou acesso privilegiado.",
-        "swarm":      "Identificado pelo scan automatizado SWARM — requer análise e remediação.",
+        "swarm":      "Identificado pelo scan automatizado Stiglitz — requer análise e remediação.",
     }
 
     source_label = esc(f.get("source", tl) if tl == "swarm" else tl)
@@ -387,7 +387,7 @@ def _render_finding_card(i: int, f: dict, prefix: str = "RED") -> str:
 def _section_findings(**k) -> str:
     all_findings    = k["findings"]
     swarm_findings  = k.get("swarm_findings", [])
-    # RED findings are those that are NOT from the merged SWARM list
+    # RED findings are those that are NOT from the merged Stiglitz list
     red_findings    = [f for f in all_findings if f not in swarm_findings]
 
     h = '<h2 id="s5">5. Achados e Vulnerabilidades</h2>\n'
@@ -405,10 +405,10 @@ def _section_findings(**k) -> str:
     else:
         h += '<div class="ib g"><p>Nenhum exploit confirmado pelo Red Team nesta fase.</p></div>\n'
 
-    # ── SWARM findings ──
+    # ── Stiglitz findings ──
     if swarm_findings:
-        h += f'<h3>Contexto SWARM — Scan de Origem ({len(swarm_findings)})</h3>\n'
-        h += '<div class="ib n"><p>Vulnerabilidades identificadas pelo scan SWARM que precede este engagement. '
+        h += f'<h3>Contexto Stiglitz — Scan de Origem ({len(swarm_findings)})</h3>\n'
+        h += '<div class="ib n"><p>Vulnerabilidades identificadas pelo scan Stiglitz que precede este engagement. '
         h += 'Incluídas para contexto e priorização de remediação.</p></div>\n'
         for i, f in enumerate(swarm_findings, 1):
             h += _render_finding_card(i, f, prefix="SWM")
@@ -532,11 +532,11 @@ def _section_appendix(**k) -> str:
         ("data/open_services.txt", "Serviços abertos"),
         ("recon/subdomains.txt", "Subdomínios (recon)"),
         ("crawl/katana_urls.txt", "URLs (katana)"),
-        ("swarm_red.log", "Log de atividades"),
+        ("stiglitz_red.log", "Log de atividades"),
         ("sqlmap/", "Resultados sqlmap"),
         ("xss/xss_confirmed.txt", "XSS confirmados"),
         ("poc/verify.sh", "Script de verificação PoC"),
-        ("metasploit/swarm_red.rc", "RC Metasploit"),
+        ("metasploit/stiglitz_red.rc", "RC Metasploit"),
         ("hydra/", "Brute force"),
         ("nikto/nikto_report.json", "Nikto"),
         ("searchsploit/", "SearchSploit"),

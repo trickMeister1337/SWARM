@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SWARM Diff — Comparação entre dois scans
-Uso: python3 swarm_diff.py <scan_anterior/> <scan_novo/>
-     python3 swarm_diff.py <scan_anterior/> <scan_novo/> --html
+Stiglitz Diff — Comparação entre dois scans
+Uso: python3 stiglitz_diff.py <scan_anterior/> <scan_novo/>
+     python3 stiglitz_diff.py <scan_anterior/> <scan_novo/> --html
 
 Identifica vulnerabilidades: novas, corrigidas e persistentes.
 """
@@ -13,8 +13,8 @@ RED   = "\033[0;31m"; GREEN  = "\033[0;32m"; YELLOW = "\033[1;33m"
 CYAN  = "\033[0;36m"; BOLD   = "\033[1m";    NC     = "\033[0m"
 
 def usage():
-    print(f"\n  {BOLD}SWARM Diff — Comparação de Scans{NC}")
-    print(f"  Uso: python3 swarm_diff.py <anterior/> <novo/> [--html]\n")
+    print(f"\n  {BOLD}Stiglitz Diff — Comparação de Scans{NC}")
+    print(f"  Uso: python3 stiglitz_diff.py <anterior/> <novo/> [--html]\n")
     sys.exit(1)
 
 if len(sys.argv) < 3:
@@ -76,7 +76,7 @@ def load_findings(scan_dir):
 
 def load_risk(scan_dir):
     """Try to extract risk score and metadata from the HTML report."""
-    rep = os.path.join(scan_dir, "relatorio_swarm.html")
+    rep = os.path.join(scan_dir, "stiglitz_report.html")
     if not os.path.exists(rep): return None, None
     content = open(rep, encoding="utf-8", errors="replace").read()
     m = re.search(r'Índice de Risco.*?(\d+)', content[:5000])
@@ -86,7 +86,7 @@ def load_risk(scan_dir):
     return score, ts
 
 print(f"\n{CYAN}{BOLD}══════════════════════════════════════════════════════════════{NC}")
-print(f"{CYAN}{BOLD}  SWARM DIFF — Análise Comparativa de Scans{NC}")
+print(f"{CYAN}{BOLD}  Stiglitz DIFF — Análise Comparativa de Scans{NC}")
 print(f"{CYAN}{BOLD}══════════════════════════════════════════════════════════════{NC}\n")
 
 print(f"  {BOLD}Anterior:{NC} {DIR_OLD}")
@@ -180,7 +180,7 @@ if HTML_OUT:
                      f'</div>')
 
     page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
-<title>SWARM Diff — {_html.escape(os.path.basename(DIR_OLD))} vs {_html.escape(os.path.basename(DIR_NEW))}</title>
+<title>Stiglitz Diff — {_html.escape(os.path.basename(DIR_OLD))} vs {_html.escape(os.path.basename(DIR_NEW))}</title>
 <style>
 body{{font-family:'Segoe UI',sans-serif;margin:0;padding:20px;background:#f0f2f5}}
 .container{{max-width:1100px;margin:0 auto;background:white;border-radius:12px;
@@ -200,7 +200,7 @@ tr:nth-child(even) td{{background:#fafafa}}
 .footer{{background:#f5f5f5;padding:16px;text-align:center;font-size:12px;color:#888}}
 </style></head><body><div class="container">
 <div class="header">
-  <h1>SWARM — Análise Comparativa de Scans</h1>
+  <h1>Stiglitz — Análise Comparativa de Scans</h1>
   <p>Anterior: <strong>{_html.escape(os.path.basename(DIR_OLD))}</strong>
      &nbsp;→&nbsp;
      Novo: <strong>{_html.escape(os.path.basename(DIR_NEW))}</strong></p>
@@ -235,10 +235,10 @@ tr:nth-child(even) td{{background:#fafafa}}
 {build_rows(persist, new_f, "#d4833a", "~")}
 </table>
 </div>
-<div class="footer">SWARM — Scanner Automatizado de Segurança · CONFIDENCIAL</div>
+<div class="footer">Stiglitz — Scanner Automatizado de Segurança · CONFIDENCIAL</div>
 </div></body></html>"""
 
-    out_name = f"swarm_diff_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    out_name = f"stiglitz_diff_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
     with open(out_name, "w", encoding="utf-8") as f:
         f.write(page)
     print(f"\n  {GREEN}[✓] Relatório HTML: {out_name}{NC}")

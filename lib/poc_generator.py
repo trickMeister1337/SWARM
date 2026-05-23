@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SWARM RED — Gerador de Prova de Conceito (PoC)
+Stiglitz RED — Gerador de Prova de Conceito (PoC)
 
 Extrai payloads confirmados dos logs sqlmap e alertas ZAP e produz:
   - Lista de PoCs estruturados (usada pelo report_generator para seção HTML)
@@ -314,7 +314,7 @@ def generate_verify_script(outdir: str, pocs: List[Dict], target: str) -> str:
     L: List[str] = [
         "#!/usr/bin/env bash",
         "# ═══════════════════════════════════════════════════════════════════════",
-        f"# SWARM RED — Verificação de PoC  |  Alvo: {target}",
+        f"# Stiglitz RED — Verificação de PoC  |  Alvo: {target}",
         "# Uso: bash poc/verify.sh",
         "#",
         "# Execute antes da remediação (deve FALHAR nos PoCs de vulnerabilidade)",

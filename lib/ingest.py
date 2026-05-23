@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SWARM RED — Ingestão e priorização de findings do SWARM.
+Stiglitz RED — Ingestão e priorização de findings do Stiglitz.
 
-Lê a saída do SWARM (findings.json + raw/) e produz listas priorizadas
+Lê a saída do Stiglitz (findings.json + raw/) e produz listas priorizadas
 para cada fase de exploração. Só promove URLs/CVEs que têm evidência real.
 
 Uso: python3 ingest.py <scan_dir> <outdir>
@@ -73,7 +73,7 @@ def _url_score(url: str) -> int:
 # ── Parsers ────────────────────────────────────────────────────────────────────
 
 def parse_findings(scan_dir: str) -> list:
-    """Lê findings.json do SWARM — fonte primária."""
+    """Lê findings.json do Stiglitz — fonte primária."""
     path = os.path.join(scan_dir, "findings.json")
     data = _load_json(path)
     if isinstance(data, list):
@@ -85,7 +85,7 @@ def parse_findings(scan_dir: str) -> list:
 
 def parse_confirmations(scan_dir: str) -> dict:
     """
-    Lê exploit_confirmations.json do SWARM.
+    Lê exploit_confirmations.json do Stiglitz.
     Retorna dict {url: confidence} para achados confirmados.
     """
     path = os.path.join(scan_dir, "raw", "exploit_confirmations.json")
@@ -102,7 +102,7 @@ def parse_confirmations(scan_dir: str) -> dict:
 
 
 def parse_nuclei(scan_dir: str) -> list:
-    """Lê nuclei.json do SWARM."""
+    """Lê nuclei.json do Stiglitz."""
     for name in ("nuclei.json", "nuclei_results.jsonl", "nuclei_all.json"):
         path = os.path.join(scan_dir, "raw", name)
         if os.path.exists(path):
@@ -111,7 +111,7 @@ def parse_nuclei(scan_dir: str) -> list:
 
 
 def parse_zap(scan_dir: str) -> list:
-    """Lê zap_alerts.json do SWARM."""
+    """Lê zap_alerts.json do Stiglitz."""
     path = os.path.join(scan_dir, "raw", "zap_alerts.json")
     data = _load_json(path)
     if isinstance(data, list):
@@ -123,7 +123,7 @@ def parse_zap(scan_dir: str) -> list:
 
 def parse_nmap(scan_dir: str) -> list:
     """
-    Lê nmap.txt do SWARM e extrai serviços abertos.
+    Lê nmap.txt do Stiglitz e extrai serviços abertos.
     Retorna lista de dicts {port, protocol, service, version, host}.
     """
     services = []
@@ -194,7 +194,7 @@ def build_sqli_targets(scan_dir: str, confirmed: dict) -> list:
     Retorna lista de URLs ordenada por prioridade para SQLi.
 
     Prioridade (score):
-      +20  URL confirmada como SQLi pelo poc_validator do SWARM
+      +20  URL confirmada como SQLi pelo poc_validator do Stiglitz
       +10  URL em achado ZAP de SQLi (High/Critical)
       +5   parâmetro com nome suspeito (id, user, token, etc.)
       +2   tem query string
@@ -208,7 +208,7 @@ def build_sqli_targets(scan_dir: str, confirmed: dict) -> list:
             s = _url_score(url) + extra
             candidates[url] = max(candidates.get(url, 0), s)
 
-    # Confirmações do SWARM (mais alta prioridade)
+    # Confirmações do Stiglitz (mais alta prioridade)
     for url, conf in confirmed.items():
         add(url, extra=20)
 

@@ -2,8 +2,8 @@
 """
 js_analysis.py — Análise de JS (secrets, endpoints, frameworks) → js_*.json
 
-Extraído de swarm.sh (heredoc PYJS). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYJS). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import urllib.request, urllib.parse, re, os, sys, json, ssl, hashlib, time
 from pathlib import Path

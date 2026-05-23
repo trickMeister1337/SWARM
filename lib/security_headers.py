@@ -2,8 +2,8 @@
 """
 security_headers.py — Verifica security headers HTTP → security_headers.json
 
-Extraído de swarm.sh (heredoc PYSECHEADERS). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYSECHEADERS). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import subprocess, json, sys, os
 outdir = sys.argv[1]

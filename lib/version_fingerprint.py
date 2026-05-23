@@ -2,8 +2,8 @@
 """
 version_fingerprint.py — PROBES de versão de tecnologias → version_findings.json
 
-Extraído de swarm.sh (heredoc PYVERSION). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYVERSION). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, json, re, urllib.request, urllib.error, ssl
 

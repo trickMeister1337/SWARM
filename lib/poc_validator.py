@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SWARM — PoC Validator v3
+Stiglitz — PoC Validator v3
 Confirma ativamente vulnerabilidades de TODAS as fontes:
   - Nuclei (com e sem curl-command)
   - OWASP ZAP (extrai request do XML)
@@ -68,7 +68,7 @@ def run_cmd(cmd, timeout=20, retries=2, backoff=5):
 
 def parse_http_response(raw):
     """
-    Extrai status, headers e body de curl -D - -w '...===SWARM_STATUS:NNN==='.
+    Extrai status, headers e body de curl -D - -w '...===Stiglitz_STATUS:NNN==='.
     Robusto: localiza o marker pela ÚLTIMA ocorrência para não confundir com
     conteúdo do body que possa conter a string.
     """
@@ -76,7 +76,7 @@ def parse_http_response(raw):
         return "000", "", ""
 
     # Localizar status pela última ocorrência do marker
-    marker_re = re.compile(r'===SWARM_STATUS:(\d+)===')
+    marker_re = re.compile(r'===Stiglitz_STATUS:(\d+)===')
     matches = list(marker_re.finditer(raw))
     if matches:
         last_match = matches[-1]
@@ -630,7 +630,7 @@ def confirm_nuclei(outdir):
 
                 clean_curl, safe_curl = build_safe_baseline(curl_cmd, url)
                 exec_cmd = (clean_curl
-                            + " -D - -w '\\n===SWARM_STATUS:%{http_code}==='")
+                            + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='")
 
                 print(f"  [Nuclei] {template_id} ({vuln_type}) → {url[:55]}...")
                 raw_out, err = run_cmd(exec_cmd, timeout=20)
@@ -644,7 +644,7 @@ def confirm_nuclei(outdir):
 
                 # Baseline com payload seguro
                 base_exec = (safe_curl
-                             + " -D - -w '\\n===SWARM_STATUS:%{http_code}==='")
+                             + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='")
                 base_out, _ = run_cmd(base_exec, timeout=15, retries=1)
                 _, _, base_body = parse_http_response(base_out or "")
 
@@ -657,7 +657,7 @@ def confirm_nuclei(outdir):
                 for m in ["GET", "POST"]:
                     o, e = run_cmd(
                         f"curl -sk -L -X {m} --max-time 10 '{url}'"
-                        f" -D - -w '\\n===SWARM_STATUS:%{{http_code}}==='",
+                        f" -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}==='",
                         timeout=12, retries=1)
                     if not e and o:
                         ms, mh, mb = parse_http_response(o)
@@ -764,7 +764,7 @@ def confirm_zap(outdir):
             meta      = alert_meta.get(name, {})
 
             curl_cmd  = _zap_request_to_curl(url, req, req_body)
-            exec_cmd  = curl_cmd + " -D - -w '\\n===SWARM_STATUS:%{http_code}==='"
+            exec_cmd  = curl_cmd + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
             safe_curl = re.sub(r'^curl\s+', 'curl -sk -L --max-time 15 ', curl_cmd)
 
             print(f"  [ZAP]    {name[:45]} → {url[:45]}...")
@@ -779,7 +779,7 @@ def confirm_zap(outdir):
             # Baseline GET limpo
             base_out, _ = run_cmd(
                 f"curl -sk -L --max-time 15 '{url}'"
-                f" -D - -w '\\n===SWARM_STATUS:%{{http_code}}==='",
+                f" -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}==='",
                 timeout=15, retries=1)
             _, _, base_body = parse_http_response(base_out or "")
 
@@ -885,7 +885,7 @@ def confirm_tls(outdir, domain):
 
         # Verificar conectividade básica
         raw_out, err = run_cmd(
-            f"curl -sk --max-time 15 -D - -w '\\n===SWARM_STATUS:%{{http_code}}===' '{url}'",
+            f"curl -sk --max-time 15 -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}===' '{url}'",
             timeout=20, retries=1)
         if err == "TIMEOUT":
             confirmations.append(
@@ -953,7 +953,7 @@ def confirm_tls(outdir, domain):
         state = "CONFIRMADO" if confirmed else "NÃO CONFIRMADO"
         print(f"  [{state}] {confidence}% | {poc_note}")
 
-        curl_cmd = f"curl -sk -D - -w '\\n===SWARM_STATUS:%{{http_code}}===' '{url}'"
+        curl_cmd = f"curl -sk -D - -w '\\n===Stiglitz_STATUS:%{{http_code}}===' '{url}'"
         confirmations.append(_entry(
             finding_id, url, "medium", "tls",
             confirmed, confidence, poc_note, status,

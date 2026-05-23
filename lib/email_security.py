@@ -2,8 +2,8 @@
 """
 email_security.py — SPF/DMARC/DKIM → email_security.json
 
-Extraído de swarm.sh (heredoc PYEMAIL). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYEMAIL). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import subprocess, json, sys, re, os
 

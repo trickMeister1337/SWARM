@@ -24,7 +24,7 @@ def fetch_kev():
 
     try:
         url = "https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv"
-        req = urllib.request.Request(url, headers={"User-Agent": "SWARM/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "Stiglitz/1.0"})
         with urllib.request.urlopen(req, timeout=15) as r:
             raw = r.read().decode("utf-8")
         reader = csv.DictReader(io.StringIO(raw))
@@ -48,7 +48,7 @@ def nvd_fetch(cve_id):
     url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={urllib.parse.quote(cve_id)}"
     for attempt in range(3):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "SWARM/1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Stiglitz/1.0"})
             with urllib.request.urlopen(req, timeout=12) as r:
                 if r.status == 200: return json.loads(r.read())
         except Exception:

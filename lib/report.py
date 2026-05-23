@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SWARM RED — Gerador de relatório HTML.
+Stiglitz RED — Gerador de relatório HTML.
 Consolida outputs de todas as fases em um relatório acionável.
 
 Uso: python3 report.py <outdir> <target> <profile> <duration_sec>
@@ -171,7 +171,7 @@ def _section_cves(outdir):
         f'<li><a href="https://nvd.nist.gov/vuln/detail/{esc(c)}" target="_blank">{esc(c)}</a></li>'
         for c in cves
     )
-    return f"<p>{len(cves)} CVE(s) encontrado(s) pelo SWARM:</p><ul>{items}</ul>"
+    return f"<p>{len(cves)} CVE(s) encontrado(s) pelo Stiglitz:</p><ul>{items}</ul>"
 
 
 # ── HTML template ─────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ def generate_report(outdir, target, profile, duration_sec):
     </div>"""
 
     body = f"""
-    <h1>SWARM RED — Relatório de Exploração</h1>
+    <h1>Stiglitz RED — Relatório de Exploração</h1>
     <p class="meta">
         Alvo: <strong>{esc(target)}</strong> &nbsp;|&nbsp;
         Perfil: <strong>{esc(profile)}</strong> &nbsp;|&nbsp;
@@ -245,7 +245,7 @@ def generate_report(outdir, target, profile, duration_sec):
     <h2>Fase 5 — Web Scanner (Nikto)</h2>
     {_section_web(outdir)}
 
-    <h2>CVEs Identificados pelo SWARM</h2>
+    <h2>CVEs Identificados pelo Stiglitz</h2>
     {_section_cves(outdir)}
     """
 
@@ -254,13 +254,13 @@ def generate_report(outdir, target, profile, duration_sec):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SWARM RED — {esc(target)}</title>
+    <title>Stiglitz RED — {esc(target)}</title>
     <style>{CSS}</style>
 </head>
 <body>{body}</body>
 </html>"""
 
-    out_path = os.path.join(outdir, "relatorio_swarm_red.html")
+    out_path = os.path.join(outdir, "stiglitz_red_report.html")
     Path(out_path).write_text(report_html)
     return out_path
 

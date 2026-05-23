@@ -15,13 +15,13 @@ jobs:
 
       - name: Check main scripts
         run: |
-          bash -n swarm.sh
-          bash -n swarm_red.sh
+          bash -n stiglitz.sh
+          bash -n stiglitz_red.sh
           bash -n osint.sh
           bash -n pci_scan.sh
           bash -n setup.sh
-          bash -n swarm_batch.sh
-          bash -n swarm_full.sh
+          bash -n stiglitz_batch.sh
+          bash -n stiglitz_full.sh
 
       - name: Check lib/ shell modules
         run: |
@@ -32,7 +32,7 @@ jobs:
 
       - name: Check Python modules (compile)
         run: |
-          python3 -m py_compile swarm_report.py
+          python3 -m py_compile stiglitz_report.py
           for f in lib/*.py; do
             echo "Compiling $f..."
             python3 -m py_compile "$f"

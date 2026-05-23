@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SWARM RED — Testes unitários dos módulos Python.
+Stiglitz RED — Testes unitários dos módulos Python.
 
 Uso: python3 test_lib.py
 """
@@ -327,7 +327,7 @@ class TestEvidence(unittest.TestCase):
                 f.write("VULNERABLE|https://t.com/api?name=x|sqlmap|level=3,risk=2\n")
                 f.write("VULNERABLE|https://t.com/api?q=y|sqlmap|level=3,risk=2\n")
 
-            for path in ["cves_found.txt", "open_services.txt", "swarm_red.log",
+            for path in ["cves_found.txt", "open_services.txt", "stiglitz_red.log",
                          "zap_high_crit.txt", "urls_with_params.txt"]:
                 open(os.path.join(tmpdir, path), "w").close()
 
@@ -348,7 +348,7 @@ class TestReportGenerator(unittest.TestCase):
             for d in ["sqlmap", "metasploit", "hydra", "nikto", "searchsploit"]:
                 os.makedirs(os.path.join(tmpdir, d), exist_ok=True)
             for path in ["exploits_confirmed.csv", "cves_found.txt", "open_services.txt",
-                         "swarm_red.log", "zap_high_crit.txt"]:
+                         "stiglitz_red.log", "zap_high_crit.txt"]:
                 with open(os.path.join(tmpdir, path), "w") as f:
                     if "csv" in path:
                         f.write("status|target|tool|detail\n")
@@ -358,7 +358,7 @@ class TestReportGenerator(unittest.TestCase):
 
             with open(report_path) as f:
                 html = f.read()
-            self.assertIn("SWARM RED", html)
+            self.assertIn("Stiglitz RED", html)
             self.assertIn("test.com", html)
             self.assertIn("CONFIDENCIAL", html)
             self.assertIn("<style>", html)
@@ -383,7 +383,7 @@ class TestReportGenerator(unittest.TestCase):
                 f.write("[10:00:06] [INFO] Type: boolean-based blind\n")
                 f.write("[10:00:07] [INFO] back-end DBMS: MySQL >= 5.0\n")
 
-            for path in ["cves_found.txt", "open_services.txt", "swarm_red.log", "zap_high_crit.txt"]:
+            for path in ["cves_found.txt", "open_services.txt", "stiglitz_red.log", "zap_high_crit.txt"]:
                 open(os.path.join(tmpdir, path), "w").close()
 
             report_path = generate_report(tmpdir, "t.com", "staging", 1, 1, 0, "1.0.0")

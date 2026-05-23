@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SWARM RED v7.0 — Extração de evidências e consolidação de findings.
+Stiglitz RED v7.0 — Extração de evidências e consolidação de findings.
 
 Lê resultados de sqlmap, dalfox, hydra, metasploit e nikto.
 Consolida findings deduplicados para o relatório HTML.
@@ -245,7 +245,7 @@ def collect_and_consolidate(outdir: str) -> Dict[str, Any]:
 
     cves      = _rl(f"{outdir}/data/cves_found.txt")
     services  = _rl(f"{outdir}/data/open_services.txt")
-    log_content = _rf(f"{outdir}/swarm_red.log", 3000)
+    log_content = _rf(f"{outdir}/stiglitz_red.log", 3000)
 
     zap_hc = []
     for line in _rl(f"{outdir}/data/zap_high_crit.txt"):

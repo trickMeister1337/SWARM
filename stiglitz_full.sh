@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SWARM FULL — Orquestrador completo da suite SWARM
+#  Stiglitz FULL — Orquestrador completo da suite Stiglitz
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 #  Executa o pipeline completo em sequência:
-#    osint.sh → swarm.sh → swarm_red.sh → (pci_scan.sh)
+#    osint.sh → stiglitz.sh → stiglitz_red.sh → (pci_scan.sh)
 #  e gera um índice HTML consolidando todos os relatórios.
 #
 #  Uso:
-#    bash swarm_full.sh -t https://alvo.com
-#    bash swarm_full.sh -t https://alvo.com -p staging --pci
-#    bash swarm_full.sh -t https://alvo.com --skip-osint --skip-red
+#    bash stiglitz_full.sh -t https://alvo.com
+#    bash stiglitz_full.sh -t https://alvo.com -p staging --pci
+#    bash stiglitz_full.sh -t https://alvo.com --skip-osint --skip-red
 # ═══════════════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
@@ -63,10 +63,10 @@ fmt_time() { local s=$1; printf "%dm%02ds" $(( s/60 )) $(( s%60 )); }
 usage() {
     cat << 'EOF'
 
-SWARM FULL v1.0 — Orquestrador completo da suite
+Stiglitz FULL v1.0 — Orquestrador completo da suite
 
 MODO:
-  bash swarm_full.sh -t https://alvo.com [opções]
+  bash stiglitz_full.sh -t https://alvo.com [opções]
 
 OPÇÕES PRINCIPAIS:
   -t, --target URL        URL do alvo (obrigatório)
@@ -77,8 +77,8 @@ OPÇÕES PRINCIPAIS:
 
 CONTROLE DE FASES:
   --skip-osint            Pular fase OSINT
-  --skip-scan             Pular fase SWARM (recon + varredura)
-  --skip-red              Pular fase SWARM RED (exploração)
+  --skip-scan             Pular fase Stiglitz (recon + varredura)
+  --skip-red              Pular fase Stiglitz RED (exploração)
 
 OPÇÕES GERAIS:
   --dry-run               Simular sem executar ferramentas
@@ -86,10 +86,10 @@ OPÇÕES GERAIS:
   -h, --help              Exibir ajuda
 
 EXEMPLOS:
-  bash swarm_full.sh -t https://alvo.com
-  bash swarm_full.sh -t https://alvo.com -p production --skip-red
-  bash swarm_full.sh -t https://alvo.com -p lab --dry-run
-  bash swarm_full.sh -t https://alvo.com --skip-osint --scope-file escopo.txt
+  bash stiglitz_full.sh -t https://alvo.com
+  bash stiglitz_full.sh -t https://alvo.com -p production --skip-red
+  bash stiglitz_full.sh -t https://alvo.com -p lab --dry-run
+  bash stiglitz_full.sh -t https://alvo.com --skip-osint --scope-file escopo.txt
 
 EOF
     exit 0
@@ -115,7 +115,7 @@ parse_args() {
 }
 
 validate() {
-    [ -z "$TARGET" ] && { fail "Informe o alvo com -t <url>"; echo "  bash swarm_full.sh --help"; exit 1; }
+    [ -z "$TARGET" ] && { fail "Informe o alvo com -t <url>"; echo "  bash stiglitz_full.sh --help"; exit 1; }
 
     DOMAIN=$(echo "$TARGET" | sed 's|https\?://||' | cut -d'/' -f1 | cut -d':' -f1)
     [ -z "$DOMAIN" ] && { fail "Não foi possível extrair o domínio de '$TARGET'"; exit 1; }
@@ -139,7 +139,7 @@ banner() {
 /____/  |__/|__/_/  |_/_/ |_/_/  /_/  /_/    \____/\____/  /_____/
 BANNER
     echo -e "${RST}"
-    echo -e "  ${YLW}${BLD}v${VERSION}${RST} — Orquestrador completo da suite SWARM"
+    echo -e "  ${YLW}${BLD}v${VERSION}${RST} — Orquestrador completo da suite Stiglitz"
     echo -e "  ${DIM}Alvo: ${TARGET} | Perfil: ${PROFILE^^}${RST}"
     [ "$DRY_RUN" = true ] && echo -e "  ${YLW}[DRY-RUN MODE — nenhum teste real será executado]${RST}"
     echo ""
@@ -148,7 +148,7 @@ BANNER
 authorization_gate() {
     echo ""
     echo -e "${YLW}╔══════════════════════════════════════════════════════════╗${RST}"
-    echo -e "${YLW}║           GATE DE AUTORIZAÇÃO — SWARM FULL v${VERSION}        ║${RST}"
+    echo -e "${YLW}║           GATE DE AUTORIZAÇÃO — Stiglitz FULL v${VERSION}        ║${RST}"
     echo -e "${YLW}╚══════════════════════════════════════════════════════════╝${RST}"
     echo ""
     echo -e "  ${BLD}Alvo:${RST}    ${TARGET}"
@@ -158,8 +158,8 @@ authorization_gate() {
 
     local fases="OSINT"
     [ "$SKIP_OSINT" = true ] && fases="(OSINT pulado)"
-    [ "$SKIP_SCAN"  = false ] && fases="$fases → SWARM"  || fases="$fases → (SWARM pulado)"
-    [ "$SKIP_RED"   = false ] && fases="$fases → SWARM RED" || fases="$fases → (RED pulado)"
+    [ "$SKIP_SCAN"  = false ] && fases="$fases → Stiglitz"  || fases="$fases → (Stiglitz pulado)"
+    [ "$SKIP_RED"   = false ] && fases="$fases → Stiglitz RED" || fases="$fases → (RED pulado)"
     echo -e "  ${BLD}Pipeline:${RST} $fases"
     echo ""
     echo -e "  ${RED}${BLD}AVISO:${RST} Este pipeline executa reconhecimento e testes ativos."
@@ -169,7 +169,7 @@ authorization_gate() {
 
     if [ "$DRY_RUN" = true ]; then
         warn "[DRY-RUN] Autorização simulada."
-        export SWARM_AUTHORIZED=1
+        export Stiglitz_AUTHORIZED=1
         return 0
     fi
 
@@ -181,7 +181,7 @@ authorization_gate() {
     fi
 
     # Propagar autorização para os scripts filhos (evita prompts redundantes)
-    export SWARM_AUTHORIZED=1
+    export Stiglitz_AUTHORIZED=1
     log "AUTORIZADO. Pipeline completo. Alvo=${TARGET} Perfil=${PROFILE}"
 }
 
@@ -232,16 +232,16 @@ run_osint() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  FASE 2 — SWARM (recon + varredura)
+#  FASE 2 — Stiglitz (recon + varredura)
 # ═══════════════════════════════════════════════════════════════════════════════
 run_scan() {
     if [ "$SKIP_SCAN" = true ]; then
-        warn "SWARM: pulado (--skip-scan)"
+        warn "Stiglitz: pulado (--skip-scan)"
         return 0
     fi
 
-    phase "FASE 2 — SWARM (recon + varredura)"
-    [ ! -f "$SCRIPT_DIR/swarm.sh" ] && { warn "swarm.sh não encontrado — pulando"; return 0; }
+    phase "FASE 2 — Stiglitz (recon + varredura)"
+    [ ! -f "$SCRIPT_DIR/stiglitz.sh" ] && { warn "stiglitz.sh não encontrado — pulando"; return 0; }
 
     local _before; _before=$(_latest_dir "scan_${DOMAIN}_*")
     local _t0; _t0=$(date +%s)
@@ -253,8 +253,8 @@ run_scan() {
     [ -n "$AUTH_HEADER" ] && scan_args+=("--header" "$AUTH_HEADER")
     [ -n "$SCOPE_FILE" ] && scan_args+=("--scope-file" "$SCOPE_FILE")
 
-    bash "$SCRIPT_DIR/swarm.sh" "${scan_args[@]}" 2>&1 | tee -a "$LOG" || \
-        warn "swarm.sh terminou com erro (não crítico — continuando pipeline)"
+    bash "$SCRIPT_DIR/stiglitz.sh" "${scan_args[@]}" 2>&1 | tee -a "$LOG" || \
+        warn "stiglitz.sh terminou com erro (não crítico — continuando pipeline)"
 
     T_SCAN=$(elapsed $_t0)
     local _after; _after=$(_latest_dir "scan_${DOMAIN}_*")
@@ -281,26 +281,26 @@ except: print(0)
 " 2>/dev/null || echo 0)
         fi
         SCAN_CVES=$(wc -l < "$SCAN_DIR/raw/cves_found.txt" 2>/dev/null || echo 0)
-        info "SWARM: ${SCAN_FINDINGS} findings | ${SCAN_CONFIRMED} confirmados | ${SCAN_CVES} CVEs | $(fmt_time $T_SCAN)"
+        info "Stiglitz: ${SCAN_FINDINGS} findings | ${SCAN_CONFIRMED} confirmados | ${SCAN_CVES} CVEs | $(fmt_time $T_SCAN)"
         log "SCAN_DIR=$SCAN_DIR"
     else
-        warn "SWARM: diretório de saída não localizado"
+        warn "Stiglitz: diretório de saída não localizado"
     fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  FASE 3 — SWARM RED (exploração)
+#  FASE 3 — Stiglitz RED (exploração)
 # ═══════════════════════════════════════════════════════════════════════════════
 run_red() {
     if [ "$SKIP_RED" = true ]; then
-        warn "SWARM RED: pulado (--skip-red)"
+        warn "Stiglitz RED: pulado (--skip-red)"
         return 0
     fi
 
-    phase "FASE 3 — SWARM RED (exploração)"
-    [ ! -f "$SCRIPT_DIR/swarm_red.sh" ] && { warn "swarm_red.sh não encontrado — pulando"; return 0; }
+    phase "FASE 3 — Stiglitz RED (exploração)"
+    [ ! -f "$SCRIPT_DIR/stiglitz_red.sh" ] && { warn "stiglitz_red.sh não encontrado — pulando"; return 0; }
 
-    local _before; _before=$(_latest_dir "swarm_red_${DOMAIN//./_}_*")
+    local _before; _before=$(_latest_dir "stiglitz_red_${DOMAIN//./_}_*")
     local _t0; _t0=$(date +%s)
 
     local red_args=("-p" "$PROFILE")
@@ -314,12 +314,12 @@ run_red() {
     [ -n "$AUTH_HEADER" ]   && red_args+=("--auth-header" "$AUTH_HEADER")
     [ -n "$SCOPE_FILE" ]    && red_args+=("--scope-file"  "$SCOPE_FILE")
 
-    bash "$SCRIPT_DIR/swarm_red.sh" "${red_args[@]}" 2>&1 | tee -a "$LOG" || \
-        warn "swarm_red.sh terminou com erro (não crítico)"
+    bash "$SCRIPT_DIR/stiglitz_red.sh" "${red_args[@]}" 2>&1 | tee -a "$LOG" || \
+        warn "stiglitz_red.sh terminou com erro (não crítico)"
 
     T_RED=$(elapsed $_t0)
     local domain_safe="${DOMAIN//./_}"
-    local _after; _after=$(_latest_dir "swarm_red_${domain_safe}_*")
+    local _after; _after=$(_latest_dir "stiglitz_red_${domain_safe}_*")
     [ "$_after" != "$_before" ] && [ -n "$_after" ] && RED_DIR="$_after"
 
     if [ -n "$RED_DIR" ] && [ -f "$RED_DIR/exploits_confirmed.csv" ]; then
@@ -327,10 +327,10 @@ run_red() {
         RED_XSS=$(grep -c "XSS" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
         RED_BRUTE=$(grep -c "BRUTE\|CREDENTIAL" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
         local total=$(( RED_SQLI + RED_XSS + RED_BRUTE ))
-        info "SWARM RED: ${total} finding(s) (SQLi:${RED_SQLI} XSS:${RED_XSS} Brute:${RED_BRUTE}) | $(fmt_time $T_RED)"
+        info "Stiglitz RED: ${total} finding(s) (SQLi:${RED_SQLI} XSS:${RED_XSS} Brute:${RED_BRUTE}) | $(fmt_time $T_RED)"
         log "RED_DIR=$RED_DIR"
     else
-        warn "SWARM RED: diretório de saída não localizado ou sem findings"
+        warn "Stiglitz RED: diretório de saída não localizado ou sem findings"
     fi
 }
 
@@ -377,8 +377,8 @@ def rpath(d, filename):
     return ""
 
 osint_report = rpath(osint_dir, "osint_report.html")
-scan_report  = rpath(scan_dir,  "relatorio_swarm.html")
-red_report   = rpath(red_dir,   "relatorio_swarm_red.html")
+scan_report  = rpath(scan_dir,  "stiglitz_report.html")
+red_report   = rpath(red_dir,   "stiglitz_red_report.html")
 
 def link(path, label):
     if path:
@@ -395,9 +395,9 @@ def status_badge(ran, issues=None):
 rows = [
     ("🔍 OSINT", osint_dir, status_badge(bool(osint_dir), osint_sub),
      f"{osint_sub} subdomínios · {osint_leaks} vazamentos", link(osint_report, "Relatório OSINT")),
-    ("📡 SWARM", scan_dir, status_badge(bool(scan_dir), scan_find),
-     f"{scan_find} findings · {scan_conf} confirmados · {scan_cves} CVEs", link(scan_report, "Relatório SWARM")),
-    ("⚔ SWARM RED", red_dir, status_badge(bool(red_dir), red_total),
+    ("📡 Stiglitz", scan_dir, status_badge(bool(scan_dir), scan_find),
+     f"{scan_find} findings · {scan_conf} confirmados · {scan_cves} CVEs", link(scan_report, "Relatório Stiglitz")),
+    ("⚔ Stiglitz RED", red_dir, status_badge(bool(red_dir), red_total),
      f"SQLi:{red_sqli} · XSS:{red_xss} · Brute:{red_brute}", link(red_report, "Relatório RED")),
 ]
 
@@ -415,7 +415,7 @@ for name, d, badge, summary, lnk in rows:
 
 index_html = f"""<!DOCTYPE html>
 <html lang="pt-br"><head><meta charset="UTF-8">
-<title>SWARM FULL — {html.escape(domain)}</title>
+<title>Stiglitz FULL — {html.escape(domain)}</title>
 <style>
   *{{box-sizing:border-box}}
   body{{font-family:"Segoe UI",sans-serif;margin:0;background:#f0f2f5;color:#333}}
@@ -440,7 +440,7 @@ index_html = f"""<!DOCTYPE html>
   @media print{{body{{background:white}}.header{{-webkit-print-color-adjust:exact}}}}
 </style></head><body>
 <div class="header">
-  <h1>🎯 SWARM FULL — Relatório Consolidado</h1>
+  <h1>🎯 Stiglitz FULL — Relatório Consolidado</h1>
   <p>{html.escape(target)} &nbsp;·&nbsp; Perfil: {html.escape(profile.upper())} &nbsp;·&nbsp; {ts_str} &nbsp;·&nbsp; Duração total: {total_time} &nbsp;·&nbsp; CONFIDENCIAL</p>
 </div>
 <div class="container">
@@ -462,7 +462,7 @@ index_html = f"""<!DOCTYPE html>
   </div>
 </div>
 <div class="footer">
-  Gerado por SWARM FULL v{html.escape(version)} · {ts_str} · Uso restrito a equipes autorizadas · CONFIDENCIAL
+  Gerado por Stiglitz FULL v{html.escape(version)} · {ts_str} · Uso restrito a equipes autorizadas · CONFIDENCIAL
 </div>
 </body></html>"""
 
@@ -475,10 +475,10 @@ PYEOF
 # ── Notificação final ─────────────────────────────────────────────────────────
 send_notification() {
     local message="$1"
-    local token="${SWARM_TELEGRAM_TOKEN:-}"
-    local chat="${SWARM_TELEGRAM_CHAT:-}"
-    local webhook="${SWARM_NOTIFY_WEBHOOK:-}"
-    local teams="${SWARM_TEAMS_WEBHOOK:-}"
+    local token="${STIGLITZ_TELEGRAM_TOKEN:-}"
+    local chat="${STIGLITZ_TELEGRAM_CHAT:-}"
+    local webhook="${STIGLITZ_NOTIFY_WEBHOOK:-}"
+    local teams="${STIGLITZ_TEAMS_WEBHOOK:-}"
 
     if [ -n "$token" ] && [ -n "$chat" ]; then
         curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
@@ -488,7 +488,7 @@ send_notification() {
     if [ -n "$teams" ]; then
         local escaped; escaped=$(echo "$message" | sed 's/"/\\"/g' | sed 's/$/\\n/' | tr -d '\n')
         curl -s -X POST "$teams" -H "Content-Type: application/json" \
-            -d "{\"@type\":\"MessageCard\",\"@context\":\"https://schema.org/extensions\",\"themeColor\":\"1a3a4f\",\"summary\":\"SWARM FULL concluído\",\"sections\":[{\"activityTitle\":\"🎯 SWARM FULL v${VERSION}\",\"activityText\":\"${escaped}\"}]}" \
+            -d "{\"@type\":\"MessageCard\",\"@context\":\"https://schema.org/extensions\",\"themeColor\":\"1a3a4f\",\"summary\":\"Stiglitz FULL concluído\",\"sections\":[{\"activityTitle\":\"🎯 Stiglitz FULL v${VERSION}\",\"activityText\":\"${escaped}\"}]}" \
             --max-time 10 >/dev/null 2>&1 || true
     fi
     if [ -n "$webhook" ]; then
@@ -505,7 +505,7 @@ print_summary() {
 
     echo ""
     echo -e "${CYN}══════════════════════════════════════════════════════════${RST}"
-    echo -e "${CYN}  SUMÁRIO FINAL — SWARM FULL v${VERSION}${RST}"
+    echo -e "${CYN}  SUMÁRIO FINAL — Stiglitz FULL v${VERSION}${RST}"
     echo -e "${CYN}══════════════════════════════════════════════════════════${RST}"
     echo ""
     printf "  %-18s %s\n" "Alvo:"     "$TARGET"
@@ -514,8 +514,8 @@ print_summary() {
     printf "  %-18s %s\n" "Duração:"  "$(fmt_time $total_elapsed)"
     echo ""
     printf "  %-18s %d subdomínios · %d vazamentos\n" "OSINT:"     "$OSINT_SUBDOMAINS" "$OSINT_LEAKS"
-    printf "  %-18s %d findings · %d confirmados · %d CVEs\n" "SWARM:" "$SCAN_FINDINGS" "$SCAN_CONFIRMED" "$SCAN_CVES"
-    printf "  %-18s SQLi:%d XSS:%d Brute:%d\n" "SWARM RED:"  "$RED_SQLI" "$RED_XSS" "$RED_BRUTE"
+    printf "  %-18s %d findings · %d confirmados · %d CVEs\n" "Stiglitz:" "$SCAN_FINDINGS" "$SCAN_CONFIRMED" "$SCAN_CVES"
+    printf "  %-18s SQLi:%d XSS:%d Brute:%d\n" "Stiglitz RED:"  "$RED_SQLI" "$RED_XSS" "$RED_BRUTE"
     echo ""
 
     if [ "$total_red" -gt 0 ]; then
@@ -527,8 +527,8 @@ print_summary() {
     echo ""
     echo -e "  ${DIM}Índice:${RST}    ${FULL_DIR}/index.html"
     [ -n "$OSINT_DIR" ] && echo -e "  ${DIM}OSINT:${RST}     ${OSINT_DIR}/osint_report.html"
-    [ -n "$SCAN_DIR"  ] && echo -e "  ${DIM}SWARM:${RST}     ${SCAN_DIR}/relatorio_swarm.html"
-    [ -n "$RED_DIR"   ] && echo -e "  ${DIM}SWARM RED:${RST} ${RED_DIR}/relatorio_swarm_red.html"
+    [ -n "$SCAN_DIR"  ] && echo -e "  ${DIM}Stiglitz:${RST}     ${SCAN_DIR}/stiglitz_report.html"
+    [ -n "$RED_DIR"   ] && echo -e "  ${DIM}Stiglitz RED:${RST} ${RED_DIR}/stiglitz_red_report.html"
     echo ""
 }
 
@@ -552,7 +552,7 @@ main() {
     LOG="$FULL_DIR/swarm_full.log"
 
     banner
-    log "SWARM FULL v${VERSION} iniciado — Alvo=${TARGET} Perfil=${PROFILE}"
+    log "Stiglitz FULL v${VERSION} iniciado — Alvo=${TARGET} Perfil=${PROFILE}"
 
     authorization_gate
 
@@ -570,13 +570,13 @@ main() {
     fi
 
     print_summary
-    log "SWARM FULL concluído — $(fmt_time $(elapsed $T_START)) — Output: $FULL_DIR"
+    log "Stiglitz FULL concluído — $(fmt_time $(elapsed $T_START)) — Output: $FULL_DIR"
 
     local total_red=$(( RED_SQLI + RED_XSS + RED_BRUTE ))
-    send_notification "[SWARM FULL v${VERSION}] Pipeline concluído
+    send_notification "[Stiglitz FULL v${VERSION}] Pipeline concluído
 Alvo: ${TARGET}
 OSINT: ${OSINT_SUBDOMAINS} subdomínios · ${OSINT_LEAKS} vazamentos
-SWARM: ${SCAN_FINDINGS} findings · ${SCAN_CVES} CVEs
+Stiglitz: ${SCAN_FINDINGS} findings · ${SCAN_CVES} CVEs
 RED: SQLi:${RED_SQLI} XSS:${RED_XSS} Brute:${RED_BRUTE}
 Duração: $(fmt_time $(elapsed $T_START))
 Índice: ${FULL_DIR}/index.html"

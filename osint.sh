@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SWARM OSINT — Pre-Engagement Intelligence Collector
+#  Stiglitz OSINT — Pre-Engagement Intelligence Collector
 # ═══════════════════════════════════════════════════════════════════════════════
-#  Coleta inteligência passiva antes do engajamento ativo (swarm.sh).
+#  Coleta inteligência passiva antes do engajamento ativo (stiglitz.sh).
 #
-#  Pipeline:  SWARM OSINT (inteligência passiva) → SWARM (recon ativo)
+#  Pipeline:  Stiglitz OSINT (inteligência passiva) → Stiglitz (recon ativo)
 #
 #  USO EXCLUSIVO EM AMBIENTES AUTORIZADOS E CONTROLADOS.
 #  Requer: Rules of Engagement (RoE) assinado + domínio no escopo.
@@ -15,9 +15,9 @@
 #    bash osint.sh <target> --out /path/dir
 #    bash osint.sh <target> --no-roe
 #
-#  Integração com SWARM:
+#  Integração com Stiglitz:
 #    bash osint.sh target.com
-#    bash swarm.sh target.com --osint-dir osint_target.com_<timestamp>/
+#    bash stiglitz.sh target.com --osint-dir osint_target.com_<timestamp>/
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 set -uo pipefail
@@ -145,9 +145,9 @@ usage() {
     echo -e "  GITHUB_TOKEN=xxx"
     echo -e "  HUNTER_API_KEY=xxx"
     echo ""
-    echo -e "${BLD}Integração SWARM:${RST}"
+    echo -e "${BLD}Integração Stiglitz:${RST}"
     echo -e "  bash osint.sh target.com"
-    echo -e "  bash swarm.sh target.com --osint-dir osint_target.com_*/   ${DIM}# próxima versão${RST}"
+    echo -e "  bash stiglitz.sh target.com --osint-dir osint_target.com_*/   ${DIM}# próxima versão${RST}"
     echo ""
     exit 0
 }
@@ -247,7 +247,7 @@ confirm_roe() {
     echo -e "  ${YLW}${BLD}║             ⚠  CONFIRMAÇÃO DE ESCOPO  ⚠                ║${RST}"
     echo -e "  ${YLW}${BLD}╠══════════════════════════════════════════════════════════╣${RST}"
     echo -e "  ${YLW}${BLD}║                                                        ║${RST}"
-    echo -e "  ${YLW}${BLD}║  SWARM OSINT executa coleta PASSIVA/SEMI-ATIVA:        ║${RST}"
+    echo -e "  ${YLW}${BLD}║  Stiglitz OSINT executa coleta PASSIVA/SEMI-ATIVA:        ║${RST}"
     echo -e "  ${YLW}${BLD}║  • Consultas DNS, WHOIS, crt.sh                        ║${RST}"
     echo -e "  ${YLW}${BLD}║  • Enumeração passiva de subdomínios                   ║${RST}"
     echo -e "  ${YLW}${BLD}║  • Harvesting de e-mails e funcionários                ║${RST}"
@@ -291,7 +291,7 @@ setup_output() {
     LOGFILE="$OUTDIR/osint.log"
     touch "$LOGFILE"
 
-    echo "[$(ts)] SWARM OSINT v${VERSION} iniciado" >> "$LOGFILE"
+    echo "[$(ts)] Stiglitz OSINT v${VERSION} iniciado" >> "$LOGFILE"
     echo "[$(ts)] Alvo: $DOMAIN | Base: $BASE_DOMAIN" >> "$LOGFILE"
     echo "[$(ts)] Output: $OUTDIR" >> "$LOGFILE"
 
@@ -711,7 +711,7 @@ phase_leaked_creds() {
         local result
         result=$(curl -s --max-time 10 \
             -H "hibp-api-key: ${HIBP_KEY}" \
-            -H "User-Agent: SWARM-OSINT/${VERSION}" \
+            -H "User-Agent: Stiglitz-OSINT/${VERSION}" \
             "https://haveibeenpwned.com/api/v3/breachedaccount/${email}" \
             2>/dev/null)
 
@@ -927,13 +927,13 @@ phase_cloud_surface() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  FASE 9 — BUILD OUTPUT FILES (integração SWARM)
+#  FASE 9 — BUILD OUTPUT FILES (integração Stiglitz)
 # ═══════════════════════════════════════════════════════════════════════════════
 phase_build_outputs() {
     phase "FASE 9 — BUILD OUTPUT FILES"
     [ "$ABORT" = true ] && return 130
 
-    # targets_enriched.txt — entrada para swarm.sh
+    # targets_enriched.txt — entrada para stiglitz.sh
     step "Gerando targets_enriched.txt"
     {
         # O domínio-alvo sempre entra, mesmo que não haja subdomínios descobertos
@@ -958,7 +958,7 @@ phase_build_outputs() {
     target_count=$(wc -l < "$OUTDIR/targets_enriched.txt" 2>/dev/null || echo 0)
     info "targets_enriched.txt → ${target_count} alvos"
 
-    # endpoints_historical.txt — para ffuf/nuclei no swarm.sh
+    # endpoints_historical.txt — para ffuf/nuclei no stiglitz.sh
     [ -f "$OUTDIR/interesting_endpoints.txt" ] && \
         cp "$OUTDIR/interesting_endpoints.txt" "$OUTDIR/endpoints_historical.txt" 2>/dev/null || true
 
@@ -1118,16 +1118,16 @@ report = f"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SWARM OSINT — {esc(domain)}</title>
+<title>Stiglitz OSINT — {esc(domain)}</title>
 <style>{CSS}</style>
 </head>
 <body>
 <div class="ctn">
 
 <div class="hdr">
-  <h1>SWARM OSINT — Pre-Engagement Intelligence Report</h1>
+  <h1>Stiglitz OSINT — Pre-Engagement Intelligence Report</h1>
   <div class="sub">{esc(domain)}</div>
-  <div class="meta">Data: {now} &nbsp;|&nbsp; SWARM OSINT v{esc(version)}</div>
+  <div class="meta">Data: {now} &nbsp;|&nbsp; Stiglitz OSINT v{esc(version)}</div>
   <div class="cls">CONFIDENCIAL — OSINT — DISTRIBUIÇÃO RESTRITA</div>
 </div>
 
@@ -1164,7 +1164,7 @@ report = f"""<!DOCTYPE html>
 
 <div class="ib"><strong>Alvo:</strong> {esc(domain)} &nbsp;|&nbsp;
 <strong>Gerado em:</strong> {now} &nbsp;|&nbsp;
-<strong>Próximo passo:</strong> <code>bash swarm.sh {esc(domain)} --osint-dir &lt;este_dir&gt;/</code></div>
+<strong>Próximo passo:</strong> <code>bash stiglitz.sh {esc(domain)} --osint-dir &lt;este_dir&gt;/</code></div>
 
 <h2 id="s2">Domain Intelligence</h2>
 {section("s2-dns", "DNS Records", "dns_records.txt", 100)}
@@ -1213,7 +1213,7 @@ report = f"""<!DOCTYPE html>
 {section("s10", "SPF / DMARC / DKIM / MX", "email_security.txt", 50)}
 
 </div><!-- .cnt -->
-<div class="ft">SWARM OSINT v{esc(version)} — USO EXCLUSIVO EM AMBIENTES COM RoE ASSINADO</div>
+<div class="ft">Stiglitz OSINT v{esc(version)} — USO EXCLUSIVO EM AMBIENTES COM RoE ASSINADO</div>
 </div><!-- .ctn -->
 </body>
 </html>"""
@@ -1237,7 +1237,7 @@ PYEOF
 summary() {
     echo ""
     echo -e "${CYN}════════════════════════════════════════════════════════════════${RST}"
-    echo -e "  ${BLD}${CYN}SWARM OSINT — CONCLUÍDO${RST}"
+    echo -e "  ${BLD}${CYN}Stiglitz OSINT — CONCLUÍDO${RST}"
     echo -e "${CYN}════════════════════════════════════════════════════════════════${RST}"
     echo ""
     echo -e "  ${BLD}Alvo:${RST}      $DOMAIN"
@@ -1260,13 +1260,13 @@ summary() {
     fi
     echo ""
     echo -e "  ${CYN}─── Arquivos-chave ────────────────────────────────────────${RST}"
-    echo -e "  ${BLD}targets_enriched.txt${RST}     → entrada para swarm.sh"
-    echo -e "  ${BLD}leaked_creds.csv${RST}         → entrada para swarm_red.sh (hydra)"
+    echo -e "  ${BLD}targets_enriched.txt${RST}     → entrada para stiglitz.sh"
+    echo -e "  ${BLD}leaked_creds.csv${RST}         → entrada para stiglitz_red.sh (hydra)"
     echo -e "  ${BLD}osint_report.html${RST}        → relatório completo"
     echo -e "  ${BLD}osint_summary.json${RST}       → metadados legíveis por máquina"
     echo ""
     echo -e "  ${CYN}─── Próximo passo ─────────────────────────────────────────${RST}"
-    echo -e "  ${DIM}bash swarm.sh ${DOMAIN} --osint-dir ${OUTDIR}/${RST}"
+    echo -e "  ${DIM}bash stiglitz.sh ${DOMAIN} --osint-dir ${OUTDIR}/${RST}"
     echo ""
     echo -e "${CYN}════════════════════════════════════════════════════════════════${RST}"
     echo ""

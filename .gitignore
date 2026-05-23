@@ -1,6 +1,6 @@
-# SWARM outputs (resultados de scan — dados sensíveis)
-swarm_red_*/
-swarm_red_tmp_*/
+# Stiglitz outputs (resultados de scan — dados sensíveis)
+stiglitz_red_*/
+stiglitz_red_tmp_*/
 scan_*/
 osint_*/
 pci_scan_*/

@@ -2,8 +2,8 @@
 """
 scan_metadata.py — Gera scan_metadata.json (comportamento/evasão do scan)
 
-Extraído de swarm.sh (heredoc PYMETADATA). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYMETADATA). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import json, sys, os
 outdir, waf_det, waf_name = sys.argv[1], sys.argv[2], sys.argv[3]

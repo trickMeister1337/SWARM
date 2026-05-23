@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SWARM RED — Fase Recon (subfinder + httpx)
+# Stiglitz RED — Fase Recon (subfinder + httpx)
 # Descobre subdomínios ativos e mapeia superfície inicial.
-# Chamado por: swarm_red.sh run_recon()
+# Chamado por: stiglitz_red.sh run_recon()
 
 set -uo pipefail
 

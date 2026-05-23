@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SWARM RED — Fase Crawl (katana + ffuf)
+# Stiglitz RED — Fase Crawl (katana + ffuf)
 # Mapeia endpoints, formulários e parâmetros da aplicação.
-# Chamado por: swarm_red.sh run_crawl()
+# Chamado por: stiglitz_red.sh run_crawl()
 
 set -uo pipefail
 
@@ -120,7 +120,7 @@ _find_wordlist() {
     done
 
     # Gerar wordlist mínima inline como último recurso
-    local inline_wl="/tmp/swarm_red_wordlist_$$.txt"
+    local inline_wl="/tmp/stiglitz_red_wordlist_$$.txt"
     cat > "$inline_wl" << 'WL'
 api
 admin

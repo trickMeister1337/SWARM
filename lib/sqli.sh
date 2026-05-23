@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SWARM RED — Fase SQLi (sqlmap)
+# Stiglitz RED — Fase SQLi (sqlmap)
 # Detecção real de SQLi — sem falsos positivos.
-# Chamado por: swarm_red.sh run_sqli()
+# Chamado por: stiglitz_red.sh run_sqli()
 
 set -uo pipefail
 

@@ -31,7 +31,7 @@ def generate_report(outdir):
     html = f"""
     <html>
     <head>
-        <title>SWARM Report - {outdir}</title>
+        <title>Stiglitz Report - {outdir}</title>
         <style>
             body {{ font-family: sans-serif; background: #f4f4f9; padding: 20px; }}
             .card {{ background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
@@ -44,7 +44,7 @@ def generate_report(outdir):
         </style>
     </head>
     <body>
-        <h1>SWARM Security Assessment</h1>
+        <h1>Stiglitz Security Assessment</h1>
         <p>Gerado em: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
         <hr>
         <h2>Achados ({len(findings)})</h2>

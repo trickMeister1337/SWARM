@@ -31,9 +31,9 @@ Stiglitz chains the tools a red-teamer already uses — `subfinder`, `httpx`, `n
 │ OSINT    │ →  │ Recon &  │ →  │ Active        │ →  │ Big4-grade   │
 │ (passive)│    │ Scanning │    │ Exploitation  │    │ HTML report  │
 └──────────┘    └──────────┘    └──────────────┘    └──────────────┘
-  osint.sh        swarm.sh         swarm_red.sh        auto-generated
+  osint.sh        stiglitz.sh         stiglitz_red.sh        auto-generated
 
-            swarm_full.sh  ── runs the whole chain in one command
+            stiglitz_full.sh  ── runs the whole chain in one command
             pci_scan.sh    ── standalone PCI DSS 4.0.1 compliance scan
 ```
 
@@ -52,22 +52,22 @@ git clone https://github.com/trickMeister1337/Stiglitz.git
 cd Stiglitz
 bash setup.sh                      # installs system + Go + Python tooling
 
-bash swarm.sh https://target.com   # recon + adaptive scan + report
+bash stiglitz.sh https://target.com   # recon + adaptive scan + report
 ```
 
-Output lands in `scan_<domain>_<timestamp>/` — open `relatorio_swarm.html`.
+Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`.
 
 ## Components
 
 | Tool | Role | When to use |
 |---|---|---|
 | `osint.sh` | Passive pre-engagement intelligence (10 phases) | Before any active scan |
-| `swarm.sh` | Recon & adaptive vulnerability scanning (11 phases) | Map the attack surface |
-| `swarm_red.sh` | Automated exploitation engine (8 phases) | After recon, or standalone |
-| `swarm_full.sh` | End-to-end orchestrator | One-command full engagement |
+| `stiglitz.sh` | Recon & adaptive vulnerability scanning (11 phases) | Map the attack surface |
+| `stiglitz_red.sh` | Automated exploitation engine (8 phases) | After recon, or standalone |
+| `stiglitz_full.sh` | End-to-end orchestrator | One-command full engagement |
 | `pci_scan.sh` | PCI DSS 4.0.1 compliance scan | Payment environments |
-| `swarm_batch.sh` | Multi-target wrapper | Many targets in series |
-| `swarm_diff.py` | Scan-to-scan comparison | Remediation tracking |
+| `stiglitz_batch.sh` | Multi-target wrapper | Many targets in series |
+| `stiglitz_diff.py` | Scan-to-scan comparison | Remediation tracking |
 
 ## The scan pipeline
 
@@ -113,8 +113,8 @@ tech_profile.json  → nuclei tags · ffuf wordlist · CMS scanner
 
 | File | Contents |
 |---|---|
-| `relatorio_swarm.html` | Full technical report — exec summary, methodology, tech inventory, prioritization matrix, scan diff, reproducible evidence |
-| `sumario_executivo.html` | One-page risk summary for management |
+| `stiglitz_report.html` | Full technical report — exec summary, methodology, tech inventory, prioritization matrix, scan diff, reproducible evidence |
+| `executive_summary.html` | One-page risk summary for management |
 | `findings.json` | Structured export for SIEM / Jira |
 | `raw/` | nuclei JSONL, ZAP alerts, TLS issues, tech_profile.json, JS analysis, CVE enrichment |
 
@@ -122,23 +122,23 @@ tech_profile.json  → nuclei tags · ffuf wordlist · CMS scanner
 
 ```bash
 # Recon + adaptive scan (most common)
-bash swarm.sh https://target.com
+bash stiglitz.sh https://target.com
 
 # Reuse OSINT discovery (skips subfinder, feeds historical endpoints)
 bash osint.sh target.com --shodan-key $KEY --github-token $TOKEN
-bash swarm.sh target.com --osint-dir osint_target.com_*/
+bash stiglitz.sh target.com --osint-dir osint_target.com_*/
 
 # Authenticated scan
-bash swarm.sh https://target.com --token "eyJ..."
+bash stiglitz.sh https://target.com --token "eyJ..."
 
 # Automated exploitation from a scan's output
-bash swarm_red.sh -d scan_target.com_*/ -p staging
+bash stiglitz_red.sh -d scan_target.com_*/ -p staging
 
 # Full engagement in one command
-bash swarm_full.sh target.com
+bash stiglitz_full.sh target.com
 
 # Multiple targets
-bash swarm_batch.sh -f targets.txt -p staging
+bash stiglitz_batch.sh -f targets.txt -p staging
 ```
 
 ### Execution profiles
@@ -163,30 +163,30 @@ bash setup.sh
 
 ```bash
 bash osint.sh target.com --shodan-key $KEY --github-token $TOKEN   # 1. passive OSINT
-bash swarm.sh https://target.com --osint-dir osint_target.com_*/   # 2. recon + scan
-bash swarm_red.sh -d scan_target.com_*/ -p staging                 # 3. exploitation
-bash swarm_red.sh -d scan_target.com_*/ -p staging                 # 4. re-run → auto diff
+bash stiglitz.sh https://target.com --osint-dir osint_target.com_*/   # 2. recon + scan
+bash stiglitz_red.sh -d scan_target.com_*/ -p staging                 # 3. exploitation
+bash stiglitz_red.sh -d scan_target.com_*/ -p staging                 # 4. re-run → auto diff
 
 # 5. post-engagement hygiene
-tar czf results.tar.gz swarm_red_*/ scan_*/ osint_*/
+tar czf results.tar.gz stiglitz_red_*/ scan_*/ osint_*/
 gpg -c results.tar.gz && shred -vfz results.tar.gz
-rm -rf swarm_red_*/ scan_*/ osint_*/
+rm -rf stiglitz_red_*/ scan_*/ osint_*/
 ```
 
 ## Notifications
 
-Set any of these and Stiglitz pings on scan completion: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`.
+Set any of these and Stiglitz pings on scan completion: `STIGLITZ_TELEGRAM_TOKEN` + `STIGLITZ_TELEGRAM_CHAT`, `STIGLITZ_NOTIFY_WEBHOOK` (Slack/generic), `STIGLITZ_TEAMS_WEBHOOK`.
 
 ## Project layout
 
 ```
-swarm.sh            Main scanner (11 phases)
-swarm_red.sh        Exploitation engine (8 phases)
+stiglitz.sh            Main scanner (11 phases)
+stiglitz_red.sh        Exploitation engine (8 phases)
 osint.sh            Pre-engagement OSINT (10 phases)
-swarm_full.sh       End-to-end orchestrator
+stiglitz_full.sh       End-to-end orchestrator
 pci_scan.sh         PCI DSS 4.0.1 compliance
-swarm_report.py     HTML/JSON report generator
-swarm_diff.py       Scan comparison
+stiglitz_report.py     HTML/JSON report generator
+stiglitz_diff.py       Scan comparison
 lib/                Python modules (parsers, evidence, poc_validator, cve_enrich, …)
                     + bash modules (recon, crawl, sqli, xss, brute, msf, web)
 .github/workflows/  CI: bash syntax + Python compile + unit tests

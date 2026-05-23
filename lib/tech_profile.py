@@ -2,8 +2,8 @@
 """
 tech_profile.py — Tech Profile Builder → tech_profile.json
 
-Extraído de swarm.sh (heredoc PYTECHPROFILE). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYTECHPROFILE). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys, re, json, os
 

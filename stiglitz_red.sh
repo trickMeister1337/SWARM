@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SWARM RED v7.0 — Blackbox Pentest Engine
+#  Stiglitz RED v7.0 — Blackbox Pentest Engine
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 #  Modos de operação:
-#    Blackbox  — bash swarm_red.sh -t https://target.com [-p profile]
-#    SWARM     — bash swarm_red.sh -d scan_dir           [-p profile]
+#    Blackbox  — bash stiglitz_red.sh -t https://target.com [-p profile]
+#    Stiglitz     — bash stiglitz_red.sh -d scan_dir           [-p profile]
 #
 #  Fases: recon → surface → crawl → sqli → xss → brute → services → report
 #
-#  Uso completo: bash swarm_red.sh --help
+#  Uso completo: bash stiglitz_red.sh --help
 # ═══════════════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
@@ -65,15 +65,15 @@ dry_cmd() {
 usage() {
     cat << 'EOF'
 
-SWARM RED v7.0 — Blackbox Pentest Engine
+Stiglitz RED v7.0 — Blackbox Pentest Engine
 
 MODOS:
-  bash swarm_red.sh -t https://target.com [-p profile]  # Blackbox
-  bash swarm_red.sh -d scan_dir           [-p profile]  # Integração SWARM
+  bash stiglitz_red.sh -t https://target.com [-p profile]  # Blackbox
+  bash stiglitz_red.sh -d scan_dir           [-p profile]  # Integração Stiglitz
 
 OPÇÕES PRINCIPAIS:
   -t, --target URL        URL alvo (modo blackbox)
-  -d, --dir SCAN_DIR      Diretório de scan SWARM (modo integração)
+  -d, --dir SCAN_DIR      Diretório de scan Stiglitz (modo integração)
   -p, --profile PROFILE   Perfil: lab|staging|production (padrão: lab)
   --scope DOMAIN          Domínio em escopo (padrão: derivado do alvo)
   --scope-file FILE       Arquivo com domínios/IPs em escopo (um por linha)
@@ -99,11 +99,11 @@ PERFIS:
   production Impacto mínimo, apenas confirmação. Janela de manutenção.
 
 EXEMPLOS:
-  bash swarm_red.sh -t https://api.company.com -p staging
-  bash swarm_red.sh -t https://target.com --auth-cookie "token=abc" --skip brute
-  bash swarm_red.sh -d scan_target.com_20260514_120000 -p production
-  bash swarm_red.sh -t https://target.com --only sqli,xss --dry-run
-  bash swarm_red.sh -t https://target.com --scope-file scope.txt --resume
+  bash stiglitz_red.sh -t https://api.company.com -p staging
+  bash stiglitz_red.sh -t https://target.com --auth-cookie "token=abc" --skip brute
+  bash stiglitz_red.sh -d scan_target.com_20260514_120000 -p production
+  bash stiglitz_red.sh -t https://target.com --only sqli,xss --dry-run
+  bash stiglitz_red.sh -t https://target.com --scope-file scope.txt --resume
 
 EOF
     exit 0
@@ -143,8 +143,8 @@ validate() {
         MODE="swarm"
         [ -d "$SCAN_DIR" ] || { fail "Diretório não encontrado: $SCAN_DIR"; exit 1; }
     else
-        fail "Informe -t <url> (blackbox) ou -d <scan_dir> (SWARM integração)."
-        echo "  bash swarm_red.sh --help"
+        fail "Informe -t <url> (blackbox) ou -d <scan_dir> (Stiglitz integração)."
+        echo "  bash stiglitz_red.sh --help"
         exit 1
     fi
 
@@ -254,7 +254,7 @@ run_recon() {
     phase "FASE 1 — RECON (subfinder + httpx)"
 
     if [ "$MODE" != "blackbox" ]; then
-        info "Modo SWARM — recon ignorado (dados existem em $SCAN_DIR)"
+        info "Modo Stiglitz — recon ignorado (dados existem em $SCAN_DIR)"
         return 0
     fi
     phase_enabled "recon"   || { warn "Fase 'recon' ignorada (--skip)"; return 0; }
@@ -287,12 +287,12 @@ run_surface() {
     phase_enabled "surface"   || { warn "Fase 'surface' ignorada (--skip)"; return 0; }
     checkpoint_skip "surface" && { info "Surface: retomado de checkpoint — pulando"; return 0; }
 
-    # Modo SWARM: reusar nmap existente
+    # Modo Stiglitz: reusar nmap existente
     if [ "$MODE" = "swarm" ] && [ -f "$SCAN_DIR/raw/nmap.txt" ]; then
         cp "$SCAN_DIR/raw/nmap.txt" "$OUTDIR/data/nmap.txt"
         grep -E '^[0-9]+/tcp.*open' "$OUTDIR/data/nmap.txt" \
             | awk '{print $1, $3, $4, $5, $6}' > "$OUTDIR/data/open_services.txt"
-        info "Surface: $(wc -l < "$OUTDIR/data/open_services.txt") serviço(s) do SWARM"
+        info "Surface: $(wc -l < "$OUTDIR/data/open_services.txt") serviço(s) do Stiglitz"
         checkpoint_done "surface"
         return 0
     fi
@@ -399,7 +399,7 @@ _build_scored_targets() {
     [ -f "$OUTDIR/crawl/katana_urls.txt" ]  && cat "$OUTDIR/crawl/katana_urls.txt"  >> "$tmp_raw"
     [ -f "$OUTDIR/crawl/ffuf_urls.txt" ]    && cat "$OUTDIR/crawl/ffuf_urls.txt"    >> "$tmp_raw"
 
-    # 2. URLs do SWARM — apenas arquivos estruturados, filtrando domínios de advisory externos
+    # 2. URLs do Stiglitz — apenas arquivos estruturados, filtrando domínios de advisory externos
     if [ "$MODE" = "swarm" ] && [ -d "$SCAN_DIR" ]; then
         local _advisory_domains='github\.com/security|github\.com/advisories|nvd\.nist\.gov|cve\.org|vercel\.com/changelog|cve\.mitre\.org|first\.org|exploit-db\.com|packetstormsecurity'
         # Lê apenas raw/ e findings.json — evita capturar URLs de advisories em logs
@@ -794,16 +794,16 @@ run_services() {
 
 # ── Notificação (Telegram ou Slack/webhook genérico) ──────────────────────────
 # Configuração via variáveis de ambiente:
-#   Telegram:      export SWARM_TELEGRAM_TOKEN=<bot_token> SWARM_TELEGRAM_CHAT=<chat_id>
-#   Slack/generic: export SWARM_NOTIFY_WEBHOOK=https://hooks.slack.com/...
-#   Teams:         export SWARM_TEAMS_WEBHOOK=https://outlook.office.com/webhook/...
+#   Telegram:      export STIGLITZ_TELEGRAM_TOKEN=<bot_token> STIGLITZ_TELEGRAM_CHAT=<chat_id>
+#   Slack/generic: export STIGLITZ_NOTIFY_WEBHOOK=https://hooks.slack.com/...
+#   Teams:         export STIGLITZ_TEAMS_WEBHOOK=https://outlook.office.com/webhook/...
 #                  (ou URL do Power Automate Workflow)
 send_notification() {
     local message="$1"
-    local token="${SWARM_TELEGRAM_TOKEN:-}"
-    local chat="${SWARM_TELEGRAM_CHAT:-}"
-    local webhook="${SWARM_NOTIFY_WEBHOOK:-}"
-    local teams="${SWARM_TEAMS_WEBHOOK:-}"
+    local token="${STIGLITZ_TELEGRAM_TOKEN:-}"
+    local chat="${STIGLITZ_TELEGRAM_CHAT:-}"
+    local webhook="${STIGLITZ_NOTIFY_WEBHOOK:-}"
+    local teams="${STIGLITZ_TEAMS_WEBHOOK:-}"
 
     if [ -n "$token" ] && [ -n "$chat" ]; then
         curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
@@ -822,8 +822,8 @@ send_notification() {
   "@type": "MessageCard",
   "@context": "https://schema.org/extensions",
   "themeColor": "CC0000",
-  "summary": "SWARM RED — scan concluído",
-  "sections": [{ "activityTitle": "🎯 SWARM RED v%s", "activityText": "%s" }]
+  "summary": "Stiglitz RED — scan concluído",
+  "sections": [{ "activityTitle": "🎯 Stiglitz RED v%s", "activityText": "%s" }]
 }' "$VERSION" "$escaped")
         curl -s -X POST "$teams" \
             -H "Content-Type: application/json" \
@@ -847,7 +847,7 @@ send_notification() {
 authorization_gate() {
     echo ""
     echo -e "${YLW}╔══════════════════════════════════════════════════════════╗${RST}"
-    echo -e "${YLW}║           GATE DE AUTORIZAÇÃO — SWARM RED v${VERSION}        ║${RST}"
+    echo -e "${YLW}║           GATE DE AUTORIZAÇÃO — Stiglitz RED v${VERSION}        ║${RST}"
     echo -e "${YLW}╚══════════════════════════════════════════════════════════╝${RST}"
     echo ""
     echo -e "  ${BLD}Perfil:${RST}  ${PROFILE^^}"
@@ -868,10 +868,10 @@ authorization_gate() {
         return 0
     fi
 
-    # Bypass para execução encadeada pelo swarm_full.sh
-    if [ "${SWARM_AUTHORIZED:-0}" = "1" ]; then
-        info "Autorizado pelo orquestrador SWARM FULL."
-        log "AUTORIZADO (SWARM_FULL). Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]}"
+    # Bypass para execução encadeada pelo stiglitz_full.sh
+    if [ "${Stiglitz_AUTHORIZED:-0}" = "1" ]; then
+        info "Autorizado pelo orquestrador Stiglitz FULL."
+        log "AUTORIZADO (Stiglitz_FULL). Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]}"
         return 0
     fi
 
@@ -902,7 +902,7 @@ run_report() {
 
     log "Gerando relatório HTML — alvo=${target_domain} confirmados=${n_confirmed}/${total_urls}"
 
-    # Passar SCAN_DIR para integrar findings do SWARM de origem
+    # Passar SCAN_DIR para integrar findings do Stiglitz de origem
     local report_out
     report_out=$(python3 "$LIB/report_generator.py" \
         "$OUTDIR" "$target_domain" "$PROFILE" "$total_urls" "$n_confirmed" "$failed" "$VERSION" \
@@ -921,12 +921,12 @@ run_report() {
     # Auto-diff: comparar com scan anterior do mesmo domínio
     local domain="${SCOPE_DOMAINS[0]//[^a-zA-Z0-9._-]/_}"
     local prev_scan
-    prev_scan=$(find . -maxdepth 1 -type d -name "swarm_red_${domain}_*" \
+    prev_scan=$(find . -maxdepth 1 -type d -name "stiglitz_red_${domain}_*" \
         ! -path "./${OUTDIR}" 2>/dev/null | sort -r | head -1)
-    if [ -n "$prev_scan" ] && [ -f "${SCRIPT_DIR}/swarm_diff.py" ]; then
+    if [ -n "$prev_scan" ] && [ -f "${SCRIPT_DIR}/stiglitz_diff.py" ]; then
         log "Diff com scan anterior: $prev_scan"
-        python3 "${SCRIPT_DIR}/swarm_diff.py" "$prev_scan" "$OUTDIR" --html 2>/dev/null \
-            && info "Diff gerado: ver swarm_diff_*.html" || warn "swarm_diff: falhou (não crítico)"
+        python3 "${SCRIPT_DIR}/stiglitz_diff.py" "$prev_scan" "$OUTDIR" --html 2>/dev/null \
+            && info "Diff gerado: ver stiglitz_diff_*.html" || warn "swarm_diff: falhou (não crítico)"
     fi
 
     log "Fase Report concluída — $(($(date +%s)-_t0))s"
@@ -944,7 +944,7 @@ print_summary() {
 
     echo ""
     echo -e "${CYN}═══════════════════════════════════════════════════════════${RST}"
-    echo -e "${CYN}  SUMÁRIO FINAL — SWARM RED v${VERSION}${RST}"
+    echo -e "${CYN}  SUMÁRIO FINAL — Stiglitz RED v${VERSION}${RST}"
     echo -e "${CYN}═══════════════════════════════════════════════════════════${RST}"
     echo ""
     printf "  %-12s %s\n" "Alvo:"   "${SCOPE_DOMAINS[*]}"
@@ -964,8 +964,8 @@ print_summary() {
     fi
 
     echo ""
-    echo -e "  ${DIM}Relatório:${RST} ${OUTDIR}/relatorio_swarm_red.html"
-    echo -e "  ${DIM}Log:${RST}       ${OUTDIR}/swarm_red.log"
+    echo -e "  ${DIM}Relatório:${RST} ${OUTDIR}/stiglitz_red_report.html"
+    echo -e "  ${DIM}Log:${RST}       ${OUTDIR}/stiglitz_red.log"
     echo ""
 }
 
@@ -984,18 +984,18 @@ main() {
     if [ -n "$OUTDIR_OVERRIDE" ]; then
         OUTDIR="$OUTDIR_OVERRIDE"
     else
-        OUTDIR="swarm_red_${domain}_${ts}"
+        OUTDIR="stiglitz_red_${domain}_${ts}"
     fi
 
     mkdir -p "$OUTDIR"/{data,recon,crawl,sqlmap,xss,hydra,nikto,metasploit,searchsploit,poc}
     > "$OUTDIR/exploits_confirmed.csv"
 
-    LOG="$OUTDIR/swarm_red.log"
-    STATE_FILE="$OUTDIR/.swarm_red_state"
+    LOG="$OUTDIR/stiglitz_red.log"
+    STATE_FILE="$OUTDIR/.stiglitz_red_state"
     [ ! -f "$STATE_FILE" ] && touch "$STATE_FILE"
 
     banner
-    log "SWARM RED v${VERSION} iniciado — Modo=${MODE^^} Perfil=${PROFILE^^} Escopo=${SCOPE_DOMAINS[*]}"
+    log "Stiglitz RED v${VERSION} iniciado — Modo=${MODE^^} Perfil=${PROFILE^^} Escopo=${SCOPE_DOMAINS[*]}"
 
     authorization_gate
 
@@ -1010,7 +1010,7 @@ main() {
     run_report
     print_summary
 
-    log "SWARM RED concluído — Output: $OUTDIR"
+    log "Stiglitz RED concluído — Output: $OUTDIR"
 
     # Notificação ao finalizar
     local n_sqli_f n_xss_f n_brute_f n_total_f
@@ -1018,7 +1018,7 @@ main() {
     n_xss_f=$(grep -c "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
     n_brute_f=$(grep -c "BRUTE\|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
     n_total_f=$(( n_sqli_f + n_xss_f + n_brute_f ))
-    send_notification "[SWARM RED v${VERSION}] Concluído
+    send_notification "[Stiglitz RED v${VERSION}] Concluído
 Alvo: ${SCOPE_DOMAINS[*]}
 Perfil: ${PROFILE^^} | Modo: ${MODE^^}
 Findings: ${n_total_f} (SQLi:${n_sqli_f} XSS:${n_xss_f} Brute:${n_brute_f})

@@ -1,14 +1,14 @@
 #!/bin/bash
 # ==============================================================================
-# SWARM BATCH — Orquestrador de múltiplos alvos
-# Executa swarm.sh com suporte a paralelização via semáforo FIFO
-# Uso: bash swarm_batch.sh targets.txt [--delay N] [--workers N]
-#      bash swarm_batch.sh targets.txt --workers 5   (5 scans em paralelo)
-#      bash swarm_batch.sh targets.txt --delay 30    (sequencial, 30s delay)
+# Stiglitz BATCH — Orquestrador de múltiplos alvos
+# Executa stiglitz.sh com suporte a paralelização via semáforo FIFO
+# Uso: bash stiglitz_batch.sh targets.txt [--delay N] [--workers N]
+#      bash stiglitz_batch.sh targets.txt --workers 5   (5 scans em paralelo)
+#      bash stiglitz_batch.sh targets.txt --delay 30    (sequencial, 30s delay)
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SWARM="$SCRIPT_DIR/swarm.sh"
+Stiglitz="$SCRIPT_DIR/stiglitz.sh"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -37,7 +37,7 @@ if [ -z "$TARGETS_FILE" ]; then
 fi
 
 [ ! -f "$TARGETS_FILE" ] && echo -e "${RED}[✗] Arquivo não encontrado: $TARGETS_FILE${NC}" && exit 1
-[ ! -f "$SWARM" ]        && echo -e "${RED}[✗] swarm.sh não encontrado em: $SWARM${NC}" && exit 1
+[ ! -f "$Stiglitz" ]        && echo -e "${RED}[✗] stiglitz.sh não encontrado em: $Stiglitz${NC}" && exit 1
 
 # ── Validar --workers ─────────────────────────────────────────────────────────
 if ! [[ "$WORKERS" =~ ^[0-9]+$ ]] || [ "$WORKERS" -lt 1 ]; then
@@ -76,7 +76,7 @@ BATCH_START=$(date +%s)
 clear 2>/dev/null || true
 echo -e "${GREEN}${BOLD}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║               SWARM — MODO BATCH                            ║"
+echo "║               Stiglitz — MODO BATCH                            ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "${GREEN}[+] Arquivo   : $TARGETS_FILE${NC}"
@@ -138,7 +138,7 @@ run_sequential() {
 
         local SCAN_EXIT=0
         set -o pipefail
-        SWARM_BATCH=1 bash "$SWARM" "$TARGET_URL" 2>&1 | tee "$_log" || SCAN_EXIT=$?
+        STIGLITZ_BATCH=1 bash "$Stiglitz" "$TARGET_URL" 2>&1 | tee "$_log" || SCAN_EXIT=$?
         set +o pipefail
 
         local SCAN_END
@@ -218,8 +218,8 @@ run_parallel() {
             sleep 2
 
             local SCAN_EXIT=0
-            ZAP_PORT=$WORKER_ZAP_PORT SWARM_BATCH=1 \
-                bash "$SWARM" "$TARGET_URL" > "$_log" 2>&1 || SCAN_EXIT=$?
+            ZAP_PORT=$WORKER_ZAP_PORT STIGLITZ_BATCH=1 \
+                bash "$Stiglitz" "$TARGET_URL" > "$_log" 2>&1 || SCAN_EXIT=$?
 
             local SCAN_END
             SCAN_END=$(date +%s)
@@ -369,7 +369,7 @@ for r in results:
     total_high += stats["high"]
     total_med  += stats["medium"]
 
-    report_path = os.path.join(r["outdir"], "relatorio_swarm.html") if r["outdir"] else ""
+    report_path = os.path.join(r["outdir"], "stiglitz_report.html") if r["outdir"] else ""
     report_link = (f'<a href="{html.escape(os.path.abspath(report_path))}" target="_blank" '
                    f'style="color:#388bfd;font-weight:500">📄 Abrir</a>') \
                    if os.path.exists(report_path) else \
@@ -411,7 +411,7 @@ if top_risks:
     insight_html += "</ul>"
 
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
-<title>SWARM — Relatório Consolidado {html.escape(batch_ts)}</title>
+<title>Stiglitz — Relatório Consolidado {html.escape(batch_ts)}</title>
 <style>
 *{{box-sizing:border-box}}
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5;color:#333}}
@@ -440,7 +440,7 @@ a{{color:#388bfd;text-decoration:none}}a:hover{{text-decoration:underline}}
 </style></head>
 <body><div class="container">
 <div class="header">
-  <h1>🕷️ SWARM — Relatório Consolidado de Segurança</h1>
+  <h1>🕷️ Stiglitz — Relatório Consolidado de Segurança</h1>
   <p>Batch: {html.escape(batch_ts)} &nbsp;·&nbsp; {passed}/{total} scans concluídos &nbsp;·&nbsp; Duração total: {dur_str}</p>
   <p>Gerado em: {rdate} &nbsp;·&nbsp; <strong>CONFIDENCIAL — USO INTERNO</strong></p>
 </div>
@@ -494,7 +494,7 @@ a{{color:#388bfd;text-decoration:none}}a:hover{{text-decoration:underline}}
 
 </div>
 <div class="footer">
-  <p>SWARM — Scanner Automatizado de Segurança &nbsp;·&nbsp; CONFIDENCIAL</p>
+  <p>Stiglitz — Scanner Automatizado de Segurança &nbsp;·&nbsp; CONFIDENCIAL</p>
 </div>
 </div></body></html>"""
 

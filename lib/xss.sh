@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SWARM RED — Fase XSS (dalfox)
+# Stiglitz RED — Fase XSS (dalfox)
 # Testa Cross-Site Scripting em URLs com parâmetros.
-# Chamado por: swarm_red.sh run_xss()
+# Chamado por: stiglitz_red.sh run_xss()
 
 set -uo pipefail
 
@@ -95,7 +95,7 @@ run_xss_phase() {
     echo "[✓] XSS: $xss_confirmed finding(s) confirmado(s)"
 }
 
-# Consolida resultados JSON do dalfox em formato SWARM RED
+# Consolida resultados JSON do dalfox em formato Stiglitz RED
 _consolidate_xss_results() {
     local per_url_dir="$1"
     local xss_dir="$2"

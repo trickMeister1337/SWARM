@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SWARM RED — Instalador Universal (Linux / WSL)
+#  Stiglitz RED — Instalador Universal (Linux / WSL)
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Instala TODAS as dependências automaticamente. Zero passos manuais.
 #  Detecta distro (apt/dnf/pacman/zypper) e WSL automaticamente.
@@ -29,7 +29,7 @@ INSTALLED=0; SKIPPED=0; FAILED=0; TOTAL=0
 # ═══════════════════════════════════════════════════════════════════════════════
 exec > >(tee -a "$LOGFILE") 2>&1
 echo "════════════════════════════════════════" >> "$LOGFILE"
-echo "SWARM RED Installer — $(date)" >> "$LOGFILE"
+echo "Stiglitz RED Installer — $(date)" >> "$LOGFILE"
 echo "════════════════════════════════════════" >> "$LOGFILE"
 
 banner() {
@@ -600,7 +600,7 @@ install_searchsploit() {
 
             # Configurar .searchsploit_rc
             cat > "$HOME/.searchsploit_rc" << RCEOF
-## searchsploit — gerado por SWARM RED setup.sh
+## searchsploit — gerado por Stiglitz RED setup.sh
 package_array=()
 package_array+=("exploitdb")
 path_array=()
@@ -622,7 +622,7 @@ RCEOF
 
         sudo tee /usr/local/bin/searchsploit > /dev/null << 'WRAPPER'
 #!/usr/bin/env python3
-"""searchsploit wrapper — busca ExploitDB via web (fallback SWARM RED)"""
+"""searchsploit wrapper — busca ExploitDB via web (fallback Stiglitz RED)"""
 import sys, json, re, urllib.request, urllib.parse
 
 def search(query):
@@ -930,7 +930,7 @@ configure_wsl() {
     if ! grep -q "JAVA_TOOL_OPTIONS" "$shell_rc" 2>/dev/null; then
         cat >> "$shell_rc" << 'ENVEOF'
 
-# SWARM RED — Headless config para WSL
+# Stiglitz RED — Headless config para WSL
 export JAVA_TOOL_OPTIONS="-Djava.awt.headless=true"
 ENVEOF
         info "Variáveis headless configuradas"
@@ -1040,15 +1040,15 @@ verify_install() {
         echo -e "  ${GRN}${BLD}✅ Instalação completa!${RST}"
     elif [ "$missing" -le 2 ]; then
         echo -e "  ${YLW}${BLD}⚠  Quase completo — $missing ferramenta(s) faltando${RST}"
-        echo -e "  ${DIM}O SWARM RED funciona sem elas (fases correspondentes desabilitadas)${RST}"
+        echo -e "  ${DIM}O Stiglitz RED funciona sem elas (fases correspondentes desabilitadas)${RST}"
     else
         echo -e "  ${RED}${BLD}❌ $missing ferramentas faltando${RST}"
         echo -e "  ${DIM}Verifique o log: $LOGFILE${RST}"
     fi
 
     echo ""
-    echo -e "  ${DIM}Próximo passo:${RST}  ${BLD}bash swarm_red.sh --help${RST}"
-    echo -e "  ${DIM}Testar:${RST}         ${BLD}bash test_swarm_red.sh${RST}"
+    echo -e "  ${DIM}Próximo passo:${RST}  ${BLD}bash stiglitz_red.sh --help${RST}"
+    echo -e "  ${DIM}Testar:${RST}         ${BLD}bash test_stiglitz_red.sh${RST}"
     echo -e "  ${DIM}Integração:${RST}     ${BLD}bash test_integration.sh${RST}"
     echo ""
 }

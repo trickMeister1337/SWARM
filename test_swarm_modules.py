@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Testes dos módulos Python extraídos do swarm.sh (lib/*.py).
+Testes dos módulos Python extraídos do stiglitz.sh (lib/*.py).
 
 Esses módulos são scripts CLI (leem sys.argv e executam código no nível de
 módulo), então são testados via subprocess contra fixtures em diretórios
@@ -17,7 +17,7 @@ import unittest
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(ROOT, "lib")
 
-# Módulos extraídos do swarm.sh nas fases A/B da refatoração
+# Módulos extraídos do stiglitz.sh nas fases A/B da refatoração
 EXTRACTED_MODULES = [
     "scan_metadata.py", "security_headers.py", "version_fingerprint.py",
     "tech_profile.py", "monitoring_check.py", "secscan.py", "cve_enrich.py",
@@ -132,14 +132,14 @@ class TestScanMetadata(_TmpScanDir):
 
 
 class TestModulesCompile(unittest.TestCase):
-    """Todos os módulos extraídos + swarm_report.py devem compilar."""
+    """Todos os módulos extraídos + stiglitz_report.py devem compilar."""
     def test_all_extracted_modules_compile(self):
         import py_compile
         for m in EXTRACTED_MODULES:
             path = os.path.join(LIB, m)
             self.assertTrue(os.path.exists(path), f"módulo ausente: {m}")
             py_compile.compile(path, doraise=True)
-        py_compile.compile(os.path.join(ROOT, "swarm_report.py"), doraise=True)
+        py_compile.compile(os.path.join(ROOT, "stiglitz_report.py"), doraise=True)
 
 
 if __name__ == "__main__":

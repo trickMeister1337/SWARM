@@ -2,8 +2,8 @@
 """
 zap_config_fix.py — Ajusta config.xml do ZAP
 
-Extraído de swarm.sh (heredoc PYFIX). Recebe argumentos posicionais
-via sys.argv, idêntico à invocação original do swarm.sh.
+Extraído de stiglitz.sh (heredoc PYFIX). Recebe argumentos posicionais
+via sys.argv, idêntico à invocação original do stiglitz.sh.
 """
 import sys
 
