@@ -45,6 +45,16 @@ O SWARM é uma suite completa de segurança ofensiva composta por scripts indepe
 
 ## Últimas Atualizações
 
+### v7.5 — Qualidade do relatório e do índice de risco (Mai 2026)
+
+- **Índice de risco sem saturação** — antes somava ocorrências por URL (mesmo alerta em N URLs estourava o número, quase todo scan batia 100/100). Agora usa tipos únicos com faixa-base pela severidade mais alta + bônus de quantidade com retornos decrescentes. A faixa CRÍTICO exige achado crítico real ou KEV — bônus brandos (EPSS/JS) não fabricam CRÍTICO sozinhos.
+- **Exploit confirmado ≠ verificado** — a confirmação ativa separa vulnerabilidades abusáveis (default-login, SQLi, cifras fracas) de verificações de hardening (headers, HSTS/CAA, config TLS). Badges distintos nos cards (✓ EXPLOIT CONFIRMADO / ✓ VERIFICADO) e seções separadas no relatório.
+- **Matriz Esforço × Impacto** — grid de priorização estilo Big4 com o quadrante alto-impacto/baixo-esforço destacado como ★ quick wins.
+- **Diff com scan anterior** — seção "Evolução desde o Último Scan" com novos / corrigidos / persistentes vs o scan anterior do mesmo domínio.
+- **Vetor CVSS nos cards** — exibe o vetor completo (`CVSS:3.1/AV:N/...`) + decodificação dos campos de exploitabilidade (vetor de ataque, complexidade, privilégio, interação).
+- **Redução de falsos-positivos** — secrets JS: "Hardcoded Password" não casa mais labels de UI; "Private Key" exige bloco PEM completo. poc_validator não marca metadados do testssl (scanTime) como exploit.
+- **Normalização de scheme** — `swarm.sh target.com` (sem `https://`) assume HTTPS, corrigindo abort por HTTP 000 em alvos HTTPS-only.
+
 ### v7.4 — Refatoração: modularização do swarm.sh (Mai 2026)
 
 O `swarm.sh` carregava ~2.500 linhas de Python embutido em 12 heredocs bash — sem syntax check, lint, testes ou debug possível. Esse código foi extraído para módulos standalone, reduzindo o `swarm.sh` de **4.991 → 1.870 linhas**.
