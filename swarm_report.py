@@ -1826,6 +1826,70 @@ methodology_html = f'''<h2>1.1. Escopo &amp; Metodologia</h2>
 <p><strong>Limitações:</strong> esta é uma avaliação automatizada e não substitui um pentest manual.{_waf_limit} Achados de severidade crítica/alta devem ser validados manualmente antes da remediação.</p>
 </div>'''
 
+# ── Diff com scan anterior do mesmo domínio ──────────────────
+def _find_prev_scan(outdir, domain):
+    """Diretório de scan anterior mais recente (mesmo domínio) que tenha
+    findings.json — pula scans antigos sem dados estruturados."""
+    import glob
+    base = os.path.dirname(os.path.abspath(outdir)) or "."
+    cur  = os.path.basename(os.path.abspath(outdir))
+    cands = [c for c in sorted(glob.glob(os.path.join(base, f"scan_{domain}_*")), reverse=True)
+             if os.path.isdir(c) and os.path.basename(c) < cur]
+    for c in cands:
+        if os.path.exists(os.path.join(c, "findings.json")):
+            return c
+    return None
+
+diff_html = ""
+_prev_dir = _find_prev_scan(OUTDIR, DOMAIN)
+if _prev_dir:
+    _prev_fj = os.path.join(_prev_dir, "findings.json")
+    _prev_findings = None
+    try: _prev_findings = json.load(open(_prev_fj, encoding="utf-8")).get("findings", [])
+    except Exception: _prev_findings = None
+    if _prev_findings is not None:
+        def _fkey(n): return re.sub(r'\s+', ' ', str(n).strip().lower())
+        _ACT = ("critical", "high", "medium", "low")
+        _cur_map  = {_fkey(f.get("name","")): (f.get("name",""), f.get("severity",""))
+                     for f in all_f if f.get("severity") in _ACT and f.get("name")}
+        _prev_map = {_fkey(f.get("name","")): (f.get("name",""), f.get("severity",""))
+                     for f in _prev_findings if f.get("severity") in _ACT and f.get("name")}
+        _novos      = set(_cur_map)  - set(_prev_map)
+        _corrigidos = set(_prev_map) - set(_cur_map)
+        _persist    = set(_cur_map)  & set(_prev_map)
+        # timestamp do scan anterior (do nome do diretório scan_<dom>_YYYYMMDD_HHMMSS)
+        _pm = re.search(r'_(\d{8})_(\d{6})$', os.path.basename(_prev_dir))
+        if _pm:
+            _d, _t = _pm.group(1), _pm.group(2)
+            _prev_label = f"{_d[6:8]}/{_d[4:6]}/{_d[0:4]} {_t[0:2]}:{_t[2:4]}"
+        else:
+            _prev_label = os.path.basename(_prev_dir)
+
+        def _diff_group(icon, title, color, keys, src_map):
+            if not keys:
+                return (f'<div style="flex:1;min-width:200px"><h4 style="color:{color};margin:0 0 6px">'
+                        f'{icon} {title} (0)</h4><p style="color:#999;font-size:12px;margin:0">Nenhum</p></div>')
+            rows = "".join(
+                f'<li style="margin:3px 0;font-size:12px">{badge(src_map[k][1])} {html.escape(src_map[k][0][:48])}</li>'
+                for k in sorted(keys, key=lambda k: SEV_ORDER.get(src_map[k][1], 9))[:12])
+            extra = f'<li style="color:#888;font-size:11px">+{len(keys)-12} mais</li>' if len(keys) > 12 else ""
+            return (f'<div style="flex:1;min-width:200px"><h4 style="color:{color};margin:0 0 6px">'
+                    f'{icon} {title} ({len(keys)})</h4><ul style="margin:0;padding-left:18px">{rows}{extra}</ul></div>')
+
+        diff_html = (
+            f'<h2>1.2. Evolução desde o Último Scan</h2>'
+            f'<div class="info-box"><p style="font-size:13px">Comparado com o scan de '
+            f'<strong>{_prev_label}</strong> (por tipo de achado). '
+            f'<span style="color:#27ae60">{len(_corrigidos)} corrigido(s)</span> · '
+            f'<span style="color:#b34e4e">{len(_novos)} novo(s)</span> · '
+            f'<span style="color:#888">{len(_persist)} persistente(s)</span>.</p></div>'
+            f'<div style="display:flex;gap:20px;flex-wrap:wrap;margin:10px 0">'
+            + _diff_group("🆕", "Novos", "#b34e4e", _novos, _cur_map)
+            + _diff_group("✅", "Corrigidos", "#27ae60", _corrigidos, _prev_map)
+            + _diff_group("➡️", "Persistentes", "#888", _persist, _cur_map)
+            + '</div>'
+        )
+
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
 <title>SWARM — {html.escape(DOMAIN)}</title><style>
 body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:20px;background:#f0f2f5}}
@@ -1879,6 +1943,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 {'<p style="color:#b34e4e;font-size:13px">⚠ <strong>'+str(EMAIL_ISSUES)+' problema(s) de segurança de email</strong> detectado(s).</p>' if EMAIL_ISSUES > 0 else ""}
 </div>
 {methodology_html}
+{diff_html}
 <h2>2. Superfície de Ataque</h2>
 <table>
 <tr><th style="width:220px">Subdomínios descobertos</th><td>{SUB_COUNT}</td></tr>
