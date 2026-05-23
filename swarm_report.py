@@ -624,27 +624,56 @@ for _c in (confirmations if isinstance(confirmations, list) else []):
     _nc.append(_c)
 confirmations = _nc
 
-# Conjunto de identificadores com confirmação ativa (template_id / id testssl).
-# Usado para marcar os cards/linhas correspondentes como "confirmado ativamente".
-_confirmed_keys = set()
+# Classificar cada confirmação: "exploit" (abusável diretamente) vs
+# "verified" (config/hardening apenas verificado). Evita rotular header
+# ausente ou config TLS como "exploit confirmado".
+_EXPLOIT_VULN_TYPES = ("sqli", "rce", "command_injection", "cmdi", "auth_bypass",
+                       "default_login", "default-login", "ssrf", "lfi", "rfi",
+                       "xss", "deserialization", "xxe", "ssti", "idor", "path_traversal")
+_TLS_EXPLOIT_KW = ("null", "anull", "rc4", "export", "des", "3des", "sweet32",
+                   "logjam", "drown", "beast", "poodle", "heartbleed", "ccs",
+                   "robot", "ticketbleed", "crime", "cipherlist", "obsoleted")
+
+def _confirmation_category(c):
+    """exploit = vulnerabilidade abusável; verified = apenas verificado."""
+    vt   = str(c.get("vuln_type", "")).lower()
+    tid  = str(c.get("template_id", "")).lower()
+    blob = vt + " " + tid
+    if any(t in blob for t in _EXPLOIT_VULN_TYPES):
+        return "exploit"
+    if "default" in tid and "login" in tid:
+        return "exploit"
+    if vt == "tls" or any(x in tid for x in ("tls", "ssl", "cipher")):
+        return "exploit" if any(x in tid for x in _TLS_EXPLOIT_KW) else "verified"
+    return "verified"
+
+for _c in confirmations:
+    _c["category"] = _confirmation_category(_c)
+
+# Mapa: identificador confirmado (template_id / id testssl) → categoria.
+# Usado para marcar os cards/linhas correspondentes.
+_confirmed_cat = {}
 for _c in confirmations:
     if _c.get("confirmed"):
         _k = str(_c.get("template_id", "")).strip().lower()
         if _k and _k != "—":
-            _confirmed_keys.add(_k)
+            _confirmed_cat[_k] = _c["category"]
 
-def _is_confirmed(f):
-    """True se o finding tem uma confirmação ativa correspondente.
-    Nuclei guarda o template-id em f['other']; testssl em f['id']."""
+def _confirmed_category(f):
+    """Retorna 'exploit'/'verified' se o finding tem confirmação correspondente,
+    senão None. Nuclei guarda o template-id em f['other']; testssl em f['id']."""
     cands = []
     if f.get("source") == "Nuclei":
         cands.append(f.get("other", ""))
     cands.append(f.get("id", ""))
     for c in cands:
         ck = str(c).strip().lower()
-        if ck and ck in _confirmed_keys:
-            return True
-    return False
+        if ck and ck in _confirmed_cat:
+            return _confirmed_cat[ck]
+    return None
+
+def _is_confirmed(f):
+    return _confirmed_category(f) is not None
 
 # ── WAF & Email Security ───────────────────────────────────
 email_security = {}
@@ -1029,10 +1058,15 @@ def render_finding(f):
                'source-version' if _src == 'Version Fingerprint' else
                'source-zap')
     confirmed_badge = ''
-    if _is_confirmed(f):
+    _cat = _confirmed_category(f)
+    if _cat == "exploit":
+        confirmed_badge = ('<span style="background:#7a0000;color:white;padding:2px 8px;'
+            'border-radius:4px;font-size:10px;font-weight:bold;margin-left:6px;'
+            'border:1px solid #ff4444">✓ EXPLOIT CONFIRMADO</span>')
+    elif _cat == "verified":
         confirmed_badge = ('<span style="background:#1b5e20;color:white;padding:2px 8px;'
             'border-radius:4px;font-size:10px;font-weight:bold;margin-left:6px;'
-            'border:1px solid #2e7d32">✓ CONFIRMADO ATIVAMENTE</span>')
+            'border:1px solid #2e7d32">✓ VERIFICADO</span>')
     return f'''<div class="vuln {f['severity']}">
   <h3>{html.escape(f.get('name',''))} <span class="source-badge {src_cls}">{f.get('source','')}</span> {badge(f['severity'])}{reclassify_badge}{confirmed_badge}</h3>
   <table>{rows}
@@ -1353,9 +1387,13 @@ if tls_findings:
     TLS_SEV_PT = {"CRITICAL":"CRÍTICO","HIGH":"ALTO","WARN":"AVISO","LOW":"BAIXO","OK":"OK","INFO":"INFO"}
     def _tls_problem_cell(f):
         cell = html.escape(f.get("name", f.get("finding", "")))
-        if _is_confirmed(f):
+        _c = _confirmed_category(f)
+        if _c == "exploit":
+            cell += ('  <span style="background:#7a0000;color:white;padding:1px 6px;'
+                'border-radius:3px;font-size:10px;font-weight:bold">✓ EXPLORÁVEL</span>')
+        elif _c == "verified":
             cell += ('  <span style="background:#1b5e20;color:white;padding:1px 6px;'
-                'border-radius:3px;font-size:10px;font-weight:bold">✓ CONFIRMADO</span>')
+                'border-radius:3px;font-size:10px;font-weight:bold">✓ VERIFICADO</span>')
         return cell
     tls_rows = "".join(
         f'<tr><td style="font-family:monospace;font-size:12px">{html.escape(f["id"])}</td>'
@@ -1372,79 +1410,95 @@ if tls_findings:
 else:
     tls_html = ""
 
-# ── Gerar HTML: Confirmações de Exploit ──────────────────────
-if confirmations:
-    conf_rows = ""
-    for c in confirmations:
-        status_color = "#27ae60" if c.get("confirmed") else "#b34e4e"
-        status_label = "✓ CONFIRMADO" if c.get("confirmed") else "✗ NÃO CONFIRMADO"
-        sev_colors = {"critical":"#7a2e2e","high":"#b34e4e","medium":"#d4833a","low":"#4a7c8c","info":"#888"}
-        sev_c = sev_colors.get(c.get("severity","info"),"#888")
+# ── Gerar HTML: Confirmação Ativa (Exploits vs Verificações) ─────────
+def _conf_row(c):
+    status_color = "#27ae60" if c.get("confirmed") else "#b34e4e"
+    status_label = "✓ CONFIRMADO" if c.get("confirmed") else "✗ NÃO CONFIRMADO"
+    sev_colors = {"critical":"#7a2e2e","high":"#b34e4e","medium":"#d4833a","low":"#4a7c8c","info":"#888"}
+    sev_c = sev_colors.get(c.get("severity","info"),"#888")
 
-        # Evidência estruturada: headers + body separados
-        evidence_html = ""
-        if c.get("response_headers"):
-            evidence_html += (
-                f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Response Headers</div>'
-                f'<div class="evidence-box" style="margin-bottom:8px">{html.escape(str(c.get("response_headers","")))}</div>'
-            )
-        if c.get("response_body"):
-            evidence_html += (
-                f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Response Body</div>'
-                f'<div class="evidence-box">{html.escape(str(c.get("response_body","")))}</div>'
-            )
-        if not evidence_html:
-            evidence_html = '<span style="color:#888">—</span>'
-
-        # Curl reproduzível para copy-paste
-        curl_repr = c.get("curl_reproducible") or c.get("curl_command","")
-        curl_html = (
-            f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Reproduzir:</div>'
-            f'<div class="evidence-box" style="background:#1e3a4f;color:#a8d8ea;font-size:11px">'
-            f'{html.escape(curl_repr)}</div>'
-        ) if curl_repr else ""
-
-        conf_rows += (
-            f'<tr>'
-            f'<td style="vertical-align:top">'
-            f'  <code style="font-size:12px">{html.escape(str(c.get("template_id","—")))}</code><br>'
-            f'  <span style="background:{sev_c};color:white;padding:1px 6px;border-radius:3px;font-size:10px">'
-            f'  {str(c.get("severity","info")).upper()}</span>'
-            f'</td>'
-            f'<td style="vertical-align:top"><code style="font-size:11px;word-break:break-all">{html.escape(str(c.get("url","—")))}</code></td>'
-            f'<td style="text-align:center;vertical-align:top">'
-            f'  <span style="background:{status_color};color:white;padding:3px 8px;border-radius:4px;'
-            f'  font-size:11px;font-weight:bold;white-space:nowrap">{status_label}</span><br>'
-            f'  <code style="font-size:13px;font-weight:bold;color:{status_color}">{html.escape(str(c.get("http_status","—")))}</code>'
-            f'</td>'
-            f'<td style="text-align:center;vertical-align:top">'
-            + (lambda conf=c.get("confidence",0), vt=c.get("vuln_type",""):
-                f'<div style="font-size:24px;font-weight:bold;color:{"#27ae60" if conf>=80 else ("#d4833a" if conf>=50 else "#b34e4e")}">{conf}%</div>'
-                f'<div style="font-size:10px;color:#888;margin-top:2px">{html.escape(vt)}</div>'
-            )() +
-            f'</td>'
-            f'<td style="vertical-align:top">'
-            f'<div style="background:#f0f7ff;border-left:3px solid #388bfd;padding:6px 10px;border-radius:3px;font-size:12px;margin-bottom:8px">'
-            f'<strong>Nota:</strong> {html.escape(c.get("poc_note","—"))}</div>'
-            f'{evidence_html}{curl_html}'
-            f'</td>'
-            f'</tr>'
+    evidence_html = ""
+    if c.get("response_headers"):
+        evidence_html += (
+            f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Response Headers</div>'
+            f'<div class="evidence-box" style="margin-bottom:8px">{html.escape(str(c.get("response_headers","")))}</div>'
         )
-    n_conf = sum(1 for c in confirmations if c.get("confirmed"))
-    confirm_html = (
-        f'<h2>Confirmação Ativa de Exploits ({n_conf}/{len(confirmations)} confirmados)</h2>'
-        f'<p style="color:#666;font-size:13px">Cada achado foi re-executado para verificar se permanece ativo. '
-        f'O comando <code>curl</code> reproduzível pode ser copiado e executado diretamente.</p>'
-        f'<table>'
-        f'<tr style="background:#f5f5f5">'
-        f'<th style="width:160px">Template</th>'
-        f'<th>URL</th>'
-        f'<th style="width:110px">Status</th>'
-        f'<th style="width:80px">Confiança</th>'
-        f'<th>Evidência & Nota PoC</th></tr>'
-        + conf_rows +
-        f'</table>'
+    if c.get("response_body"):
+        evidence_html += (
+            f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Response Body</div>'
+            f'<div class="evidence-box">{html.escape(str(c.get("response_body","")))}</div>'
+        )
+    if not evidence_html:
+        evidence_html = '<span style="color:#888">—</span>'
+
+    curl_repr = c.get("curl_reproducible") or c.get("curl_command","")
+    curl_html = (
+        f'<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:3px">Reproduzir:</div>'
+        f'<div class="evidence-box" style="background:#1e3a4f;color:#a8d8ea;font-size:11px">'
+        f'{html.escape(curl_repr)}</div>'
+    ) if curl_repr else ""
+
+    conf = c.get("confidence", 0)
+    vt   = c.get("vuln_type", "")
+    return (
+        f'<tr>'
+        f'<td style="vertical-align:top">'
+        f'  <code style="font-size:12px">{html.escape(str(c.get("template_id","—")))}</code><br>'
+        f'  <span style="background:{sev_c};color:white;padding:1px 6px;border-radius:3px;font-size:10px">'
+        f'  {str(c.get("severity","info")).upper()}</span>'
+        f'</td>'
+        f'<td style="vertical-align:top"><code style="font-size:11px;word-break:break-all">{html.escape(str(c.get("url","—")))}</code></td>'
+        f'<td style="text-align:center;vertical-align:top">'
+        f'  <span style="background:{status_color};color:white;padding:3px 8px;border-radius:4px;'
+        f'  font-size:11px;font-weight:bold;white-space:nowrap">{status_label}</span><br>'
+        f'  <code style="font-size:13px;font-weight:bold;color:{status_color}">{html.escape(str(c.get("http_status","—")))}</code>'
+        f'</td>'
+        f'<td style="text-align:center;vertical-align:top">'
+        f'<div style="font-size:24px;font-weight:bold;color:{"#27ae60" if conf>=80 else ("#d4833a" if conf>=50 else "#b34e4e")}">{conf}%</div>'
+        f'<div style="font-size:10px;color:#888;margin-top:2px">{html.escape(vt)}</div>'
+        f'</td>'
+        f'<td style="vertical-align:top">'
+        f'<div style="background:#f0f7ff;border-left:3px solid #388bfd;padding:6px 10px;border-radius:3px;font-size:12px;margin-bottom:8px">'
+        f'<strong>Nota:</strong> {html.escape(c.get("poc_note","—"))}</div>'
+        f'{evidence_html}{curl_html}'
+        f'</td>'
+        f'</tr>'
     )
+
+def _conf_table(title, subtitle, items):
+    rows = "".join(_conf_row(c) for c in items)
+    return (
+        f'<h3>{title} ({len(items)})</h3>'
+        f'<p style="color:#666;font-size:13px">{subtitle}</p>'
+        f'<table><tr style="background:#f5f5f5">'
+        f'<th style="width:160px">Template</th><th>URL</th>'
+        f'<th style="width:110px">Status</th><th style="width:80px">Confiança</th>'
+        f'<th>Evidência & Nota PoC</th></tr>' + rows + f'</table>'
+    )
+
+if confirmations:
+    _exploits = [c for c in confirmations if c.get("confirmed") and c.get("category") == "exploit"]
+    _verified = [c for c in confirmations if c.get("confirmed") and c.get("category") == "verified"]
+    _notconf  = [c for c in confirmations if not c.get("confirmed")]
+    confirm_html = (
+        f'<h2>Confirmação Ativa — {len(_exploits)} exploit(s) · {len(_verified)} verificação(ões)</h2>'
+        f'<p style="color:#666;font-size:13px">Cada achado foi re-executado. '
+        f'<strong>Exploits</strong> são vulnerabilidades abusáveis diretamente; '
+        f'<strong>verificações</strong> confirmam configurações/hardening (ex: header ausente, '
+        f'config TLS) — relevantes, mas não exploráveis por si só.</p>'
+    )
+    if _exploits:
+        confirm_html += _conf_table(
+            "🔴 Exploits Confirmados",
+            "Vulnerabilidades abusáveis com PoC reproduzível.", _exploits)
+    if _verified:
+        confirm_html += _conf_table(
+            "🔵 Verificações Ativas",
+            "Issues de configuração/hardening confirmados via re-execução.", _verified)
+    if _notconf:
+        confirm_html += _conf_table(
+            "⚪ Não Confirmados",
+            "Achados que não puderam ser confirmados na re-execução.", _notconf)
 else:
     confirm_html = (
         f'<h2>Confirmação Ativa de Exploits</h2>'
