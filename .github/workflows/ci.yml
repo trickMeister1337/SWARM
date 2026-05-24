@@ -53,6 +53,8 @@ jobs:
           bash stiglitz_full.sh -t https://example.com --dry-run \
             --skip-osint --skip-scan --skip-red --output-dir /tmp/full_ci
           test -f /tmp/full_ci/index.html
+          echo "── pipeline.py dry-run (orquestrador) ──"
+          python3 pipeline.py https://example.com --dry-run --outdir /tmp/pipe_ci | grep -q "dry-run"
 
   unit-tests:
     name: Python unit tests
@@ -68,7 +70,7 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run tests
-        run: python3 -m pytest test_lib.py test_swarm_modules.py -v --tb=short
+        run: python3 -m pytest test_lib.py test_swarm_modules.py test_pipeline.py -v --tb=short
 
   integration:
     name: Integration scan (Juice Shop)

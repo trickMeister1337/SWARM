@@ -29,10 +29,12 @@
 !/stiglitz_full.sh
 !/stiglitz_red.sh
 !/stiglitz_report.py
+!/pipeline.py
 !/test_lib.py
 !/test_swarm_modules.py
 !/test_swarm_red.sh
 !/test_integration.py
+!/test_pipeline.py
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/

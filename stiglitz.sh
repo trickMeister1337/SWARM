@@ -1882,18 +1882,28 @@ if _phase_enabled "P11"; then
 phase_start "P11"
 phase_banner "FASE 11/11: GERAÇÃO DE RELATÓRIO"
 
-# Sanitizar variáveis numéricas — evita ValueError no bloco Python se exportadas como ""
-JS_SECRETS="${JS_SECRETS:-0}";    JS_ENDPOINTS="${JS_ENDPOINTS:-0}"
-JS_FRAMEWORKS="${JS_FRAMEWORKS:-0}"; JS_FILES="${JS_FILES:-0}"
-KATANA_URLS="${KATANA_URLS:-0}";  SMUGGLER_FOUND="${SMUGGLER_FOUND:-0}"
-FFUF_FOUND="${FFUF_FOUND:-0}";    TRUFFLEHOG_FOUND="${TRUFFLEHOG_FOUND:-0}"
-ACTIVE_COUNT="${ACTIVE_COUNT:-0}"; SUB_COUNT="${SUB_COUNT:-0}"
-TLS_ISSUES="${TLS_ISSUES:-0}";    CONFIRMED_COUNT="${CONFIRMED_COUNT:-0}"
-EMAIL_ISSUES="${EMAIL_ISSUES:-0}"; OPENAPI_FOUND="${OPENAPI_FOUND:-0}"
+# Vars sempre válidas (derivadas dos args / disponíveis em qualquer invocação)
 AUTH_TOKEN="${AUTH_TOKEN:-}";     AUTH_HEADER="${AUTH_HEADER:-}"
-WAF_DETECTED="${WAF_DETECTED:-false}"; WAF_NAME="${WAF_NAME:-}"
-WPSCAN_VULNS="${WPSCAN_VULNS:-0}"
-export OUTDIR TARGET DOMAIN OPEN_PORTS ACTIVE_COUNT SUB_COUNT IS_SUBDOMAIN OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT SCAN_START_TS JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND AUTH_TOKEN AUTH_HEADER WPSCAN_VULNS
+export OUTDIR TARGET DOMAIN SCAN_START_TS IS_SUBDOMAIN AUTH_TOKEN AUTH_HEADER
+
+if [ -z "$ONLY_PHASES" ]; then
+    # Run monolítico: os contadores foram calculados em memória pelas fases anteriores.
+    # Sanitizar (evita ValueError no Python se vierem como "") e exportar.
+    JS_SECRETS="${JS_SECRETS:-0}";    JS_ENDPOINTS="${JS_ENDPOINTS:-0}"
+    JS_FRAMEWORKS="${JS_FRAMEWORKS:-0}"; JS_FILES="${JS_FILES:-0}"
+    KATANA_URLS="${KATANA_URLS:-0}";  SMUGGLER_FOUND="${SMUGGLER_FOUND:-0}"
+    FFUF_FOUND="${FFUF_FOUND:-0}";    TRUFFLEHOG_FOUND="${TRUFFLEHOG_FOUND:-0}"
+    ACTIVE_COUNT="${ACTIVE_COUNT:-0}"; SUB_COUNT="${SUB_COUNT:-0}"
+    TLS_ISSUES="${TLS_ISSUES:-0}";    CONFIRMED_COUNT="${CONFIRMED_COUNT:-0}"
+    EMAIL_ISSUES="${EMAIL_ISSUES:-0}"; OPENAPI_FOUND="${OPENAPI_FOUND:-0}"
+    WAF_DETECTED="${WAF_DETECTED:-false}"; WAF_NAME="${WAF_NAME:-}"
+    WPSCAN_VULNS="${WPSCAN_VULNS:-0}"
+    export OPEN_PORTS ACTIVE_COUNT SUB_COUNT OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT \
+           JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES KATANA_URLS WAF_DETECTED WAF_NAME \
+           EMAIL_ISSUES SMUGGLER_FOUND FFUF_FOUND TRUFFLEHOG_FOUND WPSCAN_VULNS
+fi
+# Em modo --only-phase (orquestrador pipeline.py), os contadores NÃO são exportados
+# de propósito — o stiglitz_report.py os deriva de raw/* (ver _env_or / _derive_*).
 
 # Usar stiglitz_report.py externo se disponível (manutenção mais fácil)
 _report_py="$(dirname "$0")/stiglitz_report.py"
