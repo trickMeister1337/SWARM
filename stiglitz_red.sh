@@ -390,7 +390,7 @@ PYEOF
 
     _build_scored_targets
     local n_urls
-    n_urls=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null || echo 0)
+    n_urls=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null); n_urls=${n_urls:-0}
     info "Ingestão: ${n_urls} URL(s) priorizadas para teste"
     log "Ingestão: ${n_urls} URLs | CVEs: $(wc -l < "$OUTDIR/data/cves_found.txt" 2>/dev/null || echo 0)"
 }
@@ -519,7 +519,7 @@ run_sqli() {
     fi
 
     local _sqli_targets
-    _sqli_targets=$(awk -F'|' '$1>=3{count++} END{print count+0}' "$OUTDIR/data/targets_scored.txt" 2>/dev/null || echo 0)
+    _sqli_targets=$(awk -F'|' '$1>=3{count++} END{print count+0}' "$OUTDIR/data/targets_scored.txt" 2>/dev/null); _sqli_targets=${_sqli_targets:-0}
     log "Fase SQLi: ${_sqli_targets} URL(s) com score≥3 (parâmetros sensíveis)"
 
     source "$LIB/sqli.sh"
@@ -536,7 +536,7 @@ run_sqli() {
         "$AUTH_HEADER"
 
     local _sqli_confirmed
-    _sqli_confirmed=$(grep -cE "SQLI" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    _sqli_confirmed=$(grep -cE "SQLI" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); _sqli_confirmed=${_sqli_confirmed:-0}
     log "Fase SQLi concluída — $(($(date +%s)-_t0))s | confirmados: ${_sqli_confirmed}"
     checkpoint_done "sqli"
 }
@@ -564,7 +564,7 @@ run_xss() {
     fi
 
     local _xss_targets
-    _xss_targets=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null || echo 0)
+    _xss_targets=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null); _xss_targets=${_xss_targets:-0}
     log "Fase XSS: ${_xss_targets} URL(s) alvo"
 
     source "$LIB/xss.sh"
@@ -577,7 +577,7 @@ run_xss() {
         "$AUTH_HEADER"
 
     local _xss_confirmed
-    _xss_confirmed=$(grep -cE "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    _xss_confirmed=$(grep -cE "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); _xss_confirmed=${_xss_confirmed:-0}
     log "Fase XSS concluída — $(($(date +%s)-_t0))s | confirmados: ${_xss_confirmed}"
     checkpoint_done "xss"
 }
@@ -624,7 +624,7 @@ run_brute() {
     _run_http_form_brute
 
     local _brute_confirmed
-    _brute_confirmed=$(grep -cE "BRUTE|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    _brute_confirmed=$(grep -cE "BRUTE|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); _brute_confirmed=${_brute_confirmed:-0}
     log "Fase Brute concluída — $(($(date +%s)-_t0))s | confirmados: ${_brute_confirmed}"
     checkpoint_done "brute"
 }
@@ -1018,9 +1018,9 @@ main() {
 
     # Notificação ao finalizar
     local n_sqli_f n_xss_f n_brute_f n_total_f
-    n_sqli_f=$(grep -c "SQLI\|SQL_INJECT" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
-    n_xss_f=$(grep -c "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
-    n_brute_f=$(grep -c "BRUTE\|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+    n_sqli_f=$(grep -c "SQLI\|SQL_INJECT" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); n_sqli_f=${n_sqli_f:-0}
+    n_xss_f=$(grep -c "XSS" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); n_xss_f=${n_xss_f:-0}
+    n_brute_f=$(grep -c "BRUTE\|CREDENTIAL" "$OUTDIR/exploits_confirmed.csv" 2>/dev/null); n_brute_f=${n_brute_f:-0}
     n_total_f=$(( n_sqli_f + n_xss_f + n_brute_f ))
     send_notification "[Stiglitz RED v${VERSION}] Concluído
 Alvo: ${SCOPE_DOMAINS[*]}

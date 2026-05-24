@@ -227,8 +227,8 @@ run_osint() {
         # Extrair métricas do osint_summary.json se existir
         local summary="$OSINT_DIR/osint_summary.json"
         if [ -f "$summary" ]; then
-            OSINT_SUBDOMAINS=$(python3 -c "import json; d=json.load(open('$summary')); print(d.get('subdomains_live',d.get('subdomains',0)))" 2>/dev/null || echo 0)
-            OSINT_LEAKS=$(python3 -c "import json; d=json.load(open('$summary')); print(d.get('leaked_accounts',0))" 2>/dev/null || echo 0)
+            OSINT_SUBDOMAINS=$(python3 -c "import json; d=json.load(open('$summary')); print(d.get('subdomains_live',d.get('subdomains',0)))" 2>/dev/null); OSINT_SUBDOMAINS=${OSINT_SUBDOMAINS:-0}
+            OSINT_LEAKS=$(python3 -c "import json; d=json.load(open('$summary')); print(d.get('leaked_accounts',0))" 2>/dev/null); OSINT_LEAKS=${OSINT_LEAKS:-0}
         fi
         info "OSINT: ${DOMAIN} — ${OSINT_SUBDOMAINS} subdomínios | ${OSINT_LEAKS} vazamentos | $(fmt_time $T_OSINT)"
         log "OSINT_DIR=$OSINT_DIR"
@@ -286,7 +286,7 @@ try:
 except: print(0)
 " 2>/dev/null || echo 0)
         fi
-        SCAN_CVES=$(wc -l < "$SCAN_DIR/raw/cves_found.txt" 2>/dev/null || echo 0)
+        SCAN_CVES=$(wc -l < "$SCAN_DIR/raw/cves_found.txt" 2>/dev/null); SCAN_CVES=${SCAN_CVES:-0}
         info "Stiglitz: ${SCAN_FINDINGS} findings | ${SCAN_CONFIRMED} confirmados | ${SCAN_CVES} CVEs | $(fmt_time $T_SCAN)"
         log "SCAN_DIR=$SCAN_DIR"
     else
@@ -329,9 +329,9 @@ run_red() {
     [ "$_after" != "$_before" ] && [ -n "$_after" ] && RED_DIR="$_after"
 
     if [ -n "$RED_DIR" ] && [ -f "$RED_DIR/exploits_confirmed.csv" ]; then
-        RED_SQLI=$(grep -c "SQLI\|SQL_INJECT" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
-        RED_XSS=$(grep -c "XSS" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
-        RED_BRUTE=$(grep -c "BRUTE\|CREDENTIAL" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null || echo 0)
+        RED_SQLI=$(grep -c "SQLI\|SQL_INJECT" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null); RED_SQLI=${RED_SQLI:-0}
+        RED_XSS=$(grep -c "XSS" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null); RED_XSS=${RED_XSS:-0}
+        RED_BRUTE=$(grep -c "BRUTE\|CREDENTIAL" "$RED_DIR/exploits_confirmed.csv" 2>/dev/null); RED_BRUTE=${RED_BRUTE:-0}
         local total=$(( RED_SQLI + RED_XSS + RED_BRUTE ))
         info "Stiglitz RED: ${total} finding(s) (SQLi:${RED_SQLI} XSS:${RED_XSS} Brute:${RED_BRUTE}) | $(fmt_time $T_RED)"
         log "RED_DIR=$RED_DIR"
@@ -555,7 +555,7 @@ main() {
         FULL_DIR="full_${domain_safe}_${ts}"
     fi
     mkdir -p "$FULL_DIR"
-    LOG="$FULL_DIR/swarm_full.log"
+    LOG="$FULL_DIR/stiglitz_full.log"
 
     banner
     log "Stiglitz FULL v${VERSION} iniciado — Alvo=${TARGET} Perfil=${PROFILE}"

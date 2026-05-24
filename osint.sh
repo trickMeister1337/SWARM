@@ -369,7 +369,7 @@ for n in sorted(names):
     print(n)
 " > "$OUTDIR/crtsh_subdomains.txt" 2>/dev/null || touch "$OUTDIR/crtsh_subdomains.txt"
         local crt_count
-        crt_count=$(wc -l < "$OUTDIR/crtsh_subdomains.txt" 2>/dev/null || echo 0)
+        crt_count=$(wc -l < "$OUTDIR/crtsh_subdomains.txt" 2>/dev/null); crt_count=${crt_count:-0}
         info "crt.sh → ${crt_count} nomes de certificados"
     else
         warn "crt.sh: sem resultado ou API indisponível"
@@ -412,7 +412,7 @@ phase_subdomain_discovery() {
         timeout 120 subfinder -d "$DOMAIN" -silent -all 2>/dev/null \
             > "$OUTDIR/subfinder.txt" || true
         local sf_count
-        sf_count=$(wc -l < "$OUTDIR/subfinder.txt" 2>/dev/null || echo 0)
+        sf_count=$(wc -l < "$OUTDIR/subfinder.txt" 2>/dev/null); sf_count=${sf_count:-0}
         info "subfinder → ${sf_count} subdomínios"
         sources+=("$OUTDIR/subfinder.txt")
     else
@@ -425,7 +425,7 @@ phase_subdomain_discovery() {
         timeout 180 amass enum -passive -d "$DOMAIN" \
             -o "$OUTDIR/amass.txt" 2>/dev/null || true
         local am_count
-        am_count=$(wc -l < "$OUTDIR/amass.txt" 2>/dev/null || echo 0)
+        am_count=$(wc -l < "$OUTDIR/amass.txt" 2>/dev/null); am_count=${am_count:-0}
         info "amass → ${am_count} subdomínios"
         sources+=("$OUTDIR/amass.txt")
     else
@@ -444,7 +444,7 @@ phase_subdomain_discovery() {
         touch "$OUTDIR/subdomains_passive.txt"
     fi
 
-    SUBDOMAINS_FOUND=$(wc -l < "$OUTDIR/subdomains_passive.txt" 2>/dev/null || echo 0)
+    SUBDOMAINS_FOUND=$(wc -l < "$OUTDIR/subdomains_passive.txt" 2>/dev/null); SUBDOMAINS_FOUND=${SUBDOMAINS_FOUND:-0}
     info "Total subdomínios únicos → ${SUBDOMAINS_FOUND}"
 
     # dnsx — quais estão vivos
@@ -455,7 +455,7 @@ phase_subdomain_discovery() {
             -silent -resp -a -cname \
             > "$OUTDIR/subdomains_live.txt" 2>/dev/null || true
         local live_count
-        live_count=$(wc -l < "$OUTDIR/subdomains_live.txt" 2>/dev/null || echo 0)
+        live_count=$(wc -l < "$OUTDIR/subdomains_live.txt" 2>/dev/null); live_count=${live_count:-0}
         info "Subdomínios ativos → ${live_count}"
     else
         cp "$OUTDIR/subdomains_passive.txt" "$OUTDIR/subdomains_live.txt" 2>/dev/null || true
@@ -500,7 +500,7 @@ for e in data.get('data', {}).get('emails', []):
         print(v)
 " 2>/dev/null > "$OUTDIR/emails_hunter.txt" || true
             local h_count
-            h_count=$(wc -l < "$OUTDIR/emails_hunter.txt" 2>/dev/null || echo 0)
+            h_count=$(wc -l < "$OUTDIR/emails_hunter.txt" 2>/dev/null); h_count=${h_count:-0}
             info "Hunter.io → ${h_count} e-mails"
         fi
     else
@@ -526,7 +526,7 @@ except:
     } | grep -iE "^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$" \
       | sort -u > "$OUTDIR/emails.txt" 2>/dev/null || true
 
-    EMAILS_FOUND=$(wc -l < "$OUTDIR/emails.txt" 2>/dev/null || echo 0)
+    EMAILS_FOUND=$(wc -l < "$OUTDIR/emails.txt" 2>/dev/null); EMAILS_FOUND=${EMAILS_FOUND:-0}
     info "Total e-mails únicos → ${EMAILS_FOUND}"
 
     # Funcionários do theHarvester
@@ -541,7 +541,7 @@ except:
     pass
 " 2>/dev/null > "$OUTDIR/employees.txt" || true
         local emp_count
-        emp_count=$(wc -l < "$OUTDIR/employees.txt" 2>/dev/null || echo 0)
+        emp_count=$(wc -l < "$OUTDIR/employees.txt" 2>/dev/null); emp_count=${emp_count:-0}
         [ "$emp_count" -gt 0 ] && info "Funcionários identificados → ${emp_count}"
     fi
 }
@@ -561,7 +561,7 @@ phase_historical_urls() {
         echo "$DOMAIN" | timeout 180 waybackurls 2>/dev/null \
             > "$OUTDIR/waybackurls.txt" || true
         local wb_count
-        wb_count=$(wc -l < "$OUTDIR/waybackurls.txt" 2>/dev/null || echo 0)
+        wb_count=$(wc -l < "$OUTDIR/waybackurls.txt" 2>/dev/null); wb_count=${wb_count:-0}
         info "waybackurls → ${wb_count} URLs"
         url_sources+=("$OUTDIR/waybackurls.txt")
     else
@@ -574,7 +574,7 @@ phase_historical_urls() {
         echo "$DOMAIN" | timeout 180 gau --subs 2>/dev/null \
             > "$OUTDIR/gau_urls.txt" || true
         local gau_count
-        gau_count=$(wc -l < "$OUTDIR/gau_urls.txt" 2>/dev/null || echo 0)
+        gau_count=$(wc -l < "$OUTDIR/gau_urls.txt" 2>/dev/null); gau_count=${gau_count:-0}
         info "gau → ${gau_count} URLs"
         url_sources+=("$OUTDIR/gau_urls.txt")
     else
@@ -583,7 +583,7 @@ phase_historical_urls() {
 
     if [ ${#url_sources[@]} -gt 0 ]; then
         sort -u "${url_sources[@]}" 2>/dev/null > "$OUTDIR/historical_urls.txt" || true
-        URLS_FOUND=$(wc -l < "$OUTDIR/historical_urls.txt" 2>/dev/null || echo 0)
+        URLS_FOUND=$(wc -l < "$OUTDIR/historical_urls.txt" 2>/dev/null); URLS_FOUND=${URLS_FOUND:-0}
         info "Total URLs históricas únicas → ${URLS_FOUND}"
 
         # Endpoints com parâmetros ou arquivos dinâmicos
@@ -592,7 +592,7 @@ phase_historical_urls() {
             grep -E '\?[a-zA-Z].*=' "$OUTDIR/historical_urls.txt" 2>/dev/null || true
         } | sort -u > "$OUTDIR/interesting_endpoints.txt" 2>/dev/null || true
         local ep_count
-        ep_count=$(wc -l < "$OUTDIR/interesting_endpoints.txt" 2>/dev/null || echo 0)
+        ep_count=$(wc -l < "$OUTDIR/interesting_endpoints.txt" 2>/dev/null); ep_count=${ep_count:-0}
         info "Endpoints dinâmicos/com parâmetros → ${ep_count}"
     else
         warn "Nenhuma ferramenta de URL histórica disponível"
@@ -696,7 +696,7 @@ phase_leaked_creds() {
     fi
 
     local email_count
-    email_count=$(wc -l < "$OUTDIR/emails.txt" 2>/dev/null || echo 0)
+    email_count=$(wc -l < "$OUTDIR/emails.txt" 2>/dev/null); email_count=${email_count:-0}
 
     if [ "$email_count" -eq 0 ]; then
         warn "Nenhum e-mail coletado — HIBP check ignorado"
@@ -818,7 +818,7 @@ except:
     done
 
     local cve_count
-    cve_count=$(wc -l < "$OUTDIR/shodan/cves_from_shodan.txt" 2>/dev/null || echo 0)
+    cve_count=$(wc -l < "$OUTDIR/shodan/cves_from_shodan.txt" 2>/dev/null); cve_count=${cve_count:-0}
     [ "$cve_count" -gt 0 ] && \
         warn "CVEs via Shodan → ${cve_count}" || \
         info "CVEs via Shodan → nenhum identificado"
@@ -959,7 +959,7 @@ phase_build_outputs() {
     } | sort -u > "$OUTDIR/targets_enriched.txt" 2>/dev/null || true
 
     local target_count
-    target_count=$(wc -l < "$OUTDIR/targets_enriched.txt" 2>/dev/null || echo 0)
+    target_count=$(wc -l < "$OUTDIR/targets_enriched.txt" 2>/dev/null); target_count=${target_count:-0}
     info "targets_enriched.txt → ${target_count} alvos"
 
     # endpoints_historical.txt — para ffuf/nuclei no stiglitz.sh

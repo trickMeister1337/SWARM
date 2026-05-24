@@ -105,7 +105,7 @@ hosts -o $msf_dir/hosts.csv
 exit -y" 2>/dev/null || true
 
     local cred_count vuln_count
-    cred_count=$(tail -n +2 "$msf_dir/creds.csv" 2>/dev/null | grep -c . || echo 0)
-    vuln_count=$(tail -n +2 "$msf_dir/vulns.csv" 2>/dev/null | grep -c . || echo 0)
+    cred_count=$(tail -n +2 "$msf_dir/creds.csv" 2>/dev/null | grep -c .); cred_count=${cred_count:-0}
+    vuln_count=$(tail -n +2 "$msf_dir/vulns.csv" 2>/dev/null | grep -c .); vuln_count=${vuln_count:-0}
     echo "[msf] Concluído: $vuln_count vuln(s), $cred_count credencial(is)"
 }

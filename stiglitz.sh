@@ -515,7 +515,7 @@ if command -v httpx &>/dev/null; then
         httpx -silent -status-code -title -tech-detect -timeout 5 \
               -o "$OUTDIR/raw/httpx_results.txt" 2>"$OUTDIR/raw/httpx_error.log"
     [ -f "$OUTDIR/raw/httpx_results.txt" ] && \
-        ACTIVE_COUNT=$(grep -c . "$OUTDIR/raw/httpx_results.txt" 2>/dev/null || echo 0)
+        ACTIVE_COUNT=$(grep -c . "$OUTDIR/raw/httpx_results.txt" 2>/dev/null); ACTIVE_COUNT=${ACTIVE_COUNT:-0}
     echo -e "  ${GREEN}[✓] $ACTIVE_COUNT subdomínio(s) ativo(s) detectado(s)${NC}"
 else
     echo -e "  ${YELLOW}[○] httpx não disponível — pulando mapeamento HTTP${NC}"
@@ -854,7 +854,7 @@ except: pass
            > /dev/null 2>"$OUTDIR/raw/nuclei_error.log"
 
     if [ -s "$OUTDIR/raw/nuclei.json" ]; then
-        NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null || echo 0)
+        NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null); NUCLEI_COUNT=${NUCLEI_COUNT:-0}
         echo -e "  ${GREEN}[✓] Nuclei concluído. $NUCLEI_COUNT vulnerabilidade(s)${NC}"
         # Atualizar metadata com resultado Nuclei
         python3 -c "
@@ -873,7 +873,7 @@ if os.path.exists(mf):
                -timeout 10 -no-interactsh \
                -jsonl -o "$OUTDIR/raw/nuclei.json" \
                > /dev/null 2>>"$OUTDIR/raw/nuclei_error.log"
-        NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null || echo 0)
+        NUCLEI_COUNT=$(grep -c . "$OUTDIR/raw/nuclei.json" 2>/dev/null); NUCLEI_COUNT=${NUCLEI_COUNT:-0}
         echo -e "  ${GREEN}[✓] $NUCLEI_COUNT vulnerabilidade(s) encontrada(s)${NC}"
     fi
 else
@@ -1364,10 +1364,10 @@ python3 "$SCRIPT_DIR/lib/js_analysis.py" "$OUTDIR" "$TARGET" "$DOMAIN"
 
 # Coletar contadores para o relatório
 if [ -f "$OUTDIR/raw/js_analysis.json" ]; then
-    JS_SECRETS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('secrets',[])))" 2>/dev/null || echo 0)
-    JS_ENDPOINTS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('endpoints',[])))" 2>/dev/null || echo 0)
-    JS_FRAMEWORKS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('frameworks',[])))" 2>/dev/null || echo 0)
-    JS_FILES=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('js_files',[])))" 2>/dev/null || echo 0)
+    JS_SECRETS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('secrets',[])))" 2>/dev/null); JS_SECRETS=${JS_SECRETS:-0}
+    JS_ENDPOINTS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('endpoints',[])))" 2>/dev/null); JS_ENDPOINTS=${JS_ENDPOINTS:-0}
+    JS_FRAMEWORKS=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('frameworks',[])))" 2>/dev/null); JS_FRAMEWORKS=${JS_FRAMEWORKS:-0}
+    JS_FILES=$(python3 -c "import json; d=json.load(open('$OUTDIR/raw/js_analysis.json')); print(len(d.get('js_files',[])))" 2>/dev/null); JS_FILES=${JS_FILES:-0}
     echo -e "  ${GREEN}[✓] JS: $JS_FILES arquivo(s) | $JS_SECRETS secret(s) | $JS_ENDPOINTS endpoint(s) | $JS_FRAMEWORKS framework(s)${NC}"
     phase_end "P10"
     phase_done "FASE_10"
@@ -1780,7 +1780,7 @@ elif [ "$_cms_to_run" = "joomscan" ]; then
         timeout 180 joomscan -u "$TARGET" --ec \
             > "$OUTDIR/raw/joomscan.txt" 2>/dev/null || true
         if [ -s "$OUTDIR/raw/joomscan.txt" ]; then
-            _joom_items=$(grep -c "^\[!" "$OUTDIR/raw/joomscan.txt" 2>/dev/null || echo 0)
+            _joom_items=$(grep -c "^\[!" "$OUTDIR/raw/joomscan.txt" 2>/dev/null); _joom_items=${_joom_items:-0}
             echo -e "  ${GREEN}[✓]${NC} joomscan: ${_joom_items} item(s) de segurança identificado(s)"
         fi
         unset _joom_items
@@ -1921,7 +1921,7 @@ _swarm_notify() {
     fi
 }
 
-_n_findings=$(grep -c '"severity":\s*"\(critical\|high\)"' "${OUTDIR}/findings.json" 2>/dev/null || echo 0)
+_n_findings=$(grep -c '"severity":\s*"\(critical\|high\)"' "${OUTDIR}/findings.json" 2>/dev/null); _n_findings=${_n_findings:-0}
 _swarm_notify "[Stiglitz] Scan concluído
 Alvo: ${TARGET:-${DOMAIN}}
 Findings críticos/altos: ${_n_findings}

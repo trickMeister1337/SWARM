@@ -43,6 +43,17 @@ jobs:
             python3 -m py_compile "$f"
           done
 
+      - name: Smoke test (dry-run, no tools)
+        run: |
+          set -e
+          echo "── Stiglitz RED dry-run ──"
+          bash stiglitz_red.sh -t https://example.com --standalone --dry-run -p staging
+          ls stiglitz_red_example.com_*/stiglitz_red_report.html
+          echo "── Stiglitz FULL dry-run ──"
+          bash stiglitz_full.sh -t https://example.com --dry-run \
+            --skip-osint --skip-scan --skip-red --output-dir /tmp/full_ci
+          test -f /tmp/full_ci/index.html
+
   unit-tests:
     name: Python unit tests
     runs-on: ubuntu-latest
