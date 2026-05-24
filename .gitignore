@@ -35,6 +35,8 @@
 !/test_swarm_red.sh
 !/test_integration.py
 !/test_pipeline.py
+!/test_e2e.py
+!/test_fixtures
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/
