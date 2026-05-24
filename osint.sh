@@ -1045,7 +1045,7 @@ def table_rows(name, limit=300):
         if not line or line.startswith("#"):
             continue
         rows += f'<tr><td><code>{esc(line)}</code></td></tr>\n'
-    return rows or '<tr><td style="color:#999;font-style:italic">Nenhum dado coletado</td></tr>'
+    return rows or '<tr><td style="color:#999;font-style:italic">No data collected</td></tr>'
 
 def section(sid, title, filename, limit=300, badge=None):
     badge_html = f' <span class="cnt-badge">{badge}</span>' if badge else ""
@@ -1066,7 +1066,7 @@ def section2(sid, title, filename, col1, col2, limit=300, badge=None):
         parts = line.split(",", 1) if "," in line else [line, ""]
         rows += f'<tr><td><code>{esc(parts[0])}</code></td><td>{esc(parts[1] if len(parts)>1 else "")}</td></tr>\n'
     if not rows:
-        rows = f'<tr><td colspan="2" style="color:#999;font-style:italic">Nenhum dado coletado</td></tr>'
+        rows = f'<tr><td colspan="2" style="color:#999;font-style:italic">No data collected</td></tr>'
     return f"""
 <h2 id="{sid}">{esc(title)}{badge_html}</h2>
 <table><thead><tr><th>{esc(col1)}</th><th>{esc(col2)}</th></tr></thead><tbody>
@@ -1106,10 +1106,10 @@ code{background:#f4f4f4;padding:1px 5px;border-radius:3px;font-size:.85em;font-f
 # Níveis de risco para leaks e buckets
 leak_cls  = "s-crit" if leaks  > 0 else "s-info"
 buck_cls  = "s-warn" if buckets > 0 else "s-info"
-leak_ib   = ('<div class="ib crit"><strong>⚠ Vazamentos encontrados:</strong> '
-             f'{leaks} conta(s) em breach databases. Verificar leaked_creds.csv.</div>') if leaks > 0 else ""
-buck_ib   = ('<div class="ib warn"><strong>⚠ Buckets cloud identificados:</strong> '
-             f'{buckets} bucket(s) S3/Azure. Verificar cloud/buckets_found.csv.</div>') if buckets > 0 else ""
+leak_ib   = ('<div class="ib crit"><strong>⚠ Leaks found:</strong> '
+             f'{leaks} account(s) in breach databases. See leaked_creds.csv.</div>') if leaks > 0 else ""
+buck_ib   = ('<div class="ib warn"><strong>⚠ Cloud buckets identified:</strong> '
+             f'{buckets} S3/Azure bucket(s). See cloud/buckets_found.csv.</div>') if buckets > 0 else ""
 
 sub_count  = count_lines("subdomains_passive.txt")
 live_count = count_lines("subdomains_live.txt")
@@ -1118,7 +1118,7 @@ cve_count  = count_lines("shodan/cves_from_shodan.txt")
 tkover     = count_lines("cloud/takeover_candidates.csv")
 
 report = f"""<!DOCTYPE html>
-<html lang="pt-br">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -1131,93 +1131,93 @@ report = f"""<!DOCTYPE html>
 <div class="hdr">
   <h1>Stiglitz OSINT — Pre-Engagement Intelligence Report</h1>
   <div class="sub">{esc(domain)}</div>
-  <div class="meta">Data: {now} &nbsp;|&nbsp; Stiglitz OSINT v{esc(version)}</div>
-  <div class="cls">CONFIDENCIAL — OSINT — DISTRIBUIÇÃO RESTRITA</div>
+  <div class="meta">Date: {now} &nbsp;|&nbsp; Stiglitz OSINT v{esc(version)}</div>
+  <div class="cls">CONFIDENTIAL — OSINT — RESTRICTED DISTRIBUTION</div>
 </div>
 
 <div class="cnt">
 
-<div class="toc"><strong>Índice</strong><ol>
-<li><a href="#s1">Sumário Executivo</a></li>
+<div class="toc"><strong>Contents</strong><ol>
+<li><a href="#s1">Executive Summary</a></li>
 <li><a href="#s2">Domain Intelligence</a></li>
-<li><a href="#s3">Subdomínios</a></li>
-<li><a href="#s4">E-mails &amp; Funcionários</a></li>
-<li><a href="#s5">URLs Históricas &amp; Endpoints</a></li>
+<li><a href="#s3">Subdomains</a></li>
+<li><a href="#s4">Emails &amp; Staff</a></li>
+<li><a href="#s5">Historical URLs &amp; Endpoints</a></li>
 <li><a href="#s6">GitHub Dorking</a></li>
-<li><a href="#s7">Vazamentos (HIBP)</a></li>
+<li><a href="#s7">Leaks (HIBP)</a></li>
 <li><a href="#s8">Shodan Intelligence</a></li>
 <li><a href="#s9">Cloud Surface</a></li>
 <li><a href="#s10">Email Security</a></li>
 </ol></div>
 
-<h2 id="s1">Sumário Executivo</h2>
+<h2 id="s1">Executive Summary</h2>
 <div class="sts">
-  <div class="sc s-neu"><div class="n">{subdomains}</div><div class="l">Subdomínios</div></div>
-  <div class="sc s-neu"><div class="n">{live_count}</div><div class="l">Ativos</div></div>
-  <div class="sc s-neu"><div class="n">{emails}</div><div class="l">E-mails</div></div>
-  <div class="sc s-neu"><div class="n">{urls}</div><div class="l">URLs Históricas</div></div>
+  <div class="sc s-neu"><div class="n">{subdomains}</div><div class="l">Subdomains</div></div>
+  <div class="sc s-neu"><div class="n">{live_count}</div><div class="l">Live</div></div>
+  <div class="sc s-neu"><div class="n">{emails}</div><div class="l">Emails</div></div>
+  <div class="sc s-neu"><div class="n">{urls}</div><div class="l">Historical URLs</div></div>
   <div class="sc s-neu"><div class="n">{ep_count}</div><div class="l">Endpoints</div></div>
-  <div class="sc {leak_cls}"><div class="n">{leaks}</div><div class="l">Vazamentos</div></div>
+  <div class="sc {leak_cls}"><div class="n">{leaks}</div><div class="l">Leaks</div></div>
   <div class="sc {buck_cls}"><div class="n">{buckets}</div><div class="l">Cloud Buckets</div></div>
   <div class="sc {'s-crit' if cve_count > 0 else 's-info'}"><div class="n">{cve_count}</div><div class="l">CVEs (Shodan)</div></div>
 </div>
 
 {leak_ib}
 {buck_ib}
-{'<div class="ib warn"><strong>⚠ Candidatos a subdomain takeover:</strong> ' + str(tkover) + ' subdomínio(s). Verificar cloud/takeover_candidates.csv.</div>' if tkover > 0 else ""}
+{'<div class="ib warn"><strong>⚠ Subdomain takeover candidates:</strong> ' + str(tkover) + ' subdomain(s). See cloud/takeover_candidates.csv.</div>' if tkover > 0 else ""}
 
-<div class="ib"><strong>Alvo:</strong> {esc(domain)} &nbsp;|&nbsp;
-<strong>Gerado em:</strong> {now} &nbsp;|&nbsp;
-<strong>Próximo passo:</strong> <code>bash stiglitz.sh {esc(domain)} --osint-dir &lt;este_dir&gt;/</code></div>
+<div class="ib"><strong>Target:</strong> {esc(domain)} &nbsp;|&nbsp;
+<strong>Generated:</strong> {now} &nbsp;|&nbsp;
+<strong>Next step:</strong> <code>bash stiglitz.sh {esc(domain)} --osint-dir &lt;este_dir&gt;/</code></div>
 
 <h2 id="s2">Domain Intelligence</h2>
 {section("s2-dns", "DNS Records", "dns_records.txt", 100)}
 {section("s2-asn", "ASN / CIDR", "asn_info.txt", 20)}
 {section("s2-es", "Email Security (SPF / DMARC / DKIM)", "email_security.txt", 30)}
 
-<h2 id="s3">Subdomínios</h2>
-{section("s3-p", "Subdomínios Passivos", "subdomains_passive.txt", 500,
+<h2 id="s3">Subdomains</h2>
+{section("s3-p", "Passive Subdomains", "subdomains_passive.txt", 500,
          badge=str(sub_count))}
-{section("s3-l", "Subdomínios Ativos (dnsx)", "subdomains_live.txt", 500,
+{section("s3-l", "Live Subdomains (dnsx)", "subdomains_live.txt", 500,
          badge=str(live_count))}
 
-<h2 id="s4">E-mails &amp; Funcionários</h2>
-{section("s4-e", "E-mails Coletados", "emails.txt", 200,
+<h2 id="s4">Emails &amp; Staff</h2>
+{section("s4-e", "Collected Emails", "emails.txt", 200,
          badge=str(emails))}
-{section("s4-p", "Funcionários Identificados", "employees.txt", 100)}
+{section("s4-p", "Identified Staff", "employees.txt", 100)}
 
-<h2 id="s5">URLs Históricas &amp; Endpoints</h2>
-{section("s5-ep", "Endpoints com Parâmetros / Dinâmicos", "interesting_endpoints.txt", 300,
+<h2 id="s5">Historical URLs &amp; Endpoints</h2>
+{section("s5-ep", "Endpoints with Parameters / Dynamic", "interesting_endpoints.txt", 300,
          badge=str(ep_count))}
-{section("s5-u", "URLs Históricas (amostra)", "historical_urls.txt", 100,
+{section("s5-u", "Historical URLs (sample)", "historical_urls.txt", 100,
          badge=str(urls))}
 
 <h2 id="s6">GitHub Dorking</h2>
-{section("s6-t", "trufflehog — Segredos em Repositórios Públicos", "github_leaks/trufflehog.json", 50)}
+{section("s6-t", "trufflehog — Secrets in Public Repositories", "github_leaks/trufflehog.json", 50)}
 
-<h2 id="s7">Vazamentos (HaveIBeenPwned)</h2>
+<h2 id="s7">Leaks (HaveIBeenPwned)</h2>
 {section2("s7-l", "Leaked Credentials", "leaked_creds.csv",
-          "E-mail / Breach", "Data Classes / Fonte", 200,
+          "Email / Breach", "Data Classes / Source", 200,
           badge=str(leaks) if leaks > 0 else None)}
 
 <h2 id="s8">Shodan Intelligence</h2>
-{section("s8-svc", "Serviços Expostos", "shodan/exposed_services.txt", 100)}
-{section("s8-cve", "CVEs Identificados via Shodan", "shodan/cves_from_shodan.txt", 100,
+{section("s8-svc", "Exposed Services", "shodan/exposed_services.txt", 100)}
+{section("s8-cve", "CVEs Identified via Shodan", "shodan/cves_from_shodan.txt", 100,
          badge=str(cve_count) if cve_count > 0 else None)}
 
 <h2 id="s9">Cloud Surface</h2>
-{section2("s9-b", "Buckets S3 / Azure Identificados", "cloud/buckets_found.csv",
+{section2("s9-b", "Identified S3 / Azure Buckets", "cloud/buckets_found.csv",
           "Bucket", "Cloud / Status / URL", 100,
           badge=str(buckets) if buckets > 0 else None)}
-{section2("s9-tk", "Candidatos a Subdomain Takeover", "cloud/takeover_candidates.csv",
-          "Subdomínio", "CNAME / Serviço / Status", 100,
+{section2("s9-tk", "Subdomain Takeover Candidates", "cloud/takeover_candidates.csv",
+          "Subdomain", "CNAME / Service / Status", 100,
           badge=str(tkover) if tkover > 0 else None)}
 
 <h2 id="s10">Email Security</h2>
 {section("s10", "SPF / DMARC / DKIM / MX", "email_security.txt", 50)}
 
 </div><!-- .cnt -->
-<div class="ft">Stiglitz OSINT v{esc(version)} — USO EXCLUSIVO EM AMBIENTES COM RoE ASSINADO</div>
+<div class="ft">Stiglitz OSINT v{esc(version)} — FOR USE ONLY IN ENVIRONMENTS WITH A SIGNED RoE</div>
 </div><!-- .ctn -->
 </body>
 </html>"""
