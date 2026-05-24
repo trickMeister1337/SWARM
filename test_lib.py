@@ -360,7 +360,7 @@ class TestReportGenerator(unittest.TestCase):
                 html = f.read()
             self.assertIn("Stiglitz RED", html)
             self.assertIn("test.com", html)
-            self.assertIn("CONFIDENCIAL", html)
+            self.assertIn("CONFIDENTIAL", html)
             self.assertIn("<style>", html)
             self.assertGreater(len(html), 3000)
         finally:
