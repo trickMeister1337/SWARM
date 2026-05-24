@@ -179,14 +179,18 @@ PARALLEL_JOBS=1
 AUTH_TOKEN=""      # Bearer token para scan autenticado
 AUTH_HEADER=""     # Header customizado (ex: "Cookie: session=abc")
 OSINT_DIR=""       # Diretório de output do osint.sh (reaproveita descoberta)
+OUTDIR_OVERRIDE="" # Reutiliza um diretório de scan fixo (orquestrador pipeline.py)
+ONLY_PHASES=""     # Lista de fases a executar (ex: "P4"); vazio = todas
 
-# Parse args: suporta --token, --header e --osint-dir além de -f/--file
+# Parse args: suporta --token, --header, --osint-dir, --outdir, --only-phase
 _args=("$@")
 for _i in "${!_args[@]}"; do
     case "${_args[$_i]}" in
         --token|-t)          AUTH_TOKEN="${_args[$((${_i}+1))]}" ;;
         --header|-H)         AUTH_HEADER="${_args[$((${_i}+1))]}" ;;
         --osint-dir|--osint) OSINT_DIR="${_args[$((${_i}+1))]}" ;;
+        --outdir)            OUTDIR_OVERRIDE="${_args[$((${_i}+1))]}" ;;
+        --only-phase)        ONLY_PHASES="${_args[$((${_i}+1))]}" ;;
     esac
 done
 
@@ -257,7 +261,11 @@ fi
 unset _domain_valid _dns_check
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SCAN_START_TS=$(date +%s)
-OUTDIR="scan_${DOMAIN}_${TIMESTAMP}"
+if [ -n "$OUTDIR_OVERRIDE" ]; then
+    OUTDIR="$OUTDIR_OVERRIDE"   # diretório fixo reutilizado entre fases (orquestrador)
+else
+    OUTDIR="scan_${DOMAIN}_${TIMESTAMP}"
+fi
 mkdir -p "$OUTDIR/raw"
 
 # ── Lockfile: evitar execuções simultâneas no mesmo diretório ────
@@ -312,6 +320,13 @@ phase_done() {
 phase_skip() {
     # Retorna 0 (skip) se fase já concluída, 1 (run) se não
     grep -q "^$1=done:" "$STIGLITZ_STATE" 2>/dev/null
+}
+
+_phase_enabled() {
+    # Retorna 0 se a fase deve rodar. Sem --only-phase, todas rodam (comportamento padrão).
+    # Com --only-phase "P4 P9", apenas as listadas (match por palavra) rodam.
+    [ -z "$ONLY_PHASES" ] && return 0
+    case " $ONLY_PHASES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
 # ── Banner ASCII ──────────────────────────────────────────────────────────────
@@ -456,6 +471,7 @@ done
 unset _prefix _p _last2 _is_compound _tld _compound_tlds
 
 
+if _phase_enabled "P1"; then
 phase_start "P1"
 phase_banner "FASE 1/11: DESCOBERTA DE SUBDOMÍNIOS"
 
@@ -506,6 +522,8 @@ echo -e "  ${GREEN}[✓] Fase 1 concluída — $SUB_COUNT alvo(s) para análise$
 
 # ====================== FASE 2: MAPEAMENTO ======================
 
+fi  # fim P1
+if _phase_enabled "P2"; then
 phase_start "P2"
 phase_banner "FASE 2/11: MAPEAMENTO DE SUPERFÍCIE"
 
@@ -583,6 +601,8 @@ phase_end "P2"
 phase_done "FASE_2"
 
 # ── Detecção de WAF (antes do Nuclei para ajustar parâmetros de evasão) ──────────
+fi  # fim P2
+if _phase_enabled "P2_5"; then
 phase_start "P2_5"
 phase_banner "FASE 2.5/11: DETECÇÃO DE WAF"
 
@@ -660,6 +680,8 @@ phase_done "FASE_2_5"
 
 # ====================== FASES 3+4: TESTSSL + NUCLEI (paralelo) ======================
 
+fi  # fim P2_5
+if _phase_enabled "P3"; then
 phase_start "P3"
 # ── Verificação de headers de segurança ─────────────────────────
 echo -e "  ${BLUE}[…] Verificando headers de segurança HTTP...${NC}"
@@ -710,6 +732,8 @@ fi
 # ====================== FASE 4: NUCLEI ======================
 
 phase_done "FASE_3"
+fi  # fim P3
+if _phase_enabled "P4"; then
 phase_start "P4"
 phase_banner "FASE 4/11: SCAN DE VULNERABILIDADES (NUCLEI) — paralelo com testssl"
 
@@ -915,6 +939,8 @@ phase_done "FASE_4"
 
 # ====================== FASE 5: CONFIRMAÇÃO DE EXPLOITS ======================
 
+fi  # fim P4
+if _phase_enabled "P5"; then
 phase_start "P5"
 phase_banner "FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)"
 
@@ -955,6 +981,8 @@ fi
 
 # ====================== FASE 10: ENRIQUECIMENTO CVE/EPSS ======================
 
+fi  # fim P5
+if _phase_enabled "P6"; then
 phase_start "P6"
 phase_banner "FASE 6/11: ENRIQUECIMENTO CVE / EPSS (NVD + FIRST.org)"
 
@@ -969,6 +997,8 @@ phase_done "FASE_6"
 
 # ====================== FASE 7: EMAIL SECURITY ======================
 
+fi  # fim P6
+if _phase_enabled "P8"; then
 phase_start "P8"
 phase_banner "FASE 8/11: SEGURANÇA DE EMAIL (SPF / DMARC / DKIM)"
 
@@ -994,6 +1024,8 @@ phase_done "FASE_8"
 
 # ====================== FASE 9: ZAP ======================
 
+fi  # fim P8
+if _phase_enabled "P9"; then
 phase_start "P9"
 phase_banner "FASE 9/11: COLETA DE EVIDÊNCIAS (OWASP ZAP)"
 
@@ -1352,6 +1384,8 @@ export OPENAPI_FOUND TLS_ISSUES CONFIRMED_COUNT KATANA_URLS WAF_DETECTED WAF_NAM
 
 # ====================== FASE 10: JS ANALYSIS ======================
 
+fi  # fim P9
+if _phase_enabled "P10"; then
 phase_start "P10"
 phase_banner "FASE 10/11: ANÁLISE DE JAVASCRIPT & SECRETS"
 
@@ -1377,6 +1411,8 @@ export JS_SECRETS JS_ENDPOINTS JS_FRAMEWORKS JS_FILES
 
 
 # ====================== FASE 10.5: SMUGGLER + FFUF + TRUFFLEHOG ======================
+fi  # fim P10
+if _phase_enabled "P10_5"; then
 phase_start "P10_5"
 phase_banner "FASE 10.5/11: TESTES COMPLEMENTARES"
 
@@ -1841,6 +1877,8 @@ phase_done "FASE_10_5"
 
 # ====================== FASE 11: RELATÓRIO ======================
 
+fi  # fim P10_5
+if _phase_enabled "P11"; then
 phase_start "P11"
 phase_banner "FASE 11/11: GERAÇÃO DE RELATÓRIO"
 
@@ -1872,6 +1910,7 @@ else
     echo -e "  ${RED}[✗] stiglitz_report.py não encontrado — relatório HTML não gerado${NC}"
     echo -e "  ${YELLOW}    Esperado em: $(dirname "$0")/stiglitz_report.py${NC}"
 fi
+fi  # fim P11
 # ====================== RESUMO FINAL ======================
 echo -e "\n${GREEN}════════════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  PROCESSO CONCLUÍDO — $(date '+%d/%m/%Y %H:%M:%S')${NC}"
