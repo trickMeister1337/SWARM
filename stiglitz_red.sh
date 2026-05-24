@@ -236,14 +236,15 @@ phase_enabled() {
 banner() {
     echo -e "${RED}"
     cat << 'BANNER'
-   _____ _       _____    ____  __  ___   ____  __________
-  / ___/| |     / /   |  / __ \/  |/  /  / __ \/ ____/ __ \
-  \__ \ | | /| / / /| | / /_/ / /|_/ /  / /_/ / __/ / / / /
- ___/ / | |/ |/ / ___ |/ _, _/ /  / /  / _, _/ /___/ /_/ /
-/____/  |__/|__/_/  |_/_/ |_/_/  /_/  /_/ |_/_____/_____/
+  ███████╗████████╗██╗ ██████╗ ██╗     ██╗████████╗███████╗
+  ██╔════╝╚══██╔══╝██║██╔════╝ ██║     ██║╚══██╔══╝╚══███╔╝
+  ███████╗   ██║   ██║██║  ███╗██║     ██║   ██║     ███╔╝
+  ╚════██║   ██║   ██║██║   ██║██║     ██║   ██║    ███╔╝
+  ███████║   ██║   ██║╚██████╔╝███████╗██║   ██║   ███████╗
+  ╚══════╝   ╚═╝   ╚═╝ ╚═════╝ ╚══════╝╚═╝   ╚═╝   ╚══════╝
 BANNER
     echo -e "${RST}"
-    echo -e "  ${YLW}${BLD}v${VERSION}${RST} — Blackbox Pentest Engine"
+    echo -e "  ${YLW}${BLD}v${VERSION}${RST} — RED · Blackbox Pentest Engine"
     echo -e "  ${DIM}Modo: ${MODE^^} | Perfil: ${PROFILE^^} | Escopo: ${SCOPE_DOMAINS[*]}${RST}"
     [ "$DRY_RUN" = true ] && echo -e "  ${YLW}[DRY-RUN MODE]${RST}"
     [ "$RESUME" = true ]  && echo -e "  ${CYN}[RESUMINDO DE CHECKPOINT]${RST}"

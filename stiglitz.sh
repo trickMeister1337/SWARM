@@ -261,7 +261,7 @@ OUTDIR="scan_${DOMAIN}_${TIMESTAMP}"
 mkdir -p "$OUTDIR/raw"
 
 # ── Lockfile: evitar execuções simultâneas no mesmo diretório ────
-LOCKFILE="$OUTDIR/raw/.swarm.lock"
+LOCKFILE="$OUTDIR/raw/.stiglitz.lock"
 if [ -f "$LOCKFILE" ]; then
     _lock_pid=$(cat "$LOCKFILE" 2>/dev/null)
     if kill -0 "$_lock_pid" 2>/dev/null; then
@@ -1021,7 +1021,7 @@ if command -v zaproxy &>/dev/null; then
         [ ! -f "$ZAP_CONFIG" ] && [ -f "$HOME/.ZAP/config.xml" ] && \
             cp "$HOME/.ZAP/config.xml" "$ZAP_CONFIG" 2>/dev/null || true
         if [ -f "$ZAP_CONFIG" ]; then
-            cp "$ZAP_CONFIG" "${ZAP_CONFIG}.swarm_backup" 2>/dev/null
+            cp "$ZAP_CONFIG" "${ZAP_CONFIG}.stiglitz_backup" 2>/dev/null
             python3 "$SCRIPT_DIR/lib/zap_config_fix.py" "$ZAP_CONFIG"
             echo -e "  ${GREEN}[✓] config.xml configurado${NC}"
         else
@@ -1044,8 +1044,8 @@ if command -v zaproxy &>/dev/null; then
             echo -e "  ${RED}[✗] ZAP não iniciou em 180s${NC}"
             echo -e "  ${YELLOW}[!] Últimas linhas do log:${NC}"
             tail -5 "$OUTDIR/raw/zap_daemon.log" 2>/dev/null | sed 's/^/    /'
-            [ -f "${ZAP_CONFIG}.swarm_backup" ] && \
-                mv "${ZAP_CONFIG}.swarm_backup" "$ZAP_CONFIG" 2>/dev/null
+            [ -f "${ZAP_CONFIG}.stiglitz_backup" ] && \
+                mv "${ZAP_CONFIG}.stiglitz_backup" "$ZAP_CONFIG" 2>/dev/null
             ZAP_STARTED_BY_SCRIPT=0
         fi
     fi

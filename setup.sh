@@ -8,12 +8,12 @@
 #  Uso: bash setup.sh [--force]
 #
 #  O flag --force reinstala tudo mesmo se já presente.
-#  Log completo: ~/.swarm-red-install.log
+#  Log completo: ~/.stiglitz-install.log
 # ═══════════════════════════════════════════════════════════════════════════════
 set -uo pipefail
 
-readonly LOGFILE="$HOME/.swarm-red-install.log"
-readonly VENV_DIR="$HOME/.swarm-red-venv"
+readonly LOGFILE="$HOME/.stiglitz-install.log"
+readonly VENV_DIR="$HOME/.stiglitz-venv"
 FORCE=false
 [[ "${1:-}" == "--force" ]] && FORCE=true
 
@@ -630,7 +630,7 @@ def search(query):
 
     # Tentar JSON output via site
     url = f"https://www.exploit-db.com/search?q={encoded}"
-    headers = {"User-Agent": "searchsploit-swarmred/1.0", "Accept": "application/json"}
+    headers = {"User-Agent": "searchsploit-stiglitz/1.0", "Accept": "application/json"}
 
     try:
         req = urllib.request.Request(url, headers=headers)
