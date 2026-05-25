@@ -329,6 +329,15 @@ _phase_enabled() {
     case " $ONLY_PHASES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
+_needs_network() {
+    # Retorna 0 se alguma fase habilitada precisa de acesso de rede ao alvo.
+    # Fases offline (P11 = geração de relatório) não requerem conectividade.
+    for _np in P1 P2 P2_5 P3 P4 P5 P6 P8 P9 P10 P10_5; do
+        _phase_enabled "$_np" && return 0
+    done
+    return 1
+}
+
 # ── Banner ASCII ──────────────────────────────────────────────────────────────
 clear 2>/dev/null || true
 echo -e "${CYAN}"
@@ -353,6 +362,7 @@ echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━
 echo ""
 
 # ── Verificação de acesso ao alvo ─────────────────────────────────────────────
+if _needs_network; then
 echo -ne "  ${BLUE}[…]${NC} Verificando acesso ao alvo..."
 
 # Tentar com https e http, seguindo redirects, com timeout maior
@@ -391,6 +401,7 @@ if [ -z "$HTTP_CODE" ] || ! echo "$HTTP_CODE" | grep -qE "^[2345][0-9][0-9]$"; t
 fi
 echo -e "\r  ${GREEN}[✓]${NC} Alvo acessível ${GREEN}(HTTP ${HTTP_CODE})${NC}"
 echo ""
+fi # _needs_network
 
 # ====================== VALIDAÇÃO DE FERRAMENTAS ======================
 echo -e "  ${CYAN}┌───────────────────────────────────────────────────────────────────┐${NC}"
