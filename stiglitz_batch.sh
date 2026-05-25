@@ -312,10 +312,22 @@ if os.path.exists(state_file):
 def read_stats(outdir):
     stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
     if not outdir or not os.path.exists(outdir): return stats, 0
+    # Ler do findings.json gerado pelo stiglitz_report.py — agrega TLS, Email, ZAP, Nuclei
+    fj = os.path.join(outdir, "findings.json")
+    if os.path.exists(fj):
+        try:
+            data = json.load(open(fj))
+            summary = data.get("summary", {})
+            for k in stats:
+                stats[k] = int(summary.get(k, 0))
+            risk = data.get("scan", {}).get("risk_score", 0)
+            return stats, risk
+        except: pass
+    # Fallback: ler diretamente de nuclei.json + zap_alerts.json (sem TLS/Email)
     sev_map = {"high":"high","medium":"medium","low":"low","informational":"info"}
-    zap_f = os.path.join(outdir,"raw","zap_alerts.json")
-    nuc_f = os.path.join(outdir,"raw","nuclei.json")
     seen_names = {}
+    nuc_f = os.path.join(outdir,"raw","nuclei.json")
+    zap_f = os.path.join(outdir,"raw","zap_alerts.json")
     if os.path.exists(nuc_f):
         try:
             for line in open(nuc_f):

@@ -663,12 +663,14 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
         findings_raw = tdata if isinstance(tdata,list) else \
             tdata.get("scanResult",[{}])[0].get("findings",[])
         SEV_MAP = {"CRITICAL":"critical","HIGH":"high","WARN":"medium","LOW":"low","OK":"info","INFO":"info"}
+        _tls_seen_ids = set()  # dedup: testssl escaneia múltiplos IPs → mesmo id duplicado
         for item in findings_raw:
             sev_raw = item.get("severity","INFO")
             sev = SEV_MAP.get(sev_raw.upper(),"info")
             _tls_id = item.get("id","")
             # scanTime é metadado do testssl (duração do scan), não uma vulnerabilidade
-            if sev_raw.upper() in ("CRITICAL","HIGH","WARN","LOW") and _tls_id != "scanTime":
+            if sev_raw.upper() in ("CRITICAL","HIGH","WARN","LOW") and _tls_id != "scanTime" \
+                    and _tls_id not in _tls_seen_ids:
                 _tls_raw  = item.get("finding","")  # resultado bruto do teste (ex: "offered")
                 _cve_raw  = item.get("cve","") or item.get("cwe","")
                 _info     = TLS_ID_INFO.get(_tls_id, {})
@@ -676,6 +678,7 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
                 _desc     = _info.get("desc") or f"testssl.sh reported '{_tls_raw}' for the '{_tls_id}' test."
                 _rem      = _info.get("rem") or "Consult the server documentation to disable this insecure TLS feature."
                 _evidence = f"testssl.sh · test: {_tls_id} · result: {_tls_raw}" if _tls_raw else f"testssl.sh · test: {_tls_id}"
+                _tls_seen_ids.add(_tls_id)
                 tls_findings.append({
                     "id":       _tls_id,
                     "name":     _name,
