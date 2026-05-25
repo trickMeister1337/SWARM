@@ -665,7 +665,8 @@ def read_criths(outdir):
     try:
         data = json.load(open(fj))
         findings = data.get("findings", [])
-        return [f for f in findings if f.get("severity","").upper() in ("CRITICAL","HIGH")]
+        return [f for f in findings if f.get("severity","").upper() in ("CRITICAL","HIGH")
+                and f.get("source") not in _TABLE_ONLY_SOURCES]
     except:
         return []
 
@@ -735,6 +736,59 @@ if vuln_accordion:
   técnica e a remediação recomendada.
 </p>
 {vuln_accordion}"""
+
+# ── Seção de segurança de e-mail ──────────────────────────────────────────────
+_SEV_COLOR = {"high":"#c0392b","medium":"#e67e22","low":"#8e9eab","none":"#27ae60","ok":"#27ae60"}
+_STATUS_LABEL = {
+    "MISSING":      ("AUSENTE",      "high"),
+    "NOT_FOUND":    ("NÃO DETECTADO","low"),
+    "PERMISSIVE":   ("+all (permissivo)", "high"),
+    "NEUTRAL":      ("?all (neutro)", "medium"),
+    "MONITOR_ONLY": ("p=none (monitor)", "medium"),
+    "INVALID":      ("Inválido",     "medium"),
+    "OK":           ("OK",           "ok"),
+}
+
+email_rows = ""
+for r in results:
+    if r["status"] != "OK" or not r["outdir"]:
+        continue
+    esf = os.path.join(r["outdir"], "raw", "email_security.json")
+    if not os.path.exists(esf):
+        continue
+    try:
+        es = json.load(open(esf))
+    except:
+        continue
+    domain = r["url"].replace("https://","").replace("http://","")
+
+    def _cell(proto):
+        data = es.get(proto, {})
+        status = data.get("status", "NOT_FOUND")
+        label, sev = _STATUS_LABEL.get(status, (status, "medium"))
+        color = _SEV_COLOR.get(sev, "#555")
+        return f'<td style="color:{color};font-weight:600;font-size:12px">{html.escape(label)}</td>'
+
+    email_rows += f"""<tr>
+      <td style="font-weight:500;font-size:13px">{html.escape(domain)}</td>
+      {_cell("spf")}{_cell("dmarc")}{_cell("dkim")}
+    </tr>"""
+
+email_section = ""
+if email_rows:
+    email_section = """<h2 style="margin-top:40px">Segurança de E-mail (SPF / DMARC / DKIM)</h2>
+<p style="font-size:13px;color:#555;margin-bottom:14px">
+  Presença e configuração dos registros DNS de autenticação de e-mail.
+  Registros ausentes ou permissivos permitem spoofing do domínio e ataques de phishing direcionado.
+</p>
+<table>
+  <tr>
+    <th style="text-align:left;background:#1a3a4f">Domínio</th>
+    <th style="background:#1a3a4f;text-align:center;width:160px">SPF</th>
+    <th style="background:#1a3a4f;text-align:center;width:160px">DMARC</th>
+    <th style="background:#1a3a4f;text-align:center;width:160px">DKIM</th>
+  </tr>
+""" + email_rows + "\n</table>"
 
 # ── Seção de domínios que falharam ────────────────────────────────────────────
 failed_rows = ""
@@ -856,6 +910,8 @@ details summary::-webkit-details-marker{{display:none}}
 </div>
 
 {vuln_section}
+
+{email_section}
 
 {failed_section}
 
