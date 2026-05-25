@@ -669,9 +669,12 @@ if os.path.exists(tf) and os.path.getsize(tf) > 0:
             sev = SEV_MAP.get(sev_raw.upper(),"info")
             _tls_id = item.get("id","")
             # scanTime é metadado do testssl (duração do scan), não uma vulnerabilidade
+            # "not supported by local OpenSSL" = limitação do scanner local, não vulnerabilidade do servidor
+            _tls_raw_pre = item.get("finding","")
             if sev_raw.upper() in ("CRITICAL","HIGH","WARN","LOW") and _tls_id != "scanTime" \
-                    and _tls_id not in _tls_seen_ids:
-                _tls_raw  = item.get("finding","")  # resultado bruto do teste (ex: "offered")
+                    and _tls_id not in _tls_seen_ids \
+                    and "not supported by local openssl" not in _tls_raw_pre.lower():
+                _tls_raw  = _tls_raw_pre  # resultado bruto do teste (ex: "offered")
                 _cve_raw  = item.get("cve","") or item.get("cwe","")
                 _info     = TLS_ID_INFO.get(_tls_id, {})
                 _name     = _info.get("name") or f"TLS/SSL: {_tls_id}" if _tls_id else "TLS/SSL Issue"

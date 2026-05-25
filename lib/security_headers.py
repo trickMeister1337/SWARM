@@ -10,7 +10,7 @@ outdir = sys.argv[1]
 httpx_file = os.path.join(outdir,"raw","httpx_results.txt")
 
 SECURITY_HEADERS = {
-    "content-security-policy":      ("critical","CSP missing — XSS unmitigated"),
+    "content-security-policy":      ("medium","CSP missing — XSS impact amplified"),
     "x-content-type-options":       ("medium","X-Content-Type-Options missing — MIME sniffing possible"),
     "x-frame-options":              ("medium","X-Frame-Options missing — Clickjacking possible"),
     "strict-transport-security":    ("high","HSTS missing — HTTPS downgrade possible"),
