@@ -988,6 +988,7 @@ for f in findings:
 all_f = sorted(findings + zap_findings + header_findings + version_findings + tls_findings + email_findings, key=lambda x: {"critical":0,"high":1,"medium":2,"low":3,"info":4}.get(x["severity"],5))
 stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
 for f in all_f:
+    if f.get("source") == "Email Security": continue
     if f["severity"] in stats: stats[f["severity"]] += 1
 # Low/Info: cada grupo = 1 card (tipo único)
 for grp in zap_low_groups.values():
