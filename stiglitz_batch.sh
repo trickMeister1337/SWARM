@@ -309,18 +309,24 @@ if os.path.exists(state_file):
                 "dur":    int(parts[3]) if parts[3].isdigit() else 0
             })
 
+_TABLE_ONLY_SOURCES = {"testssl.sh", "Email Security"}
+
 def read_stats(outdir):
     stats = {"critical":0,"high":0,"medium":0,"low":0,"info":0}
     if not outdir or not os.path.exists(outdir): return stats, 0
-    # Ler do findings.json gerado pelo stiglitz_report.py — agrega TLS, Email, ZAP, Nuclei
+    # Ler findings.json excluindo fontes com tabela dedicada (TLS/SSL e Email Security),
+    # seguindo a mesma lógica do relatório individual (stiglitz_report.py).
     fj = os.path.join(outdir, "findings.json")
     if os.path.exists(fj):
         try:
             data = json.load(open(fj))
-            summary = data.get("summary", {})
-            for k in stats:
-                stats[k] = int(summary.get(k, 0))
-            risk = data.get("scan", {}).get("risk_score", 0)
+            for f in data.get("findings", []):
+                if f.get("source") in _TABLE_ONLY_SOURCES:
+                    continue
+                sev = f.get("severity", "info").lower()
+                if sev in stats:
+                    stats[sev] += 1
+            risk = min(stats["critical"]*10+stats["high"]*5+stats["medium"]*2+stats["low"],100)
             return stats, risk
         except: pass
     # Fallback: ler diretamente de nuclei.json + zap_alerts.json (sem TLS/Email)
