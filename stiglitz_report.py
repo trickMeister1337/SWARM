@@ -1795,11 +1795,11 @@ if _seen_m:
 with the estimated <strong>remediation effort</strong>. The <strong>high impact + low
 effort</strong> quadrant are the <strong>quick wins</strong> — top execution priority.</p></div>
 <table style="border-collapse:collapse;width:100%">
-<tr style="background:#1a3a4f;color:white">
-  <th style="padding:8px;width:90px"></th>
-  <th style="padding:8px">Low Effort<br><span style="font-weight:normal;font-size:11px">config / infra</span></th>
-  <th style="padding:8px">Medium Effort<br><span style="font-weight:normal;font-size:11px">upgrade / tuning</span></th>
-  <th style="padding:8px">High Effort<br><span style="font-weight:normal;font-size:11px">code / architecture</span></th>
+<tr>
+  <th style="padding:8px;width:90px;background:#1a3a4f;color:white"></th>
+  <th style="padding:8px;background:#1a3a4f;color:white">Low Effort<br><span style="font-weight:normal;font-size:11px;color:#cdd8e3">config / infra</span></th>
+  <th style="padding:8px;background:#1a3a4f;color:white">Medium Effort<br><span style="font-weight:normal;font-size:11px;color:#cdd8e3">upgrade / tuning</span></th>
+  <th style="padding:8px;background:#1a3a4f;color:white">High Effort<br><span style="font-weight:normal;font-size:11px;color:#cdd8e3">code / architecture</span></th>
 </tr>
 <tr><th style="background:#7a2e2e;color:white;padding:8px">High<br>Impact</th>
   {_matrix_cell("alto","baixo",highlight=True)}{_matrix_cell("alto","médio")}{_matrix_cell("alto","alto")}</tr>
