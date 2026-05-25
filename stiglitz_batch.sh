@@ -736,6 +736,43 @@ if vuln_accordion:
 </p>
 {vuln_accordion}"""
 
+# ── Seção de domínios que falharam ────────────────────────────────────────────
+failed_rows = ""
+logs_dir = os.path.join(batch_dir, "logs")
+for r in results:
+    if r["status"] == "OK":
+        continue
+    domain = r["url"].replace("https://","").replace("http://","")
+    # Extrair motivo do log (última linha não-vazia sem ANSI)
+    reason = "Motivo não identificado"
+    log_path = os.path.join(logs_dir, f"{domain}.log")
+    if os.path.exists(log_path):
+        import re as _re
+        ansi_escape = _re.compile(r'\x1b\[[0-9;]*m')
+        lines = [ansi_escape.sub("", l).strip()
+                 for l in open(log_path, errors="replace") if l.strip()]
+        # Pegar as últimas 3 linhas não-vazias e juntá-las
+        snippet = " — ".join(lines[-3:]) if lines else reason
+        reason = snippet[:200]
+    failed_rows += f"""<tr>
+      <td style="font-weight:500;color:#c0392b">{html.escape(r['url'])}</td>
+      <td style="color:#c0392b;font-size:12px">{html.escape(reason)}</td>
+    </tr>"""
+
+failed_section = ""
+if failed_rows:
+    failed_section = f"""<h2 style="margin-top:40px;color:#c0392b">Domínios que Falharam</h2>
+<p style="font-size:13px;color:#555;margin-bottom:14px">
+  Os alvos abaixo não puderam ser escaneados. A justificativa foi extraída do log de execução.
+</p>
+<table>
+  <tr>
+    <th style="text-align:left;background:#7a2e2e">Domínio</th>
+    <th style="text-align:left;background:#7a2e2e">Justificativa</th>
+  </tr>
+  {failed_rows}
+</table>"""
+
 page = f"""<!DOCTYPE html><html lang="pt-br"><head><meta charset="UTF-8">
 <title>Relatório de Segurança — {html.escape(batch_ts)}</title>
 <style>
@@ -819,6 +856,8 @@ details summary::-webkit-details-marker{{display:none}}
 </div>
 
 {vuln_section}
+
+{failed_section}
 
 </div>
 <div class="footer">
