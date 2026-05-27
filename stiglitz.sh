@@ -322,6 +322,24 @@ phase_skip() {
     grep -q "^$1=done:" "$STIGLITZ_STATE" 2>/dev/null
 }
 
+_filter_inscope_urls() {
+    # Lê URLs de $1 e imprime só as in-scope, comparando o HOST da URL com $DOMAIN
+    # (igual ou subdomínio real). Filtrar por substring deixaria escapar URLs como
+    # "https://externo.com/?redirect_uri=alvo.com", comuns em fluxos OAuth/SSO.
+    [ -s "$1" ] || return 0
+    python3 -c '
+import sys, urllib.parse as u
+dom = sys.argv[1].lower()
+for line in sys.stdin:
+    url = line.strip()
+    if not url:
+        continue
+    host = (u.urlsplit(url).hostname or "").lower()
+    if host == dom or host.endswith("." + dom):
+        print(url)
+' "$DOMAIN" < "$1" 2>/dev/null || true
+}
+
 _phase_enabled() {
     # Retorna 0 se a fase deve rodar. Sem --only-phase, todas rodam (comportamento padrão).
     # Com --only-phase "P4 P9", apenas as listadas (match por palavra) rodam.
@@ -832,10 +850,9 @@ except: pass
     _nuclei_list="$OUTDIR/raw/nuclei_urls.txt"
     echo "$TARGET" > "$_nuclei_list"
     # Apenas URLs in-scope do Katana alimentam o Nuclei — o crawl em -d 5 segue
-    # links/redirects para domínios externos (ex.: SSO, referências em JS), que
-    # NÃO podem receber probes. Mesmo filtro aplicado ao contexto ZAP adiante.
-    [ -s "$OUTDIR/raw/katana_urls.txt" ] && \
-        grep -F "$DOMAIN" "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list" || true
+    # links/redirects para domínios externos (SSO, refs em JS) que NÃO podem
+    # receber probes. Filtro por host (não substring); mesmo critério no feed ZAP.
+    _filter_inscope_urls "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list"
     # Endpoints históricos do OSINT (wayback/gau) alimentam a varredura
     if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/endpoints_historical.txt" ]; then
         cat "$OSINT_DIR/endpoints_historical.txt" >> "$_nuclei_list"
@@ -1171,18 +1188,19 @@ if command -v zaproxy &>/dev/null; then
         # ── Katana: injetar URLs descobertas em P2 no contexto ZAP ───────
         # (o crawl já foi feito na Fase 2 para alimentar o Nuclei)
         if [ -s "$OUTDIR/raw/katana_urls.txt" ]; then
-            KATANA_URLS=$(wc -l < "$OUTDIR/raw/katana_urls.txt" | tr -d " ")
-            echo -e "  ${BLUE}[…] Injetando ${KATANA_URLS} URL(s) do Katana no contexto ZAP...${NC}"
+            # Mesmo filtro host-based do feed Nuclei — só URLs in-scope vão ao ZAP.
+            _filter_inscope_urls "$OUTDIR/raw/katana_urls.txt" > "$OUTDIR/raw/katana_inscope.txt"
+            KATANA_URLS=$(wc -l < "$OUTDIR/raw/katana_inscope.txt" | tr -d " ")
+            echo -e "  ${BLUE}[…] Injetando ${KATANA_URLS} URL(s) in-scope do Katana no contexto ZAP...${NC}"
             _injected=0
             while IFS= read -r _k_url; do
                 [ -z "$_k_url" ] && continue
-                echo "$_k_url" | grep -qF "$DOMAIN" || continue
                 _k_enc=$(python3 -c \
                     "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1],safe=''))" \
                     "$_k_url" 2>/dev/null)
                 zap_api_call "core/action/accessUrl" "url=${_k_enc}" > /dev/null 2>&1
                 _injected=$((_injected + 1))
-            done < "$OUTDIR/raw/katana_urls.txt"
+            done < "$OUTDIR/raw/katana_inscope.txt"
             echo -e "  ${GREEN}[✓] $_injected URL(s) injetadas no contexto ZAP${NC}"
             sleep 2
         else

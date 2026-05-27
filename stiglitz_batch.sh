@@ -269,8 +269,11 @@ fi
 # ── Contadores finais via state file ─────────────────────────────────────────
 PASSED=0; FAILED=0
 if [ -f "$STATE_FILE" ]; then
-    PASSED=$(grep -c "^OK|" "$STATE_FILE" 2>/dev/null || echo 0)
-    FAILED=$(grep -c "^FAIL|" "$STATE_FILE" 2>/dev/null || echo 0)
+    # grep -c já imprime "0" quando não há match, mas sai com código 1 —
+    # usar "|| echo 0" anexava um segundo "0", gerando "0\n0" e quebrando o
+    # relatório consolidado. "|| true" só neutraliza o exit code.
+    PASSED=$(grep -c "^OK|" "$STATE_FILE" 2>/dev/null || true)
+    FAILED=$(grep -c "^FAIL|" "$STATE_FILE" 2>/dev/null || true)
 fi
 
 # ── Relatório consolidado ─────────────────────────────────────────────────────
