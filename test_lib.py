@@ -176,8 +176,8 @@ class TestParsers(unittest.TestCase):
         real_params = [u for u in urls if "user_id" in u]
         self.assertGreater(len(real_params), 0, "Param real user_id deveria estar")
 
-    def test_extract_urls_excludes_external_domains(self):
-        """URLs de domínios externos (caniuse.com, mozilla.org) NÃO devem ser testadas."""
+    def test_extract_urls_excludes_external_domains_in_evidence_fields(self):
+        """URLs externas em campos other/evidence (mozilla.org, owasp.org) NÃO devem ser testadas."""
         with open(os.path.join(self.tmpdir, "input_zap.json"), "w") as f:
             json.dump([
                 {"url": "https://webapp.target.com/api", "alert": "Missing HSTS", "risk": "Medium",

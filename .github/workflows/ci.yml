@@ -72,6 +72,9 @@ jobs:
       - name: Run tests
         run: python3 -m pytest test_lib.py test_swarm_modules.py test_pipeline.py test_e2e.py -v --tb=short
 
+      - name: Run RED shell suite (dry-run, no external tools)
+        run: bash test_swarm_red.sh
+
   integration:
     name: Integration scan (Juice Shop)
     runs-on: ubuntu-latest

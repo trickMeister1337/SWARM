@@ -8,6 +8,7 @@ temporários — não por import.
 """
 import os
 import sys
+import glob
 import json
 import subprocess
 import tempfile
@@ -16,13 +17,6 @@ import unittest
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(ROOT, "lib")
-
-# Módulos extraídos do stiglitz.sh nas fases A/B da refatoração
-EXTRACTED_MODULES = [
-    "scan_metadata.py", "security_headers.py", "version_fingerprint.py",
-    "tech_profile.py", "monitoring_check.py", "secscan.py", "cve_enrich.py",
-    "email_security.py", "zap_config_fix.py", "js_analysis.py", "ratelimit_check.py",
-]
 
 
 def _run_module(module, *args, timeout=60):
@@ -132,12 +126,12 @@ class TestScanMetadata(_TmpScanDir):
 
 
 class TestModulesCompile(unittest.TestCase):
-    """Todos os módulos extraídos + stiglitz_report.py devem compilar."""
-    def test_all_extracted_modules_compile(self):
+    """Todo módulo lib/*.py + stiglitz_report.py deve compilar (glob cobre módulos novos)."""
+    def test_all_lib_modules_compile(self):
         import py_compile
-        for m in EXTRACTED_MODULES:
-            path = os.path.join(LIB, m)
-            self.assertTrue(os.path.exists(path), f"módulo ausente: {m}")
+        modules = sorted(glob.glob(os.path.join(LIB, "*.py")))
+        self.assertGreater(len(modules), 0, "nenhum módulo lib/*.py encontrado")
+        for path in modules:
             py_compile.compile(path, doraise=True)
         py_compile.compile(os.path.join(ROOT, "stiglitz_report.py"), doraise=True)
 

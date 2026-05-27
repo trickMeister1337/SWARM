@@ -237,7 +237,7 @@ with open(scored_f, 'w') as fo:
         fo.write(f"{s}|{url}\n")
 PYEOF
 assert "URL scorer runs" "$?"
-assert "PNG filtered out" "$(grep -v 'logo.png' "$TMPDIR_TEST/scored.txt" | wc -l | awk '{print ($1 == wc -l < "$TMPDIR_TEST/scored.txt") ? 1 : 0}' || echo 0)"
+assert "PNG filtered out" "$(grep -q 'logo.png' "$TMPDIR_TEST/scored.txt" && echo 1 || echo 0)"
 assert "Parametrized URLs scored higher" "$(head -1 "$TMPDIR_TEST/scored.txt" | grep -qE '\?|=' && echo 0 || echo 1)"
 
 # ─── 14. Auth options ────────────────────────────────────────────────────────
