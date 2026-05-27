@@ -2141,7 +2141,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
     .confirm-yes{{background:#27ae60;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
     .confirm-no{{background:#95a5a6;color:white;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold}}
 </style></head><body><div class="container">
-<div class="header"><h1>Security Report — Bee2Pay</h1>
+<div class="header"><h1>Security Report</h1>
 <p>Target: <strong>{html.escape(TARGET)}</strong> | Domain: {html.escape(DOMAIN)}</p>
 <p>Date: {rdate} &nbsp;|&nbsp; Duration: {duration_str} &nbsp;|&nbsp; <strong>CONFIDENTIAL</strong></p></div>
 <div class="content">
@@ -2228,7 +2228,7 @@ code{{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12px}}
 </ul>
 <p><strong>Note:</strong> All findings must be manually validated before reporting to the client or development team.</p></div></div>
 <div class="footer"><p><strong>CONFIDENTIAL — INTERNAL USE</strong></p>
-<p>Bee2Pay · Security Assessment &nbsp;·&nbsp; CONFIDENTIAL</p></div></div></body></html>"""
+<p>Security Assessment &nbsp;·&nbsp; CONFIDENTIAL</p></div></div></body></html>"""
 
 out = os.path.join(OUTDIR,"stiglitz_report.html")
 open(out,"w",encoding="utf-8").write(page)
@@ -2450,7 +2450,7 @@ td{{border:1px solid #eee;padding:8px;font-size:12px}}
 <h2>Recommendations</h2>
 <ol style="font-size:13px;line-height:2">{recs_html}</ol>
 {phase_section}
-<div class="footer">Bee2Pay · Security Assessment · Restricted to authorized security teams · CONFIDENTIAL</div>
+<div class="footer">Security Assessment · Restricted to authorized security teams · CONFIDENTIAL</div>
 </body></html>"""
 
     ef = os.path.join(OUTDIR,"executive_summary.html")

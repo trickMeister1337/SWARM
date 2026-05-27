@@ -507,7 +507,7 @@ VULN_KB = [
             "O domínio não possui registro DNS SPF (Sender Policy Framework). "
             "Sem SPF, qualquer servidor de e-mail pode enviar mensagens em nome "
             "do domínio, facilitando ataques de phishing e Business Email Compromise "
-            "(BEC) que se passam por comunicações legítimas da Bee2Pay para clientes "
+            "(BEC) que se passam por comunicações legítimas da organização para clientes "
             "e parceiros."
         ),
         "remediation": (
@@ -646,7 +646,7 @@ VULN_KB = [
             "<ol><li>Crie registros CAA no DNS especificando as CAs autorizadas: "
             "<code>dominio.com. CAA 0 issue \"letsencrypt.org\"</code></li>"
             "<li>Adicione <code>iodef</code> para ser notificado de tentativas de emissão: "
-            "<code>CAA 0 iodef \"mailto:security@bee2pay.com\"</code></li>"
+            "<code>CAA 0 iodef \"mailto:security@dominio.com\"</code></li>"
             "<li>Verifique quais CAs emitem seus certificados atuais antes de restringir.</li></ol>"
         ),
         "ref": "RFC 8659 · CA/Browser Forum Baseline Requirements"
@@ -810,7 +810,7 @@ details summary::-webkit-details-marker{{display:none}}
 <body><div class="container">
 <div class="header">
   <h1>Relatório Consolidado de Segurança</h1>
-  <p>Bee2Pay · {html.escape(batch_ts)} &nbsp;·&nbsp; {passed}/{total} scans concluídos &nbsp;·&nbsp; Duração: {dur_str}</p>
+  <p>{html.escape(batch_ts)} &nbsp;·&nbsp; {passed}/{total} scans concluídos &nbsp;·&nbsp; Duração: {dur_str}</p>
   <p>Gerado em: {rdate} &nbsp;·&nbsp; <strong>CONFIDENCIAL — USO INTERNO</strong></p>
 </div>
 <div class="content">
@@ -866,7 +866,7 @@ details summary::-webkit-details-marker{{display:none}}
 
 </div>
 <div class="footer">
-  <p>Bee2Pay · Avaliação de Segurança &nbsp;·&nbsp; CONFIDENCIAL</p>
+  <p>Avaliação de Segurança &nbsp;·&nbsp; CONFIDENCIAL</p>
 </div>
 </div></body></html>"""
 
