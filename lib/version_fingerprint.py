@@ -21,6 +21,10 @@ def fetch(url, timeout=8, attempts=3, backoff=4):
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
                 return r.read().decode("utf-8", errors="replace"), r.status
+        except urllib.error.HTTPError as e:
+            # Resposta definitiva (404 = endpoint ausente, 403 = bloqueado).
+            # Não é falha transitória — não re-tentar.
+            return "", e.code
         except Exception as e:
             last_err = e
             if attempt < attempts - 1:

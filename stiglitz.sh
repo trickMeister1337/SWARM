@@ -831,8 +831,11 @@ except: pass
     # Preparar lista de URLs: domínio raiz + URLs do Katana + endpoints OSINT
     _nuclei_list="$OUTDIR/raw/nuclei_urls.txt"
     echo "$TARGET" > "$_nuclei_list"
+    # Apenas URLs in-scope do Katana alimentam o Nuclei — o crawl em -d 5 segue
+    # links/redirects para domínios externos (ex.: SSO, referências em JS), que
+    # NÃO podem receber probes. Mesmo filtro aplicado ao contexto ZAP adiante.
     [ -s "$OUTDIR/raw/katana_urls.txt" ] && \
-        cat "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list"
+        grep -F "$DOMAIN" "$OUTDIR/raw/katana_urls.txt" >> "$_nuclei_list" || true
     # Endpoints históricos do OSINT (wayback/gau) alimentam a varredura
     if [ -n "$OSINT_DIR" ] && [ -s "$OSINT_DIR/endpoints_historical.txt" ]; then
         cat "$OSINT_DIR/endpoints_historical.txt" >> "$_nuclei_list"
@@ -1131,6 +1134,7 @@ if command -v zaproxy &>/dev/null; then
         # ── OpenAPI/Swagger: detectar spec e importar no ZAP ────────────
         echo -e "  ${BLUE}[…] Verificando OpenAPI/Swagger...${NC}"
         OPENAPI_FOUND=0
+        _oa_spec_seen=0
         OPENAPI_PATHS=("/swagger.json" "/swagger/v1/swagger.json" "/openapi.json"
                        "/api/swagger.json" "/api/openapi.json" "/api-docs"
                        "/v1/swagger.json" "/v2/swagger.json" "/v3/swagger.json"
@@ -1139,7 +1143,11 @@ if command -v zaproxy &>/dev/null; then
             _oa_url="${TARGET%/}${_oapath}"
             _oa_resp=$(curl -s --max-time 8 -w "%{http_code}" -o "$OUTDIR/raw/swarm_oa_check.tmp" "$_oa_url" 2>/dev/null)
             if echo "$_oa_resp" | grep -q "^2"; then
-                if grep -qE '"swagger"|"openapi"|"paths"' "$OUTDIR/raw/swarm_oa_check.tmp" 2>/dev/null; then
+                # Validar que é um spec OpenAPI/Swagger REAL (JSON com chave de topo
+                # openapi/swagger), não uma página HTML/JS que apenas contém a palavra.
+                if python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if isinstance(d,dict) and ('openapi' in d or 'swagger' in d) else 1)" \
+                        "$OUTDIR/raw/swarm_oa_check.tmp" 2>/dev/null; then
+                    _oa_spec_seen=1
                     echo -e "  ${GREEN}[✓] OpenAPI spec encontrado: $_oapath${NC}"
                     cp "$OUTDIR/raw/swarm_oa_check.tmp" "$OUTDIR/raw/openapi_spec.json"
                     # Importar spec no ZAP via API
@@ -1149,14 +1157,16 @@ if command -v zaproxy &>/dev/null; then
                         echo -e "  ${GREEN}[✓] OpenAPI importado no ZAP — endpoints adicionados ao scan${NC}"
                         OPENAPI_FOUND=1
                     else
-                        echo -e "  ${YELLOW}[!] Import ZAP: $_oa_result${NC}"
+                        echo -e "  ${YELLOW}[!] Spec OpenAPI encontrado mas o import no ZAP falhou: $_oa_result${NC}"
                     fi
                     break
                 fi
             fi
         done
         rm -f "$OUTDIR/raw/swarm_oa_check.tmp"
-        [ "$OPENAPI_FOUND" -eq 0 ] && echo -e "  ${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
+        if [ "$OPENAPI_FOUND" -eq 0 ] && [ "$_oa_spec_seen" -eq 0 ]; then
+            echo -e "  ${YELLOW}[○] Nenhum endpoint OpenAPI/Swagger encontrado${NC}"
+        fi
 
         # ── Katana: injetar URLs descobertas em P2 no contexto ZAP ───────
         # (o crawl já foi feito na Fase 2 para alimentar o Nuclei)
