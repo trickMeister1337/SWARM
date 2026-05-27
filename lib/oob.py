@@ -62,9 +62,9 @@ class OOBSession:
             os.makedirs(os.path.dirname(self._jsonl), exist_ok=True)
         except OSError:
             return False
-        cmd = ["interactsh-client", "-json", "-o", self._jsonl, "-ns", self.server]
+        cmd = ["interactsh-client", "-json", "-o", self._jsonl, "-s", self.server]
         if self.token:
-            cmd += ["-itoken", self.token]
+            cmd += ["-t", self.token]
         try:
             self.proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
