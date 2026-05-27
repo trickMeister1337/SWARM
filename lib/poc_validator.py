@@ -2,7 +2,7 @@
 """
 Stiglitz — PoC Validator v3
 Confirma ativamente vulnerabilidades de TODAS as fontes:
-  - Nuclei (com e sem curl-command)
+  - Nuclei (curl reconstruído de método+URL+body, citado com shlex.quote)
   - OWASP ZAP (extrai request do XML)
   - testssl (TLS/SSL via openssl + curl)
   - Email security (SPF/DMARC/DKIM via dig)
@@ -55,20 +55,6 @@ PATTERNS = load_patterns()
 # ══════════════════════════════════════════════════════════════════
 # UTILITÁRIOS
 # ══════════════════════════════════════════════════════════════════
-
-# Sinais inequívocos de injeção de comando — usados para rejeitar curl-commands
-# vindos do Nuclei (que derivam de respostas potencialmente hostis do alvo).
-_CMD_INJECTION_RE = re.compile(r'\$\(|`|;|\n|\r|&&|\|\||>\s|<\s')
-
-def _sanitize_nuclei_curl(curl_cmd):
-    """Aceita o curl-command do Nuclei só se for um curl benigno, sem
-    encadeamento/substituição de comando. Caso contrário retorna None
-    e o chamador reconstrói o curl a partir de método+URL citados."""
-    if not curl_cmd or not curl_cmd.strip().startswith("curl"):
-        return None
-    if _CMD_INJECTION_RE.search(curl_cmd):
-        return None
-    return curl_cmd
 
 def run_cmd(cmd, timeout=20, retries=2, backoff=5):
     for attempt in range(retries):
@@ -620,7 +606,7 @@ def _clamp_confidence(confirmed, confidence, note=""):
 # ══════════════════════════════════════════════════════════════════
 
 def confirm_nuclei(outdir):
-    """Confirma achados Nuclei — com e sem curl-command."""
+    """Confirma achados Nuclei — curl sempre reconstruído de método+URL+body."""
     nuclei_file = os.path.join(outdir, "raw", "nuclei.json")
     confirmations = []
     if not os.path.exists(nuclei_file):
@@ -640,29 +626,30 @@ def confirm_nuclei(outdir):
                 url         = data.get("matched-at", "")
                 name        = data.get("info", {}).get("name", "")
                 tags        = " ".join(data.get("info", {}).get("tags", []) or [])
-                curl_cmd    = _sanitize_nuclei_curl(data.get("curl-command", ""))
                 vuln_type   = classify_vuln(template_id, name, tags)
 
-                # Reconstruir curl — tentar preservar o método e body originais.
-                # Variáveis derivadas do alvo são citadas com shlex.quote para
-                # impedir injeção de comando no shell do operador.
-                if not curl_cmd:
-                    raw_req = data.get("request", "") or ""
-                    first_line = raw_req.split("\n")[0].strip() if raw_req else ""
-                    method = "GET"
-                    if first_line:
-                        parts = first_line.split()
-                        if parts and parts[0] in ("GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"):
-                            method = parts[0]
-                    # Extrair body do request raw se existir
-                    req_body = ""
-                    if "\r\n\r\n" in raw_req:
-                        req_body = raw_req.split("\r\n\r\n", 1)[1].strip()
-                    elif "\n\n" in raw_req:
-                        req_body = raw_req.split("\n\n", 1)[1].strip()
-                    curl_cmd = f"curl -sk -L -X {shlex.quote(method)} --max-time 15 {shlex.quote(url)}"
-                    if req_body and method in ("POST", "PUT", "PATCH"):
-                        curl_cmd += f" --data {shlex.quote(req_body[:500])}"
+                # Reconstrói o curl SEMPRE a partir de método+URL+body, citados
+                # com shlex.quote. O curl-command do Nuclei é deliberadamente
+                # ignorado: ele deriva de respostas potencialmente hostis do alvo
+                # e usá-lo direto — mesmo filtrado por denylist — abre injeção de
+                # comando no shell do operador (o denylist não cobre & isolado,
+                # | único, (), \, globs, redirecionamentos sem espaço, etc.).
+                raw_req = data.get("request", "") or ""
+                first_line = raw_req.split("\n")[0].strip() if raw_req else ""
+                method = "GET"
+                if first_line:
+                    parts = first_line.split()
+                    if parts and parts[0] in ("GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"):
+                        method = parts[0]
+                # Extrair body do request raw se existir
+                req_body = ""
+                if "\r\n\r\n" in raw_req:
+                    req_body = raw_req.split("\r\n\r\n", 1)[1].strip()
+                elif "\n\n" in raw_req:
+                    req_body = raw_req.split("\n\n", 1)[1].strip()
+                curl_cmd = f"curl -sk -L -X {shlex.quote(method)} --max-time 15 {shlex.quote(url)}"
+                if req_body and method in ("POST", "PUT", "PATCH"):
+                    curl_cmd += f" --data {shlex.quote(req_body[:500])}"
 
                 clean_curl, safe_curl = build_safe_baseline(curl_cmd, url)
                 exec_cmd = (clean_curl
