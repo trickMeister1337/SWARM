@@ -36,6 +36,7 @@
 !/test_integration.py
 !/test_pipeline.py
 !/test_e2e.py
+!/test_email_spoof.py
 !/test_fixtures
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
