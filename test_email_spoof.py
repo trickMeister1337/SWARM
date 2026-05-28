@@ -217,5 +217,52 @@ class TestDelivery(unittest.TestCase):
         self.assertEqual(result["mx_used"], "relay.test")
 
 
+class TestGateAndOutput(unittest.TestCase):
+    def test_roe_gate_passes_with_assume_yes(self):
+        import email_spoof_poc as esp
+        self.assertTrue(esp.roe_gate("a@b.com", "c@d.com", "direct", assume_yes=True))
+
+    def test_roe_gate_blocks_non_interactive_without_consent(self):
+        import email_spoof_poc as esp
+        # sem assume_yes e sem TTY → falha segura (não envia)
+        self.assertFalse(esp.roe_gate("a@b.com", "c@d.com", "direct",
+                                      assume_yes=False, interactive=False))
+
+    def test_write_evidence_creates_json_and_transcript(self):
+        import json
+        import tempfile
+        import email_spoof_poc as esp
+        with tempfile.TemporaryDirectory() as d:
+            records = {"spf": {"status": "MISSING", "severity": "high"},
+                       "dmarc": {"status": "MISSING", "severity": "high"},
+                       "dkim": {"status": "NOT_FOUND", "severity": "low"}}
+            verdict = {"status": "SPOOFABLE_INBOX", "impact_en": "x",
+                       "spf_note_en": None,
+                       "forged_envelope": {"mail_from": "a@b.com", "header_from": "a@b.com"}}
+            send = {"recipient": "c@d.com", "forged_from": "a@b.com", "mx_used": "mx1",
+                    "delivery_method": "direct", "message_id": "<id>", "accepted": True,
+                    "transcript": ["CONNECT mx1:25", "DATA -> 250 ok"]}
+            esp.write_evidence(d, "example.com", records, verdict, send)
+            with open(os.path.join(d, "spoof_evidence.json")) as f:
+                data = json.load(f)
+            self.assertEqual(data["verdict"]["status"], "SPOOFABLE_INBOX")
+            self.assertEqual(data["send"]["accepted"], True)
+            self.assertTrue(os.path.exists(os.path.join(d, "smtp_transcript.txt")))
+
+    def test_write_evidence_without_send_omits_send_block(self):
+        import json
+        import tempfile
+        import email_spoof_poc as esp
+        with tempfile.TemporaryDirectory() as d:
+            records = {"spf": {"status": "OK"}, "dmarc": {"status": "OK"}, "dkim": {"status": "OK"}}
+            verdict = {"status": "BLOCKED_EXACT", "impact_en": "x", "spf_note_en": None,
+                       "forged_envelope": {"mail_from": "a@b.com", "header_from": "a@b.com"}}
+            esp.write_evidence(d, "example.com", records, verdict, None)
+            with open(os.path.join(d, "spoof_evidence.json")) as f:
+                data = json.load(f)
+            self.assertNotIn("send", data)
+            self.assertFalse(os.path.exists(os.path.join(d, "smtp_transcript.txt")))
+
+
 if __name__ == "__main__":
     unittest.main()
