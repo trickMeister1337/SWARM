@@ -1342,6 +1342,41 @@ class TestRiskScore(unittest.TestCase):
         self.assertEqual(r["js_bonus"], 30)
 
 
+class TestFindingShape(unittest.TestCase):
+    """Garante que findings emitidos pelos lib/*.py usam o schema canônico
+    (name/description) — observado em scan real onde secscan.py emitia
+    title/detail e o agregador entregava finding vazio no relatório."""
+
+    def setUp(self):
+        self.root = os.path.dirname(os.path.abspath(__file__))
+
+    def test_secscan_emits_name_description_not_title_detail(self):
+        path = os.path.join(self.root, "lib", "secscan.py")
+        with open(path) as f:
+            content = f.read()
+        self.assertNotIn('"title":', content,
+                         "secscan.py deve usar 'name', não 'title'")
+        self.assertNotIn('"detail":', content,
+                         "secscan.py deve usar 'description', não 'detail'")
+        self.assertIn('"name":', content)
+        self.assertIn('"description":', content)
+
+    def test_all_lib_findings_use_canonical_schema(self):
+        """Verifica que todos os módulos *_findings usam name/description."""
+        files = ["secscan.py", "version_fingerprint.py",
+                 "monitoring_check.py", "ratelimit_check.py"]
+        for fname in files:
+            path = os.path.join(self.root, "lib", fname)
+            if not os.path.exists(path):
+                continue
+            with open(path) as f:
+                content = f.read()
+            # Se o arquivo emite findings (tem .append( com dict), checa schema
+            if 'findings.append' in content or 'findings.append(' in content:
+                self.assertIn('"name":', content,
+                              f"{fname} deve usar 'name' nos findings")
+
+
 class TestProductionProfile(unittest.TestCase):
     """Asserts que o perfil production aplica restrições reais nos scripts."""
 

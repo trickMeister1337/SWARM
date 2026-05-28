@@ -34,11 +34,15 @@ for path in sec_paths:
 if not sec_found:
     print("  [!] security.txt ausente (RFC-9116 não implementado)")
     findings.append({
-        "id": "SECSCAN-001", "tool": "pysecscan", "type": "secscan",
-        "title": "security.txt missing (RFC-9116)",
-        "url": f"{target}/.well-known/security.txt",
-        "severity": "info",
-        "detail": "The target does not publish security.txt — hinders responsible vulnerability disclosure.",
+        "id":          "SECSCAN-001",
+        "tool":        "pysecscan",
+        "type":        "secscan",
+        "source":      "secscan",
+        "name":        "security.txt missing (RFC-9116)",
+        "url":         f"{target}/.well-known/security.txt",
+        "severity":    "info",
+        "description": "The target does not publish security.txt — hinders responsible vulnerability disclosure.",
+        "remediation": "Publish /.well-known/security.txt per RFC 9116 with Contact, Expires and Policy fields.",
     })
 
 # ── Internal IP exposure in HTTP responses ────────────────────────
@@ -63,12 +67,16 @@ for path in probe_paths:
 
 if ip_hits:
     findings.append({
-        "id": "SECSCAN-002", "tool": "pysecscan", "type": "secscan",
-        "title": "Internal IP address exposure (RFC-1918)",
-        "url": target,
-        "severity": "medium",
-        "detail": f"HTTP responses expose internal network IPs: {ip_hits}. "
-                  "Facilitates internal topology reconnaissance and SSRF attacks.",
+        "id":          "SECSCAN-002",
+        "tool":        "pysecscan",
+        "type":        "secscan",
+        "source":      "secscan",
+        "name":        "Internal IP address exposure (RFC-1918)",
+        "url":         target,
+        "severity":    "medium",
+        "description": (f"HTTP responses expose internal network IPs: {ip_hits}. "
+                        "Facilitates internal topology reconnaissance and SSRF attacks."),
+        "remediation": "Sanitize backend headers (X-Forwarded-For, Via) and error pages; never echo private IPs to clients.",
     })
 else:
     print("  [✓] No internal IPs exposed in HTTP responses")
