@@ -12,6 +12,7 @@ import argparse
 import email.message
 import email.utils
 import os
+import smtplib
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
@@ -60,3 +61,74 @@ def build_message(forged_from, to_addr, subject, body):
     msg["Message-ID"] = msg_id
     msg.set_content(body)
     return msg, msg_id
+
+
+def parse_mx(dig_mx_output):
+    """Parseia a saída de `dig +short MX` → lista de hosts ordenada por preferência."""
+    hosts = []
+    for line in dig_mx_output.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit():
+            hosts.append((int(parts[0]), parts[1].rstrip(".")))
+    hosts.sort()
+    return [h for _, h in hosts]
+
+
+def _decode(resp):
+    return resp.decode(errors="replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
+
+
+def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
+                   timeout=15, smtp_factory=smtplib.SMTP):
+    """Entrega direta na porta 25, tentando cada MX. Captura o transcript."""
+    transcript = []
+    last_err = None
+    for host in mx_hosts:
+        try:
+            s = smtp_factory(host, 25, timeout=timeout)
+            transcript.append(f"CONNECT {host}:25")
+            code, resp = s.ehlo(helo)
+            transcript.append(f"EHLO {helo} -> {code} {_decode(resp)}")
+            code, resp = s.mail(mail_from)
+            transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
+            code, resp = s.rcpt(rcpt_to)
+            transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
+            code, resp = s.data(msg_bytes)
+            transcript.append(f"DATA -> {code} {_decode(resp)}")
+            s.quit()
+            return {"method": "direct", "mx_used": host, "accepted": code == 250,
+                    "transcript": transcript}
+        except Exception as e:
+            transcript.append(f"ERROR {host}: {e}")
+            last_err = e
+            continue
+    return {"method": "direct", "mx_used": None, "accepted": False,
+            "transcript": transcript, "error": str(last_err) if last_err else None}
+
+
+def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_bytes,
+                  timeout=15, smtp_factory=smtplib.SMTP):
+    """Entrega via relay configurado (STARTTLS+login se user fornecido)."""
+    transcript = []
+    try:
+        s = smtp_factory(host, port, timeout=timeout)
+        transcript.append(f"CONNECT relay {host}:{port}")
+        s.ehlo(helo)
+        if user:
+            s.starttls()
+            s.ehlo(helo)
+            s.login(user, password)
+            transcript.append("STARTTLS + AUTH")
+        code, resp = s.mail(mail_from)
+        transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
+        code, resp = s.rcpt(rcpt_to)
+        transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
+        code, resp = s.data(msg_bytes)
+        transcript.append(f"DATA -> {code} {_decode(resp)}")
+        s.quit()
+        return {"method": "relay", "mx_used": host, "accepted": code == 250,
+                "transcript": transcript}
+    except Exception as e:
+        transcript.append(f"ERROR relay {host}: {e}")
+        return {"method": "relay", "mx_used": None, "accepted": False,
+                "transcript": transcript, "error": str(e)}

@@ -109,5 +109,85 @@ class TestMessage(unittest.TestCase):
         self.assertIn("HELLO-BODY", msg.get_content())
 
 
+class FakeSMTP:
+    """SMTP falso para testar a entrega sem rede. Registra comandos."""
+    instances = []
+
+    def __init__(self, host, port, timeout=15):
+        self.host = host
+        self.port = port
+        self.commands = []
+        FakeSMTP.instances.append(self)
+
+    def ehlo(self, name=""):
+        self.commands.append(("ehlo", name))
+        return (250, b"ok")
+
+    def mail(self, addr):
+        self.commands.append(("mail", addr))
+        return (250, b"sender ok")
+
+    def rcpt(self, addr):
+        self.commands.append(("rcpt", addr))
+        return (250, b"recipient ok")
+
+    def data(self, msg_bytes):
+        self.commands.append(("data", len(msg_bytes)))
+        return (250, b"queued as ABC123")
+
+    def starttls(self):
+        self.commands.append(("starttls", None))
+
+    def login(self, user, password):
+        self.commands.append(("login", user))
+
+    def quit(self):
+        self.commands.append(("quit", None))
+
+
+class TestDelivery(unittest.TestCase):
+    def setUp(self):
+        FakeSMTP.instances = []
+
+    def test_parse_mx_sorts_by_preference(self):
+        import email_spoof_poc as esp
+        hosts = esp.parse_mx("20 mx2.example.com.\n10 mx1.example.com.")
+        self.assertEqual(hosts, ["mx1.example.com", "mx2.example.com"])
+
+    def test_deliver_direct_accepts_on_250(self):
+        import email_spoof_poc as esp
+        result = esp.deliver_direct(["mx1.example.com"], "attacker.test",
+                                    "ceo@target.com", "victim@corp.com", b"RAW",
+                                    smtp_factory=FakeSMTP)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["mx_used"], "mx1.example.com")
+        self.assertEqual(result["method"], "direct")
+        self.assertTrue(any("DATA" in line for line in result["transcript"]))
+
+    def test_deliver_direct_tries_next_mx_on_failure(self):
+        import email_spoof_poc as esp
+
+        class FailFirst(FakeSMTP):
+            def __init__(self, host, port, timeout=15):
+                if host == "mx1.example.com":
+                    raise OSError("connection refused")
+                super().__init__(host, port, timeout)
+
+        result = esp.deliver_direct(["mx1.example.com", "mx2.example.com"], "h",
+                                    "a@b.com", "c@d.com", b"RAW", smtp_factory=FailFirst)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["mx_used"], "mx2.example.com")
+
+    def test_deliver_relay_authenticates_when_user_given(self):
+        import email_spoof_poc as esp
+        result = esp.deliver_relay("relay.test", 587, "user", "pass", "h",
+                                   "a@b.com", "c@d.com", b"RAW", smtp_factory=FakeSMTP)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["method"], "relay")
+        inst = FakeSMTP.instances[-1]
+        self.assertIn(("starttls", None), inst.commands)
+        self.assertIn(("login", "user"), inst.commands)
+
+
 if __name__ == "__main__":
     unittest.main()
