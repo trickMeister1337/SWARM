@@ -336,6 +336,7 @@ run_recon() {
 
     if [ "$MODE" != "blackbox" ]; then
         info "Modo Stiglitz — recon ignorado (dados existem em $SCAN_DIR)"
+        audit "PHASE_END name=recon result=skipped reason=swarm-mode"
         return 0
     fi
     phase_enabled "recon"   || { warn "Fase 'recon' ignorada (--skip)"; audit "PHASE_END name=recon result=skipped reason=filter"; return 0; }
