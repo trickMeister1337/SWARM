@@ -89,5 +89,25 @@ class TestVerdict(unittest.TestCase):
         self.assertEqual(v["forged_envelope"]["header_from"], "spoof@example.com")
 
 
+class TestMessage(unittest.TestCase):
+    def test_build_message_sets_forged_from(self):
+        import email_spoof_poc as esp
+        msg, msg_id = esp.build_message("ceo@target.com", "victim@corp.com", "Subj", "Body")
+        self.assertEqual(msg["From"], "ceo@target.com")
+        self.assertEqual(msg["To"], "victim@corp.com")
+        self.assertEqual(msg["Subject"], "Subj")
+
+    def test_build_message_returns_captured_message_id(self):
+        import email_spoof_poc as esp
+        msg, msg_id = esp.build_message("ceo@target.com", "victim@corp.com", "Subj", "Body")
+        self.assertTrue(msg_id.startswith("<"))
+        self.assertEqual(msg["Message-ID"], msg_id)
+
+    def test_build_message_body_present(self):
+        import email_spoof_poc as esp
+        msg, _ = esp.build_message("a@b.com", "c@d.com", "S", "HELLO-BODY")
+        self.assertIn("HELLO-BODY", msg.get_content())
+
+
 if __name__ == "__main__":
     unittest.main()

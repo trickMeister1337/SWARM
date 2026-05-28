@@ -9,6 +9,8 @@ Uso de red team autorizado (RoE assinado). Console PT-BR; campos de evidência
 em EN (padrão deliverable do suite).
 """
 import argparse
+import email.message
+import email.utils
 import os
 import sys
 
@@ -45,3 +47,16 @@ def compute_verdict(records, forged_from):
         "spf_note_en": spf_note,
         "forged_envelope": {"mail_from": forged_from, "header_from": forged_from},
     }
+
+
+def build_message(forged_from, to_addr, subject, body):
+    """Monta o email forjado. Retorna (EmailMessage, message_id capturado)."""
+    msg = email.message.EmailMessage()
+    msg["From"] = forged_from
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+    msg["Date"] = email.utils.formatdate(localtime=True)
+    msg_id = email.utils.make_msgid()
+    msg["Message-ID"] = msg_id
+    msg.set_content(body)
+    return msg, msg_id
