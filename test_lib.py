@@ -705,6 +705,153 @@ class TestPocValidator(unittest.TestCase):
         self.assertTrue(confirmed)
         self.assertGreaterEqual(conf, 60)
 
+    def test_url_in_scope_no_scope_means_open(self):
+        # Sem STIGLITZ_SCOPE_DOMAINS no env, _url_in_scope permite tudo (uso standalone).
+        import poc_validator as pv
+        old = pv.SCOPE_DOMAINS[:]
+        pv.SCOPE_DOMAINS = []
+        try:
+            self.assertTrue(pv._url_in_scope("http://any.external/x"))
+        finally:
+            pv.SCOPE_DOMAINS = old
+
+    def test_url_in_scope_filters_external(self):
+        import poc_validator as pv
+        old = pv.SCOPE_DOMAINS[:]
+        pv.SCOPE_DOMAINS = ["target.com"]
+        try:
+            self.assertTrue(pv._url_in_scope("http://target.com/?x=1"))
+            self.assertTrue(pv._url_in_scope("http://api.target.com/?x=1"))  # subdomínio
+            self.assertFalse(pv._url_in_scope("http://evil.com/?x=1"))
+            self.assertFalse(pv._url_in_scope("not-a-url"))
+        finally:
+            pv.SCOPE_DOMAINS = old
+
+
+class TestRiskScore(unittest.TestCase):
+    """Risk score — valores absolutos (antes só havia checagens relacionais)."""
+
+    def _stats(self, c=0, h=0, m=0, l=0):
+        return {"critical": c, "high": h, "medium": m, "low": l, "info": 0}
+
+    def test_empty_is_zero(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(), {}, [], [])
+        self.assertEqual(r["risk"], 0)
+        self.assertEqual(r["base_risk"], 0)
+        self.assertEqual(r["kev_bonus"], 0)
+
+    def test_only_low_is_low_band(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(l=2), {}, [], [])
+        # floor=5 + qty=1 → base=6; sem bônus → 6 (< 15 = BAIXO)
+        self.assertEqual(r["risk"], 6)
+
+    def test_one_medium_is_medium_band(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(m=1), {}, [], [])
+        # floor=15 + qty=1 → base=16
+        self.assertEqual(r["base_risk"], 16)
+        self.assertEqual(r["risk"], 16)
+
+    def test_high_finding_stays_below_70_without_critical_or_kev(self):
+        # Cap da banda CRÍTICA — sem severidade crítica nem KEV, risk <= 69
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(h=10), {}, [], [])
+        self.assertLessEqual(r["risk"], 69, "Não pode virar CRÍTICO sem crítico/KEV")
+
+    def test_critical_finding_reaches_critical_band(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(c=1, h=1), {}, [], [])
+        # floor=70 + qty=(6+3)=9 → base=79
+        self.assertEqual(r["base_risk"], 79)
+        self.assertEqual(r["risk"], 79)
+        self.assertGreaterEqual(r["risk"], 70)
+
+    def test_kev_bonus_capped_at_50(self):
+        from risk_score import compute_risk
+        cves = {f"CVE-2024-{i}": {"in_kev": True} for i in range(10)}
+        r = compute_risk(self._stats(h=1), cves, [], [])
+        self.assertEqual(r["kev_count"], 10)
+        self.assertEqual(r["kev_bonus"], 50, "KEV capado em +50 mesmo com 10 CVEs")
+
+    def test_kev_alone_promotes_to_critical_band(self):
+        # 1 CVE no KEV (sem severidade crítica): floor=high(40)+qty=3=43, +kev=25 → 68
+        # Mas o teto de 69 NÃO se aplica quando kev_count > 0 → pode passar
+        from risk_score import compute_risk
+        cves = {"CVE-2024-1": {"in_kev": True}}
+        r = compute_risk(self._stats(h=1), cves, [], [])
+        self.assertEqual(r["kev_count"], 1)
+        # base=43 + kev=25 = 68 → ainda na banda ALTO; mas SEM o cap em 69.
+        # Adicionando mais um KEV chegaria ao crítico:
+        cves2 = {f"CVE-2024-{i}": {"in_kev": True} for i in range(2)}
+        r2 = compute_risk(self._stats(h=5), cves2, [], [])
+        # base=40+qty=15=55, +kev=50 → 105 → cap 100 → CRÍTICO
+        self.assertGreaterEqual(r2["risk"], 70)
+
+    def test_epss_bonus_capped_at_30(self):
+        from risk_score import compute_risk
+        cves = {f"CVE-2024-{i}": {"epss_score": 0.9} for i in range(10)}
+        # Cada CVE com EPSS>=0.5 dá +15; 10 daria 150 → cap em 30
+        r = compute_risk(self._stats(m=1), cves, [], [])
+        self.assertEqual(r["epss_bonus"], 30)
+
+    def test_js_secrets_only_cannot_fabricate_critical(self):
+        # Muitos secrets JS sem severidade crítica e sem KEV → cap em 69
+        from risk_score import compute_risk
+        secrets = [{"type": "AWS Access Key"}] * 5 + [{"type": "Hardcoded Password"}] * 5
+        r = compute_risk(self._stats(m=2), {}, secrets, [])
+        self.assertLessEqual(r["risk"], 69)
+
+    def test_js_bonus_capped_at_30(self):
+        from risk_score import compute_risk
+        secrets = [{"type": "AWS Access Key"}] * 20  # 20*15=300 → cap 30
+        r = compute_risk(self._stats(m=1), {}, secrets, [])
+        self.assertEqual(r["js_bonus"], 30)
+
+
+class TestProductionProfile(unittest.TestCase):
+    """Asserts que o perfil production aplica restrições reais nos scripts."""
+
+    def setUp(self):
+        self.root = os.path.dirname(os.path.abspath(__file__))
+
+    def test_sqli_production_uses_readonly_techniques(self):
+        # lib/sqli.sh em production NUNCA pode emitir stacked queries (S)
+        with open(os.path.join(self.root, "lib", "sqli.sh")) as f:
+            content = f.read()
+        # Deve existir um case por perfil com a flag --technique adequada
+        self.assertIn('production) technique="BEU"', content,
+                      "Production deve usar técnicas read-only (BEU, sem S/T)")
+        self.assertIn('staging)    technique="BEUT"', content,
+                      "Staging não deve incluir stacked (S)")
+        # E o template do sqlmap deve usar a variável $technique
+        self.assertIn('--technique="$technique"', content)
+
+    def test_msf_production_uses_check_only(self):
+        # lib/msf.sh com payload NONE deve emitir `check` (não `run -j`)
+        with open(os.path.join(self.root, "lib", "msf.sh")) as f:
+            content = f.read()
+        self.assertIn('check_only=true', content)
+        self.assertIn('echo "check"', content,
+                      "Modo check-only deve emitir `check` no RC do msf")
+        # E auxiliares devem ser pulados em check-only
+        self.assertIn("[[ \"$mod\" == exploit/* ]] || continue", content,
+                      "Auxiliares devem ser pulados em check-only")
+
+    def test_red_orchestrator_validates_scope_domains(self):
+        # stiglitz_red.sh valida cada SCOPE_DOMAIN com regex (anti-injeção)
+        with open(os.path.join(self.root, "stiglitz_red.sh")) as f:
+            content = f.read()
+        self.assertIn("Domínio de escopo inválido", content)
+        self.assertIn("--roe", content)
+
+    def test_red_gate_requires_roe_for_bypass(self):
+        # stiglitz_red.sh: bypass via STIGLITZ_AUTHORIZED exige --roe
+        with open(os.path.join(self.root, "stiglitz_red.sh")) as f:
+            content = f.read()
+        self.assertIn("Bypass do orquestrador requer --roe", content)
+
 
 class TestOOB(unittest.TestCase):
     """Confirmação Out-of-Band (lib/oob.py)."""
@@ -755,19 +902,40 @@ class TestOOB(unittest.TestCase):
 
     def test_inject_ssrf_uses_candidate_param(self):
         import oob
-        cmd = oob.inject_oob_url("http://alvo/api?url=orig&x=1",
-                                 "http://tok.oast.test/", "ssrf")
-        self.assertIsNotNone(cmd)
-        self.assertIn("tok.oast.test", cmd)
-        self.assertTrue(cmd.startswith("curl "))
+        cmds = oob.inject_oob_url("http://alvo/api?url=orig&x=1",
+                                  "http://tok.oast.test/", "ssrf")
+        self.assertEqual(len(cmds), 1, "SSRF gera um único payload")
+        self.assertIn("tok.oast.test", cmds[0])
+        self.assertTrue(cmds[0].startswith("curl "))
 
     def test_inject_rce_blocked_in_production(self):
         import oob
-        self.assertIsNone(
-            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "production"))
-        # lab permite
-        self.assertIsNotNone(
-            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "lab"))
+        self.assertEqual(
+            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "production"),
+            [])
+        cmds = oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "lab")
+        self.assertEqual(len(cmds), 1)
+
+    def test_inject_ssti_emits_multiple_engines(self):
+        # SSTI dispara payloads para várias engines (Log4j, Jinja2, Twig,
+        # ERB, Velocity, Smarty, SpEL, FreeMarker). Qualquer callback confirma.
+        import oob
+        cmds = oob.inject_oob_url("http://alvo/?p=x", "http://h.oast.test/", "ssti", "lab")
+        self.assertGreaterEqual(len(cmds), 5, "Várias engines SSTI devem ser cobertas")
+        joined = "\n".join(cmds)
+        self.assertIn("jndi:ldap", joined, "Log4j")
+        self.assertIn("__subclasses__", joined, "Jinja2 / Python")
+        self.assertIn("Runtime", joined, "SpEL / Velocity")
+        # Todos apontam para o host OOB
+        for c in cmds:
+            self.assertIn("h.oast.test", c)
+
+    def test_inject_ssti_blocked_in_production(self):
+        import oob
+        self.assertEqual(
+            oob.inject_oob_url("http://alvo/?p=x", "http://h.oast.test/",
+                               "ssti", "production"),
+            [])
 
 
 class TestDomainFilter(unittest.TestCase):

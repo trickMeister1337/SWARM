@@ -999,6 +999,8 @@ phase_banner "FASE 5/11: CONFIRMAÇÃO ATIVA DE EXPLOITS (Nuclei)"
 
 CONFIRMED_COUNT=0
 export DOMAIN OUTDIR TARGET   # necessário para poc_validator.py resolver domínio e caminhos
+# Escopo para o poc_validator (usado pelo gate OOB para não injetar fora de escopo)
+export STIGLITZ_SCOPE_DOMAINS="$DOMAIN"
 if [ -s "$OUTDIR/raw/nuclei.json" ]; then
     echo -e "  ${BLUE}[…] Re-executando curl de cada achado para confirmar...${NC}"
     # Usar poc_validator.py — tentar múltiplos caminhos possíveis

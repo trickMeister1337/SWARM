@@ -59,14 +59,74 @@ def load_patterns(patterns_path=None):
 
 PATTERNS = load_patterns()
 
+# ── Escopo: STIGLITZ_SCOPE_DOMAINS (space-separated) ─────────────
+# Exportado pelos orquestradores. Vazio → sem filtragem (uso standalone).
+def _load_scope_domains():
+    raw = os.environ.get("STIGLITZ_SCOPE_DOMAINS", "")
+    return [d.strip().lower().lstrip("*.")
+            for d in raw.split() if d.strip()]
+
+SCOPE_DOMAINS = _load_scope_domains()
+
+def _url_in_scope(url):
+    """True se `url` é vazia/sem escopo definido OU se o host está em escopo."""
+    if not SCOPE_DOMAINS:
+        return True
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in SCOPE_DOMAINS)
+
 # ══════════════════════════════════════════════════════════════════
 # UTILITÁRIOS
 # ══════════════════════════════════════════════════════════════════
 
 def run_cmd(cmd, timeout=20, retries=2, backoff=5):
+    """Executa um comando externo SEM shell.
+
+    Aceita `list[str]` (argv direto) ou `str` (parseada por shlex.split).
+    Strings com metacaracteres de shell não-quotados (`;`, `|`, `&`, etc.)
+    falham com PARSE_ERROR — esse é o ponto: shell metacharacters nunca
+    são interpretados. Para comandos que realmente precisam de pipe
+    (openssl chain), use `run_shell_pipe` explicitamente.
+    """
+    if isinstance(cmd, str):
+        try:
+            argv = shlex.split(cmd)
+        except ValueError as e:
+            return "", f"PARSE_ERROR:{e}"
+    else:
+        argv = list(cmd)
+    if not argv:
+        return "", "EMPTY"
     for attempt in range(retries):
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+            r = subprocess.run(argv, shell=False, capture_output=True,
+                               text=True, timeout=timeout)
+            return r.stdout + r.stderr, None
+        except subprocess.TimeoutExpired:
+            if attempt < retries - 1:
+                time.sleep(backoff)
+        except (OSError, ValueError) as e:
+            return "", f"EXEC_ERROR:{e}"
+    return "", "TIMEOUT"
+
+def run_shell_pipe(cmd, timeout=20, retries=2, backoff=5):
+    """Executa um pipeline shell legítimo (openssl chain etc.).
+
+    Reservado para comandos compostos com `|` ou `>` que não fazem sentido
+    como argv único. NUNCA passar dados controlados pelo alvo sem
+    `shlex.quote` prévio — o uso de `shell=True` aqui é deliberado e
+    auditável (poucos call sites, todos internos).
+    """
+    for attempt in range(retries):
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True,
+                               text=True, timeout=timeout)
             return r.stdout + r.stderr, None
         except subprocess.TimeoutExpired:
             if attempt < retries - 1:
@@ -724,13 +784,20 @@ def confirm_nuclei(outdir):
                     resp_headers, resp_body, curl_cmd, clean_curl, safe_curl,
                     diff_changed, diff_note, method_results, auth_ev, dc, "nuclei"))
 
-                # OOB: SSRF/RCE/SSTI não confirmados por conteúdo recebem um
-                # payload único; o callback (assíncrono) é resolvido após o loop.
-                if oob_ready and not confirmed and vuln_type in ("ssrf", "rce", "ssti"):
+                # OOB: SSRF/RCE/SSTI não confirmados por conteúdo recebem
+                # payload(s) únicos; o callback (assíncrono) é resolvido após
+                # o loop. Para SSTI, vários payloads são disparados (uma engine
+                # por payload); qualquer callback confirma o finding.
+                # Gate de escopo: só injeta em hosts em escopo (evita disparar
+                # payloads em URLs externas que vazaram para o output do scan).
+                if (oob_ready and not confirmed
+                        and vuln_type in ("ssrf", "rce", "ssti")
+                        and _url_in_scope(url)):
                     token, oob_url = oob.new_payload(vuln_type)
-                    inj = inject_oob_url(url, oob_url, vuln_type, profile)
-                    if inj:
-                        run_cmd(inj, timeout=12, retries=1)
+                    cmds = inject_oob_url(url, oob_url, vuln_type, profile)
+                    if cmds:
+                        for inj in cmds:
+                            run_cmd(inj, timeout=12, retries=1)
                         oob_pending.append((len(confirmations) - 1, token, oob_url))
 
             except Exception as e:
@@ -984,7 +1051,7 @@ def confirm_tls(outdir, domain):
                           if confirmed else "HSTS presente — issue corrigida ou FP")
 
         elif any(x in finding_id.lower() for x in ["certificate", "cert", "expired", "selfsigned"]):
-            cert_out, _ = run_cmd(
+            cert_out, _ = run_shell_pipe(
                 f"echo | openssl s_client -connect {shlex.quote(domain)}:443 -servername {shlex.quote(domain)} 2>/dev/null"
                 f" | openssl x509 -noout -dates 2>/dev/null",
                 timeout=12, retries=1)
@@ -1008,7 +1075,7 @@ def confirm_tls(outdir, domain):
             proto_flag = next((v for k, v in proto_map.items()
                                if k in finding_id.lower()), "")
             if proto_flag:
-                check_out, _ = run_cmd(
+                check_out, _ = run_shell_pipe(
                     f"echo | openssl s_client -connect {shlex.quote(domain)}:443 {proto_flag} 2>&1",
                     timeout=10, retries=1)
                 if "handshake failure" in check_out.lower():
@@ -1059,13 +1126,12 @@ def confirm_email(outdir, domain):
     print(f"  [Email]  Re-verificando {len(issues)} issue(s) de email via DNS...")
     recheck = {}
 
-    # SPF
-    dq = shlex.quote(domain)
-    spf_out, _ = run_cmd(f"dig TXT {dq} +short 2>/dev/null", timeout=10, retries=1)
+    # SPF — argv-list direto; stderr é capturado pelo run_cmd, sem 2>/dev/null
+    spf_out, _ = run_cmd(["dig", "TXT", domain, "+short"], timeout=10, retries=1)
     recheck["spf"] = "v=spf1" in spf_out.lower()
 
     # DMARC
-    dmarc_out, _ = run_cmd(f"dig TXT _dmarc.{dq} +short 2>/dev/null", timeout=10, retries=1)
+    dmarc_out, _ = run_cmd(["dig", "TXT", f"_dmarc.{domain}", "+short"], timeout=10, retries=1)
     recheck["dmarc"] = "v=dmarc1" in dmarc_out.lower()
 
     # DKIM — seletores mais comuns
@@ -1073,7 +1139,7 @@ def confirm_email(outdir, domain):
     for sel in ["default", "google", "mail", "selector1", "selector2",
                  "k1", "smtp", "dkim", "email", "s1", "s2"]:
         dkim_out, _ = run_cmd(
-            f"dig TXT {sel}._domainkey.{dq} +short 2>/dev/null",
+            ["dig", "TXT", f"{sel}._domainkey.{domain}", "+short"],
             timeout=5, retries=1)
         if "v=dkim1" in dkim_out.lower():
             dkim_found = True

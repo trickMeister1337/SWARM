@@ -2,6 +2,17 @@
 
 All notable changes to Stiglitz are documented here. Dates are approximate.
 
+## v7.7 — OOB confirmation, argv-list exec, risk_score testable
+
+- **Out-of-Band confirmation (`lib/oob.py`)** — Confirma vulnerabilidades cegas (SSRF/RCE/SSTI) via callbacks DNS/HTTP coletados por um `interactsh-client` self-hosted. Findings sem evidência por conteúdo recebem um payload OOB único; um callback correlacionado eleva o finding a CONFIRMADO com 98% de confiança. Por padrão usa apenas servidor self-hosted (`INTERACTSH_SERVER`) — não vaza callbacks para a infra pública da ProjectDiscovery.
+- **Múltiplas engines SSTI** — `inject_oob_url` para `vuln_type=ssti` agora dispara payloads para Log4j (JNDI), Jinja2/Python, Twig, ERB, Velocity, Smarty, Spring SpEL e FreeMarker. Cada engine ignora o que não entende; qualquer callback confirma o finding.
+- **`run_cmd` → argv-list por padrão** — `subprocess.run` agora é `shell=False` com lista de args (parse via `shlex.split` quando vem string). `shell=True` ficou isolado em `run_shell_pipe` para os 2 call sites que legitimamente precisam de pipe (chains do `openssl`). Fecha o último vetor arquitetônico de command-injection em `poc_validator`.
+- **OOB com gate de escopo** — `poc_validator` lê `STIGLITZ_SCOPE_DOMAINS` do env e só dispara payloads OOB em hosts em escopo. Evita injetar em URLs externas que vazaram no output do scan.
+- **`stiglitz_report.py` testável** — lógica do Risk Score (KEV>EPSS>CVSS, caps por componente, banda crítica gated por crítico-real-ou-KEV) extraída para `lib/risk_score.py` como função pura. Output do relatório permanece byte-equivalente; agora há cobertura com valores absolutos.
+- **Brand-neutral reports** — relatórios consolidado e de scan deixam de mencionar marca do cliente.
+- **`interactsh-client` flags corretas** — `-s`/`-t` em vez das antigas.
+- **Testes** — +18 (10 risk_score com valores absolutos, 4 perfil production, 2 OOB SSTI multi-engine, 2 gate de escopo do OOB). Total: 79 unit + 26 pytest + 57 RED = **162 testes**.
+
 ## v7.6 — Safety, scope & injection hardening
 
 Security-focused pass closing gaps that mattered most for an offensive tool.

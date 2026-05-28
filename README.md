@@ -43,6 +43,7 @@ Stiglitz chains the tools a red-teamer already uses — `subfinder`, `httpx`, `n
 
 - **🎯 Adaptive scanning** — detects the target's stack (`httpx` tech-detect + path fingerprinting + version probes) and automatically tunes Nuclei tags, ffuf wordlists and CMS scanners. No manual configuration.
 - **🔬 Active confirmation, not just alerts** — every eligible finding is re-executed with a reproducible `curl` PoC. The report distinguishes a **confirmed exploit** from a merely **verified** hardening issue.
+- **📡 Out-of-Band confirmation for blind vulns** — `lib/oob.py` integrates a self-hosted `interactsh-client` to confirm SSRF, RCE and SSTI via correlated DNS/HTTP callbacks. SSTI fires payloads against eight engines (Log4j, Jinja2, Twig, ERB, Velocity, Smarty, Spring SpEL, FreeMarker). Enable with `INTERACTSH_SERVER=oast.yourcorp.tld` (and optional `INTERACTSH_TOKEN`, `OOB_WAIT=20`).
 - **📊 A risk score you can defend** — KEV > EPSS > CVSS methodology. The CRITICAL band requires a real critical finding or a CVE under active exploitation (CISA KEV) — soft signals can't inflate it.
 - **📁 Client-ready reports** — executive summary, scope & methodology, effort×impact prioritization matrix, evolution diff vs the last scan, CVSS vectors, and reproducible evidence. Plus `findings.json` for SIEM/Jira.
 - **🧩 One pipeline, full kill chain** — passive OSINT feeds active recon, recon feeds exploitation, every stage hands structured data to the next.
@@ -223,6 +224,23 @@ rm -rf stiglitz_red_*/ scan_*/ osint_*/
 ## Notifications
 
 Set any of these and Stiglitz pings on scan completion: `STIGLITZ_TELEGRAM_TOKEN` + `STIGLITZ_TELEGRAM_CHAT`, `STIGLITZ_NOTIFY_WEBHOOK` (Slack/generic), `STIGLITZ_TEAMS_WEBHOOK`.
+
+## Out-of-Band confirmation (OAST)
+
+Stiglitz can confirm blind vulnerabilities (SSRF, RCE, SSTI) via correlated DNS/HTTP callbacks captured by an `interactsh-client` you host yourself. Public ProjectDiscovery servers are intentionally **not** used by default — that would leak callbacks from your engagements to third-party infrastructure.
+
+```bash
+# Required: a self-hosted interactsh server (e.g. oast.yourcorp.tld)
+export INTERACTSH_SERVER=oast.yourcorp.tld
+export INTERACTSH_TOKEN=<optional-auth-token>
+export OOB_WAIT=20       # seconds to wait for callbacks (default 20)
+
+bash stiglitz.sh https://target.com
+```
+
+When enabled, every SSRF/RCE/SSTI finding not confirmed by response content receives a unique payload. A matching callback elevates the finding to `confirmed=True, confidence=98` with the OOB evidence (protocol + source IP + raw request) attached to the report card. Scope is enforced: only in-scope hosts receive payloads.
+
+SSTI payloads cover eight template engines: Log4j (JNDI), Jinja2/Python, Twig, ERB, Velocity, Smarty, Spring SpEL, FreeMarker. RCE and SSTI payloads are **blocked in `production` profile** (only emitted in `lab` and `staging`).
 
 ## Project layout
 

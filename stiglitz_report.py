@@ -17,8 +17,12 @@ Entrada via variáveis de ambiente (exportadas pelo stiglitz.sh):
 Uso direto (regenerar relatório de um scan existente):
   OUTDIR=scan_dir TARGET=https://alvo DOMAIN=alvo python3 stiglitz_report.py
 """
-import json, os, html, re
+import json, os, html, re, sys
 from datetime import datetime, timezone
+
+# Permite importar módulos de lib/ quando rodado como script standalone
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from risk_score import compute_risk, HIGH_JS_TYPES  # noqa: E402
 
 # ── Tabela CWE → CVSS sintético (baseado em médias históricas NVD) ──
 # Usada como fallback para alertas ZAP que não trazem CVE nas referências
@@ -1072,50 +1076,17 @@ for grp in zap_dedup.values():
     if sev in occurrences: occurrences[sev] += (grp["count"] - 1)
 
 # ── Risk score: KEV > EPSS > CVSS (metodologia 2026) ───────────
-# Base: faixa pela severidade mais alta + quantidade com retornos decrescentes.
-# Usa TIPOS ÚNICOS (stats), não ocorrências por URL — assim um mesmo alerta
-# repetido em N URLs não satura o índice (o que mascarava a discriminação:
-# quase todo scan batia 100/100). A severidade mais alta define a faixa-base
-# (alinhada às bandas 70/40/15); a quantidade adiciona um bônus limitado.
-if   stats["critical"] > 0: _risk_floor = 70   # CRÍTICO
-elif stats["high"]     > 0: _risk_floor = 40   # ALTO
-elif stats["medium"]   > 0: _risk_floor = 15   # MÉDIO
-elif stats["low"]      > 0: _risk_floor = 5
-else:                       _risk_floor = 0
-_risk_qty = min(stats["critical"]*6 + stats["high"]*3
-                + stats["medium"]*1 + stats["low"]*0.5, 25)
-base_risk = int(_risk_floor + _risk_qty)
-
-# Camada 1 — KEV: exploração ativa confirmada (peso máximo)
-# Um CVE no KEV é automaticamente urgente independente do CVSS
-kev_bonus = 0
-kev_count = sum(1 for ev in cve_enrichment.values() if ev.get("in_kev"))
-if kev_count > 0:
-    kev_bonus = min(kev_count * 25, 50)  # +25 por CVE no KEV, cap 50
-
-# Camada 2 — EPSS: probabilidade de exploração nos próximos 30 dias
-epss_bonus = 0
-for ev in cve_enrichment.values():
-    epss = ev.get("epss_score") or 0
-    if epss >= 0.5:    epss_bonus += 15   # exploit muito provável (>50%)
-    elif epss >= 0.1:  epss_bonus += 7    # exploit provável (>10%)
-    elif epss >= 0.01: epss_bonus += 2    # exploit possível (>1%)
-# Cap próprio (como kev_bonus/js_bonus) — evita que muitos CVEs EPSS-altos
-# saturem o componente sozinhos.
-epss_bonus = min(epss_bonus, 30)
-# Bônus JS: secrets e frameworks vulneráveis agravam o risco
-HIGH_JS_TYPES = {"AWS Access Key","AWS Secret","Private Key","Stripe Live Key","GitHub Token","GitLab PAT","OpenAI Key","Anthropic Key","Hardcoded Password","DB Connection String"}
-js_high   = [s for s in js_secrets if s.get("type","") in HIGH_JS_TYPES]
-js_medium = [s for s in js_secrets if s.get("type","") not in HIGH_JS_TYPES]
-js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
-js_bonus = min(len(js_high)*15 + len(js_medium)*5 + len(js_vuln_fw)*8, 30)
-risk = min(base_risk + kev_bonus + epss_bonus + js_bonus, 100)
-# A faixa CRÍTICO exige um achado de severidade crítica OU exploração ativa
-# (CISA KEV). Bônus brandos (EPSS/JS) elevam dentro de ALTO, mas não devem
-# fabricar um CRÍTICO sozinhos — evita que falsos-positivos de secrets JS ou
-# probabilidade EPSS inflem a leitura executiva.
-if stats["critical"] == 0 and kev_count == 0:
-    risk = min(risk, 69)
+# Lógica em lib/risk_score.py (extraída para teste em isolamento).
+_r = compute_risk(stats, cve_enrichment, js_secrets, js_frameworks)
+base_risk  = _r["base_risk"]
+kev_bonus  = _r["kev_bonus"]
+kev_count  = _r["kev_count"]
+epss_bonus = _r["epss_bonus"]
+js_high    = _r["js_high"]
+js_medium  = _r["js_medium"]
+js_vuln_fw = _r["js_vuln_fw"]
+js_bonus   = _r["js_bonus"]
+risk       = _r["risk"]
 # Classificação baseada no risk score (KEV+EPSS+CVSS) — não apenas contagem
 # Faixas: 70-100=CRÍTICO, 40-69=ALTO, 15-39=MÉDIO, 0-14=BAIXO
 if risk >= 70:
