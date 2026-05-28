@@ -728,6 +728,328 @@ class TestPocValidator(unittest.TestCase):
             pv.SCOPE_DOMAINS = old
 
 
+class TestOAuthRefresh(unittest.TestCase):
+    """oauth_refresh.py — refresh nativo de access tokens."""
+
+    def setUp(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+        # Limpa env relacionado
+        for k in ("STIGLITZ_OAUTH_TOKEN_URL", "STIGLITZ_OAUTH_REFRESH_TOKEN",
+                  "STIGLITZ_OAUTH_CLIENT_ID", "STIGLITZ_OAUTH_CLIENT_SECRET"):
+            os.environ.pop(k, None)
+
+    def test_disabled_without_env(self):
+        import oauth_refresh as oa
+        self.assertFalse(oa.is_enabled())
+
+    def test_enabled_when_env_set(self):
+        import oauth_refresh as oa
+        os.environ["STIGLITZ_OAUTH_TOKEN_URL"]     = "https://idp/token"
+        os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"] = "rt-123"
+        try:
+            self.assertTrue(oa.is_enabled())
+        finally:
+            del os.environ["STIGLITZ_OAUTH_TOKEN_URL"]
+            del os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"]
+
+    def test_refresh_raises_without_config(self):
+        import oauth_refresh as oa
+        with self.assertRaises(oa.OAuthError):
+            oa.refresh_access_token()
+
+    def test_apply_to_curl_injects_header(self):
+        import oauth_refresh as oa
+        original = "curl -sk https://api/foo"
+        out = oa.apply_to_curl(original, "tok-XYZ")
+        self.assertIn("-H", out)
+        self.assertIn("Authorization: Bearer tok-XYZ", out)
+
+    def test_apply_to_curl_replaces_existing_authorization(self):
+        # Authorization existente deve ser substituído, não duplicado
+        import oauth_refresh as oa
+        original = "curl -sk -H 'Authorization: Bearer old-token' https://api/foo"
+        out = oa.apply_to_curl(original, "new-token")
+        self.assertIn("Bearer new-token", out)
+        self.assertNotIn("old-token", out)
+
+    def test_apply_to_curl_noop_without_token(self):
+        import oauth_refresh as oa
+        original = "curl -sk https://api/foo"
+        self.assertEqual(oa.apply_to_curl(original, ""), original)
+
+    def test_refresh_uses_mock_endpoint(self):
+        """Smoke test usando um mini-servidor HTTP local."""
+        import oauth_refresh as oa
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode()
+                if "refresh_token=rt-OK" in body:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"access_token":"new-AT","token_type":"Bearer"}')
+                else:
+                    self.send_response(401)
+                    self.end_headers()
+            def log_message(self, *_): pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            os.environ["STIGLITZ_OAUTH_TOKEN_URL"] = f"http://127.0.0.1:{port}/token"
+            os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"] = "rt-OK"
+            tok = oa.refresh_access_token(timeout=5)
+            self.assertEqual(tok, "new-AT")
+            # refresh inválido → OAuthError
+            os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"] = "rt-BAD"
+            with self.assertRaises(oa.OAuthError):
+                oa.refresh_access_token(timeout=5)
+        finally:
+            server.shutdown()
+            for k in ("STIGLITZ_OAUTH_TOKEN_URL", "STIGLITZ_OAUTH_REFRESH_TOKEN"):
+                os.environ.pop(k, None)
+
+
+class TestRedBatch(unittest.TestCase):
+    """stiglitz_red_batch.sh — multi-target paralelo."""
+
+    def setUp(self):
+        self.root = os.path.dirname(os.path.abspath(__file__))
+        self.script = os.path.join(self.root, "stiglitz_red_batch.sh")
+
+    def test_script_exists_and_executable(self):
+        self.assertTrue(os.path.isfile(self.script))
+        self.assertTrue(os.access(self.script, os.X_OK))
+
+    def test_help_shows_required_args(self):
+        import subprocess
+        r = subprocess.run(["bash", self.script, "--help"],
+                           capture_output=True, text=True, timeout=10)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("--targets", r.stdout)
+        self.assertIn("--roe", r.stdout)
+        self.assertIn("--workers", r.stdout)
+        self.assertIn("--profile-file", r.stdout)
+
+    def test_missing_targets_aborts(self):
+        import subprocess
+        r = subprocess.run(["bash", self.script, "--roe", "/tmp/x"],
+                           capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("targets", r.stdout + r.stderr)
+
+    def test_missing_roe_aborts(self):
+        import subprocess, tempfile
+        tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        tf.write("https://a.com\n"); tf.close()
+        try:
+            r = subprocess.run(["bash", self.script, "--targets", tf.name],
+                               capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("roe", (r.stdout + r.stderr).lower())
+        finally:
+            os.unlink(tf.name)
+
+
+class TestTrend(unittest.TestCase):
+    """stiglitz_trend.py — análise longitudinal cross-engagement."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import stiglitz_trend as st
+        self.st = st
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mkscan(self, domain, ts, risk, findings):
+        d = os.path.join(self.tmpdir, f"scan_{domain}_{ts}")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "stiglitz_report.html"), "w") as f:
+            f.write(f"<html><body>Risk Score: {risk}</body></html>")
+        with open(os.path.join(d, "findings.json"), "w") as f:
+            json.dump({"findings": findings}, f)
+        return d
+
+    def test_extract_timestamp_from_dir_name(self):
+        d = os.path.join(self.tmpdir, "scan_alvo.com_20260301_120000")
+        os.makedirs(d)
+        ts = self.st._extract_timestamp(d)
+        self.assertEqual(ts.year, 2026)
+        self.assertEqual(ts.month, 3)
+        self.assertEqual(ts.day, 1)
+
+    def test_extract_domain_from_dir_name(self):
+        self.assertEqual(
+            self.st._extract_domain("scan_target.com_20260520_120000"),
+            "target.com")
+
+    def test_extract_risk_from_report(self):
+        d = self._mkscan("t.com", "20260301_120000", 67, [])
+        self.assertEqual(self.st._extract_risk(d), 67)
+
+    def test_extract_stats_counts_severity(self):
+        d = self._mkscan("t.com", "20260301_120000", 50,
+                         [{"severity": "critical"}, {"severity": "high"},
+                          {"severity": "high"}, {"severity": "low"}])
+        s = self.st._extract_stats(d)
+        self.assertEqual(s["critical"], 1)
+        self.assertEqual(s["high"], 2)
+        self.assertEqual(s["low"], 1)
+
+    def test_collect_sorts_by_timestamp(self):
+        # Cria 3 scans em ordem invertida — collect deve ordenar
+        d3 = self._mkscan("t.com", "20260520_120000", 52, [])
+        d1 = self._mkscan("t.com", "20260301_120000", 65, [])
+        d2 = self._mkscan("t.com", "20260415_120000", 78, [])
+        rows = self.st.collect([d3, d1, d2])
+        self.assertEqual([r["risk"] for r in rows], [65, 78, 52])
+
+    def test_render_html_includes_trend_deltas(self):
+        d1 = self._mkscan("t.com", "20260301_120000", 65, [{"severity": "high"}])
+        d2 = self._mkscan("t.com", "20260520_120000", 52, [])
+        rows = self.st.collect([d1, d2])
+        out = os.path.join(self.tmpdir, "trend.html")
+        self.st.render_html(rows, out)
+        content = open(out).read()
+        self.assertIn("Stiglitz Trend", content)
+        self.assertIn("t.com", content)
+        # Delta -13 com sinal e cor verde (melhorou)
+        self.assertIn("-13", content)
+        self.assertIn("#27ae60", content)
+
+
+class TestValidatorPlugins(unittest.TestCase):
+    """Plug-in de validadores (lib/validators/)."""
+
+    def setUp(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+
+    def test_registry_populated(self):
+        import validators
+        regs = validators.registered_types()
+        self.assertIn("sqli", regs)
+        self.assertIn("xss", regs)
+
+    def test_registry_returns_callable(self):
+        import validators
+        fn = validators.get("sqli")
+        self.assertIsNotNone(fn)
+        self.assertTrue(callable(fn))
+
+    def test_registry_unknown_returns_none(self):
+        import validators
+        self.assertIsNone(validators.get("not_a_type"))
+
+    def test_sqli_plugin_error_pattern_confirms(self):
+        from validators.sqli import validate as sqli_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "You have an error in your SQL syntax",
+            "resp_headers": "", "status": "500", "patterns": {"patterns": ["error in your sql"]},
+            "diff_changed": False, "diff_conf": 0, "diff_note": "",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+        }
+        confirmed, conf, note = sqli_validate(ctx)
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(conf, 90)
+
+    def test_sqli_plugin_size_only_diff_requires_doublecheck(self):
+        # Sem double-check consistente, diff só por tamanho NÃO confirma
+        from validators.sqli import validate as sqli_validate
+        ctx_base = {
+            "url": "http://x/", "resp_body": "", "resp_headers": "",
+            "status": "200", "patterns": {"patterns": []},
+            "diff_changed": True, "diff_conf": 15, "diff_note": "mudou 40%",
+            "auth_ev": [], "dc_bonus": 0,
+        }
+        # Sem dc
+        confirmed, _, _ = sqli_validate({**ctx_base, "dc_result": None})
+        self.assertFalse(confirmed)
+        # Com dc consistente
+        confirmed, conf, _ = sqli_validate({**ctx_base, "dc_result": (True, "ok")})
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(conf, 60)
+
+    def test_xss_plugin_pattern_reflection(self):
+        from validators.xss import validate as xss_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "<script>alert(1)</script>",
+            "resp_headers": "", "status": "200",
+            "patterns": {"patterns": [r"<script>alert\(1\)</script>"]},
+            "diff_changed": False, "diff_conf": 0, "diff_note": "",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+        }
+        confirmed, conf, _ = xss_validate(ctx)
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(conf, 90)
+
+
+class TestProfileLoader(unittest.TestCase):
+    """Profile DSL JSON-Schema — lib/profile_loader.py."""
+
+    def setUp(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+
+    def test_validates_minimum_profile(self):
+        import profile_loader as pl
+        out = pl.validate({"sqlmap": {"level": 3, "risk": 2}})
+        self.assertEqual(out["sqlmap_level"], 3)
+        self.assertEqual(out["sqlmap_risk"], 2)
+
+    def test_rejects_out_of_range(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"sqlmap": {"level": 99}})
+        with self.assertRaises(ValueError):
+            pl.validate({"sqlmap": {"risk": 0}})
+        with self.assertRaises(ValueError):
+            pl.validate({"crawl_depth": -1})
+
+    def test_rejects_bad_techniques(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"sqlmap": {"techniques": "INVALID"}})
+
+    def test_rejects_invalid_name(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"name": "has spaces"})
+        with self.assertRaises(ValueError):
+            pl.validate({"name": "../path"})
+
+    def test_rejects_unknown_timeout_keys(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"timeouts": {"unknown_tool": 60}})
+
+    def test_emit_includes_declare_for_associative(self):
+        """Em perfis com '-' no nome, falta de `declare -gA` causaria
+        bash a tratar a chave como aritmética (eng-custom → eng - custom)."""
+        import profile_loader as pl
+        out = pl.validate({"sqlmap": {"level": 3}, "brute_force": False})
+        bash = pl.emit_bash(out, "eng-custom")
+        self.assertIn("declare -gA PROFILE_SQLMAP_LEVEL", bash)
+        self.assertIn('PROFILE_SQLMAP_LEVEL["eng-custom"]="3"', bash)
+        self.assertIn('PROFILE_BRUTE_FORCE["eng-custom"]="false"', bash)
+
+    def test_emit_bool_to_bash_literal(self):
+        import profile_loader as pl
+        out = pl.validate({"brute_force": True, "nikto_enabled": False})
+        bash = pl.emit_bash(out, "staging")
+        self.assertIn('PROFILE_BRUTE_FORCE["staging"]="true"', bash)
+        self.assertIn('PROFILE_NIKTO_ENABLED["staging"]="false"', bash)
+
+
 class TestReportModules(unittest.TestCase):
     """Módulos lib/report/ extraídos de stiglitz_report.py."""
 

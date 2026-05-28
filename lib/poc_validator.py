@@ -32,6 +32,34 @@ try:
 except Exception:
     _OOB_AVAILABLE = False
 
+# OAuth refresh é opcional — só ativa quando STIGLITZ_OAUTH_TOKEN_URL estiver
+# configurada. Refresh inicial no startup + retry em 401 dentro do loop.
+try:
+    import oauth_refresh as _oauth
+    _OAUTH_AVAILABLE = True
+except Exception:
+    _OAUTH_AVAILABLE = False
+_OAUTH_TOKEN = ""   # access_token corrente (atualizado on-401)
+
+def _refresh_oauth_safe():
+    """Tenta refresh; em falha, retorna "" e loga (não aborta o scan)."""
+    global _OAUTH_TOKEN
+    if not (_OAUTH_AVAILABLE and _oauth.is_enabled()):
+        return ""
+    try:
+        _OAUTH_TOKEN = _oauth.refresh_access_token()
+        print(f"  [OAuth] refresh ok — token atualizado")
+        return _OAUTH_TOKEN
+    except Exception as e:
+        print(f"  [OAuth] refresh falhou: {e}")
+        return ""
+
+def _apply_oauth(curl_cmd):
+    """Injeta Authorization Bearer no curl quando temos token."""
+    if not _OAUTH_TOKEN:
+        return curl_cmd
+    return _oauth.apply_to_curl(curl_cmd, _OAUTH_TOKEN)
+
 # ── Threshold mínimo para considerar um achado "confirmado" ──────
 MIN_CONFIRM_CONFIDENCE = 60   # abaixo disso → force confirmed=False
 
@@ -354,6 +382,9 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
 
     v3: thresholds mais rigorosos — especialmente para tipos que geravam FP:
         generic, exposure, redirect, auth_bypass, security_header, tls
+
+    v8: dispatch via plug-in registry (lib/validators/*). Se o tipo está
+    registrado, chama o plug-in; senão cai no if/elif legado.
     """
     p    = PATTERNS.get(vuln_type, {})
     b    = (resp_body    or "").lower()
@@ -367,6 +398,22 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
     else:
         dc_bonus = 0
         dc_note  = ""
+
+    # ── Plug-in registry: dispatch para validadores externos ─────
+    try:
+        import validators as _val_pkg
+        _plugin = _val_pkg.get(vuln_type)
+    except ImportError:
+        _plugin = None
+    if _plugin:
+        ctx = {
+            "url": url, "resp_body": resp_body, "resp_headers": resp_headers,
+            "status": status, "patterns": p,
+            "diff_changed": diff_changed, "diff_conf": diff_conf,
+            "diff_note": diff_note, "auth_ev": auth,
+            "dc_result": dc_result, "dc_bonus": dc_bonus,
+        }
+        return _clamp_confidence(*_plugin(ctx))
 
     # ── SQLi ─────────────────────────────────────────────────────
     if vuln_type == "sqli":
@@ -682,6 +729,8 @@ def confirm_nuclei(outdir):
         return confirmations
 
     profile   = os.environ.get("PROFILE", "lab")
+    # OAuth: refresh inicial (se configurado) antes do loop
+    _refresh_oauth_safe()
     oob       = OOBSession(out_dir=os.path.join(outdir, "raw")) if _OOB_AVAILABLE else None
     oob_ready = bool(oob and oob.start())
     if oob_ready:
@@ -732,11 +781,19 @@ def confirm_nuclei(outdir):
                     curl_cmd += f" --data {shlex.quote(req_body[:500])}"
 
                 clean_curl, safe_curl = build_safe_baseline(curl_cmd, url)
+                # OAuth: injeta Authorization Bearer no curl reconstruído
+                clean_curl = _apply_oauth(clean_curl)
+                safe_curl  = _apply_oauth(safe_curl)
                 exec_cmd = (clean_curl
                             + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='")
 
                 print(f"  [Nuclei] {template_id} ({vuln_type}) → {url[:55]}...")
                 raw_out, err = run_cmd(exec_cmd, timeout=20)
+                # Retry em 401 com token refrescado (uma única vez)
+                if err is None and "===Stiglitz_STATUS:401===" in raw_out and _refresh_oauth_safe():
+                    clean_curl = _apply_oauth(clean_curl)
+                    exec_cmd = clean_curl + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
+                    raw_out, err = run_cmd(exec_cmd, timeout=20)
                 if err == "TIMEOUT":
                     confirmations.append(
                         _timeout_entry(template_id, url, severity, vuln_type,

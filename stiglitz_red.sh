@@ -30,6 +30,7 @@ SCAN_DIR=""
 SCOPE_DOMAINS=()
 SCOPE_FILE=""
 ROE_FILE=""
+PROFILE_FILE=""
 AUTH_COOKIE=""
 AUTH_HEADER=""
 SKIP_PHASES=()
@@ -114,6 +115,8 @@ OPÇÕES PRINCIPAIS:
   --scope-file FILE       Arquivo com domínios/IPs em escopo (um por linha)
   --roe FILE              Documento de RoE (autorização). Registra SHA-256 no
                           audit trail; obrigatório para bypass do orquestrador.
+  --profile-file FILE     Perfil JSON customizado (sobrescreve PROFILE_*).
+                          Validado por lib/profile_loader.py.
   --auth-cookie COOKIE    Cookie de autenticação ("session=abc123")
   --auth-header HEADER    Header de auth ("Authorization: Bearer token")
 
@@ -156,6 +159,7 @@ parse_args() {
             --scope)        SCOPE_DOMAINS+=("$2");  shift 2 ;;
             --scope-file)   SCOPE_FILE="$2";        shift 2 ;;
             --roe)          ROE_FILE="$2";          shift 2 ;;
+            --profile-file) PROFILE_FILE="$2";      shift 2 ;;
             --auth-cookie)  AUTH_COOKIE="$2";       shift 2 ;;
             --auth-header)  AUTH_HEADER="$2";       shift 2 ;;
             --skip)         IFS=',' read -ra SKIP_PHASES <<< "$2"; shift 2 ;;
@@ -186,10 +190,19 @@ validate() {
         exit 1
     fi
 
-    case "$PROFILE" in
-        lab|staging|production) ;;
-        *) fail "Perfil inválido: '$PROFILE'. Use: lab|staging|production"; exit 1 ;;
-    esac
+    # Com --profile-file, qualquer nome (regex restrita) é permitido —
+    # o JSON fornece os valores. Sem --profile-file, exige enum embutido.
+    if [ -n "$PROFILE_FILE" ]; then
+        [ -f "$PROFILE_FILE" ] || { fail "Profile file não encontrado: $PROFILE_FILE"; exit 1; }
+        if ! echo "$PROFILE" | grep -qE '^[a-zA-Z][a-zA-Z0-9._-]{0,40}$'; then
+            fail "Perfil inválido: '$PROFILE' (use [a-zA-Z][a-zA-Z0-9._-]*)"; exit 1
+        fi
+    else
+        case "$PROFILE" in
+            lab|staging|production) ;;
+            *) fail "Perfil inválido: '$PROFILE'. Use: lab|staging|production (ou --profile-file)"; exit 1 ;;
+        esac
+    fi
 
     # Derivar domínio-base para scope
     if [ "${#SCOPE_DOMAINS[@]}" -eq 0 ]; then
@@ -271,8 +284,18 @@ load_profiles() {
 }
 
 # ── Checkpoint ─────────────────────────────────────────────────────────────────
-checkpoint_done() { echo "$1" >> "$STATE_FILE"; }
-checkpoint_skip() { [ "$RESUME" = true ] && grep -qxF "$1" "$STATE_FILE" 2>/dev/null; }
+# checkpoint_done também emite PHASE_END no audit trail (hash chain).
+checkpoint_done() {
+    echo "$1" >> "$STATE_FILE"
+    audit "PHASE_END name=$1 result=ok"
+}
+checkpoint_skip() {
+    if [ "$RESUME" = true ] && grep -qxF "$1" "$STATE_FILE" 2>/dev/null; then
+        audit "PHASE_SKIP name=$1 reason=checkpoint"
+        return 0
+    fi
+    return 1
+}
 
 # ── Phase gate ─────────────────────────────────────────────────────────────────
 phase_enabled() {
@@ -309,12 +332,13 @@ BANNER
 # ═══════════════════════════════════════════════════════════════════════════════
 run_recon() {
     phase "FASE 1 — RECON (subfinder + httpx)"
+    audit "PHASE_START name=recon"
 
     if [ "$MODE" != "blackbox" ]; then
         info "Modo Stiglitz — recon ignorado (dados existem em $SCAN_DIR)"
         return 0
     fi
-    phase_enabled "recon"   || { warn "Fase 'recon' ignorada (--skip)"; return 0; }
+    phase_enabled "recon"   || { warn "Fase 'recon' ignorada (--skip)"; audit "PHASE_END name=recon result=skipped reason=filter"; return 0; }
     checkpoint_skip "recon" && { info "Recon: retomado de checkpoint — pulando"; return 0; }
 
     if [ "$DRY_RUN" = true ]; then
@@ -340,8 +364,9 @@ run_recon() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_surface() {
     phase "FASE 2 — SURFACE (nmap)"
+    audit "PHASE_START name=surface"
 
-    phase_enabled "surface"   || { warn "Fase 'surface' ignorada (--skip)"; return 0; }
+    phase_enabled "surface"   || { warn "Fase 'surface' ignorada (--skip)"; audit "PHASE_END name=surface result=skipped reason=filter"; return 0; }
     checkpoint_skip "surface" && { info "Surface: retomado de checkpoint — pulando"; return 0; }
 
     # Modo Stiglitz: reusar nmap existente
@@ -400,6 +425,7 @@ run_surface() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_ingest() {
     phase "INGESTÃO — Priorização de alvos"
+    audit "PHASE_START name=ingest"
 
     # Inicializar arquivos de dados
     touch "$OUTDIR/data/cves_found.txt" \
@@ -453,6 +479,7 @@ PYEOF
     n_urls=$(wc -l < "$OUTDIR/data/targets_scored.txt" 2>/dev/null); n_urls=${n_urls:-0}
     info "Ingestão: ${n_urls} URL(s) priorizadas para teste"
     log "Ingestão: ${n_urls} URLs | CVEs: $(wc -l < "$OUTDIR/data/cves_found.txt" 2>/dev/null || echo 0)"
+    audit "PHASE_END name=ingest result=ok urls=${n_urls}"
 }
 
 _build_scored_targets() {
@@ -548,8 +575,9 @@ PYEOF
 # ═══════════════════════════════════════════════════════════════════════════════
 run_crawl() {
     phase "FASE 3 — CRAWL (katana + ffuf)"
+    audit "PHASE_START name=crawl"
 
-    phase_enabled "crawl"   || { warn "Fase 'crawl' ignorada (--skip)"; return 0; }
+    phase_enabled "crawl"   || { warn "Fase 'crawl' ignorada (--skip)"; audit "PHASE_END name=crawl result=skipped reason=filter"; return 0; }
     checkpoint_skip "crawl" && { info "Crawl: retomado de checkpoint — pulando"; return 0; }
 
     if [ "$DRY_RUN" = true ]; then
@@ -576,10 +604,11 @@ run_crawl() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_sqli() {
     phase "FASE 4 — SQLi (sqlmap)"
+    audit "PHASE_START name=sqli"
     local _t0; _t0=$(date +%s)
     log "Fase SQLi iniciada — perfil=${PROFILE}"
 
-    phase_enabled "sqli"   || { warn "Fase 'sqli' ignorada (--skip)"; log "Fase SQLi: ignorada (--skip)"; return 0; }
+    phase_enabled "sqli"   || { warn "Fase 'sqli' ignorada (--skip)"; log "Fase SQLi: ignorada (--skip)"; audit "PHASE_END name=sqli result=skipped reason=filter"; return 0; }
     checkpoint_skip "sqli" && { info "SQLi: retomado de checkpoint — pulando"; return 0; }
 
     if ! has sqlmap; then
@@ -621,10 +650,11 @@ run_sqli() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_xss() {
     phase "FASE 5 — XSS (dalfox)"
+    audit "PHASE_START name=xss"
     local _t0; _t0=$(date +%s)
     log "Fase XSS iniciada — perfil=${PROFILE}"
 
-    phase_enabled "xss"   || { warn "Fase 'xss' ignorada (--skip)"; log "Fase XSS: ignorada (--skip)"; return 0; }
+    phase_enabled "xss"   || { warn "Fase 'xss' ignorada (--skip)"; log "Fase XSS: ignorada (--skip)"; audit "PHASE_END name=xss result=skipped reason=filter"; return 0; }
     checkpoint_skip "xss" && { info "XSS: retomado de checkpoint — pulando"; return 0; }
 
     if ! has dalfox; then
@@ -662,10 +692,11 @@ run_xss() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_brute() {
     phase "FASE 6 — BRUTE FORCE (hydra)"
+    audit "PHASE_START name=brute"
     local _t0; _t0=$(date +%s)
     log "Fase Brute iniciada — perfil=${PROFILE}"
 
-    phase_enabled "brute"   || { warn "Fase 'brute' ignorada (--skip)"; log "Fase Brute: ignorada (--skip)"; return 0; }
+    phase_enabled "brute"   || { warn "Fase 'brute' ignorada (--skip)"; log "Fase Brute: ignorada (--skip)"; audit "PHASE_END name=brute result=skipped reason=filter"; return 0; }
     checkpoint_skip "brute" && { info "Brute: retomado de checkpoint — pulando"; return 0; }
 
     if [ "${PROFILE_BRUTE_FORCE[$PROFILE]:-false}" != "true" ]; then
@@ -787,10 +818,11 @@ _run_http_form_brute() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_services() {
     phase "FASE 7 — SERVICES (nikto + metasploit + searchsploit)"
+    audit "PHASE_START name=services"
     local _t0; _t0=$(date +%s)
     log "Fase Services iniciada — perfil=${PROFILE}"
 
-    phase_enabled "services"   || { warn "Fase 'services' ignorada (--skip)"; log "Fase Services: ignorada (--skip)"; return 0; }
+    phase_enabled "services"   || { warn "Fase 'services' ignorada (--skip)"; log "Fase Services: ignorada (--skip)"; audit "PHASE_END name=services result=skipped reason=filter"; return 0; }
     checkpoint_skip "services" && { info "Services: retomado de checkpoint — pulando"; return 0; }
 
     # ── Nikto ──
@@ -1000,6 +1032,7 @@ authorization_gate() {
 # ═══════════════════════════════════════════════════════════════════════════════
 run_report() {
     phase "FASE 8 — RELATÓRIO"
+    audit "PHASE_START name=report"
     local _t0; _t0=$(date +%s)
     log "Fase Report iniciada"
 
@@ -1041,6 +1074,7 @@ run_report() {
     fi
 
     log "Fase Report concluída — $(($(date +%s)-_t0))s"
+    audit "PHASE_END name=report result=ok"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1087,6 +1121,16 @@ main() {
     parse_args "$@"
     validate
     load_profiles
+
+    # --profile-file: aplica overrides após carregar defaults.
+    # profile_loader.py valida o JSON e emite assignments bash.
+    if [ -n "$PROFILE_FILE" ]; then
+        local _overrides
+        _overrides=$(python3 "$LIB/profile_loader.py" "$PROFILE_FILE" "$PROFILE" 2>&1) || {
+            fail "profile_loader: $_overrides"; exit 1; }
+        eval "$_overrides"
+        info "Profile customizado aplicado: $PROFILE_FILE (perfil ativo: $PROFILE)"
+    fi
 
     # Criar diretório de saída
     local ts; ts=$(date +%Y%m%d_%H%M%S)

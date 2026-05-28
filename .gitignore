@@ -38,6 +38,8 @@
 !/test_e2e.py
 !/test_fixtures
 !/verify_audit.py
+!/stiglitz_trend.py
+!/stiglitz_red_batch.sh
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/

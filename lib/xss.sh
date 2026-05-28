@@ -93,6 +93,9 @@ run_xss_phase() {
 
     xss_confirmed=$(wc -l < "$xss_dir/xss_confirmed.txt" 2>/dev/null || echo 0)
     echo "[✓] XSS: $xss_confirmed finding(s) confirmado(s)"
+    if [ "$xss_confirmed" -gt 0 ] && command -v audit &>/dev/null; then
+        audit "FINDING_CONFIRMED type=xss count=${xss_confirmed}"
+    fi
 }
 
 # Consolida resultados JSON do dalfox em formato Stiglitz RED
