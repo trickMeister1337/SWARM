@@ -57,6 +57,38 @@ phase() {
 }
 log()   { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 has()   { command -v "$1" &>/dev/null; }
+
+# ── Audit trail tamper-evident (hash chain) ────────────────────────────────────
+# Cada entrada: SEQ | ISO_TS | EVENT | prev_hash:curr_hash
+# curr_hash = sha256(prev || ts || event)[:16]. Seed = roe_sha (amarra o trail
+# ao documento de autorização). Verificável offline via verify_audit.py.
+AUDIT_LOG=""
+_audit_seq=0
+audit_init() {
+    [ -z "$OUTDIR" ] && return 0
+    AUDIT_LOG="$OUTDIR/audit.log"
+    : > "$AUDIT_LOG"
+    chmod 600 "$AUDIT_LOG" 2>/dev/null || true
+    local seed="${1:-0000000000000000}"
+    _audit_seq=0
+    local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local event="AUDIT_INIT seed=$seed"
+    local h
+    h=$(printf '%s|%s|%s' "$seed" "$ts" "$event" | sha256sum | cut -c1-16)
+    printf '%04d | %s | %s | %s:%s\n' "$_audit_seq" "$ts" "$event" "$seed" "$h" >> "$AUDIT_LOG"
+}
+audit() {
+    [ -z "$AUDIT_LOG" ] && return 0
+    local event="$*"
+    local prev
+    prev=$(awk -F'[ :]+' 'END{print $NF}' "$AUDIT_LOG" 2>/dev/null)
+    [ -z "$prev" ] && prev="0000000000000000"
+    _audit_seq=$((_audit_seq + 1))
+    local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local h
+    h=$(printf '%s|%s|%s' "$prev" "$ts" "$event" | sha256sum | cut -c1-16)
+    printf '%04d | %s | %s | %s:%s\n' "$_audit_seq" "$ts" "$event" "$prev" "$h" >> "$AUDIT_LOG"
+}
 dry_cmd() {
     if [ "$DRY_RUN" = true ]; then
         echo -e "  ${DIM}[DRY-RUN]${RST} $*"
@@ -920,9 +952,14 @@ authorization_gate() {
     fi
     local _op="${USER:-$(id -un 2>/dev/null || echo unknown)}"
 
+    # Inicializar audit trail (hash chain) amarrado ao RoE.
+    audit_init "${roe_sha:-0000000000000000}"
+    audit "PROFILE=${PROFILE} MODE=${MODE} SCOPE=${SCOPE_DOMAINS[*]} OPERATOR=${_op}"
+
     if [ "$DRY_RUN" = true ]; then
         warn "[DRY-RUN] Autorização simulada — nenhum teste real será executado"
         log "DRY-RUN autorizado. Operador=${_op} Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]} RoE=${roe_sha}"
+        audit "AUTHORIZED via=dry-run"
         return 0
     fi
 
@@ -931,16 +968,19 @@ authorization_gate() {
     if [ "${STIGLITZ_AUTHORIZED:-0}" = "1" ]; then
         if [ -z "$ROE_FILE" ]; then
             fail "Bypass do orquestrador requer --roe <arquivo> (RoE assinado). Abortando."
+            audit "AUTHORIZATION_DENIED reason=orchestrator-without-roe"
             exit 1
         fi
         info "Autorizado pelo orquestrador Stiglitz FULL (RoE validado)."
         log "AUTORIZADO (orquestrador). Operador=${_op} Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]} RoE=${roe_sha}"
+        audit "AUTHORIZED via=orchestrator"
         return 0
     fi
 
     # Não interativo (sem TTY) e sem orquestrador → não há como confirmar: aborta.
     if [ ! -t 0 ]; then
         fail "Sem terminal interativo e sem autorização do orquestrador. Abortando."
+        audit "AUTHORIZATION_DENIED reason=no-tty-no-orchestrator"
         exit 1
     fi
 
@@ -948,9 +988,11 @@ authorization_gate() {
     read -r _auth_input
     if [[ "$_auth_input" != "EU AUTORIZO" ]]; then
         fail "Autorização não confirmada. Abortando."
+        audit "AUTHORIZATION_DENIED reason=user-declined"
         exit 1
     fi
     log "AUTORIZADO (interativo). Operador=${_op} Perfil=${PROFILE} Modo=${MODE} Escopo=${SCOPE_DOMAINS[*]} RoE=${roe_sha}"
+    audit "AUTHORIZED via=interactive"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

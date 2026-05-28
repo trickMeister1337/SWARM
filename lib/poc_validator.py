@@ -687,6 +687,10 @@ def confirm_nuclei(outdir):
     if oob_ready:
         print(f"  [OOB] interactsh ativo ({oob.domain}) — confirmação cega habilitada")
     oob_pending = []   # [(idx_em_confirmations, token, oob_url)]
+    # Cap por scan: limita o nº de findings que disparam OOB. Em scans com
+    # 200+ findings SSRF/RCE/SSTI, isso evita stress no alvo. Default 25.
+    OOB_MAX = max(0, int(os.environ.get("OOB_MAX_PAYLOADS", "25")))
+    oob_fired_count = 0   # incrementa por finding disparado, não por payload
 
     with open(nuclei_file, encoding="utf-8") as f:
         for line in f:
@@ -790,15 +794,20 @@ def confirm_nuclei(outdir):
                 # por payload); qualquer callback confirma o finding.
                 # Gate de escopo: só injeta em hosts em escopo (evita disparar
                 # payloads em URLs externas que vazaram para o output do scan).
+                # Cap OOB_MAX_PAYLOADS: limita findings disparados por scan.
                 if (oob_ready and not confirmed
                         and vuln_type in ("ssrf", "rce", "ssti")
-                        and _url_in_scope(url)):
+                        and _url_in_scope(url)
+                        and oob_fired_count < OOB_MAX):
                     token, oob_url = oob.new_payload(vuln_type)
                     cmds = inject_oob_url(url, oob_url, vuln_type, profile)
                     if cmds:
                         for inj in cmds:
                             run_cmd(inj, timeout=12, retries=1)
                         oob_pending.append((len(confirmations) - 1, token, oob_url))
+                        oob_fired_count += 1
+                        if oob_fired_count == OOB_MAX:
+                            print(f"  [OOB] cap atingido ({OOB_MAX} findings) — próximos não injetam")
 
             except Exception as e:
                 print(f"  [!] Nuclei parse error: {e}")
@@ -808,6 +817,9 @@ def confirm_nuclei(outdir):
         wait_s = int(os.environ.get("OOB_WAIT", "20"))
         print(f"  [OOB] Aguardando callbacks por {wait_s}s ({len(oob_pending)} payload(s))...")
         time.sleep(wait_s)
+        # Cap de bytes da evidência OOB anexada (raw-request do callback).
+        # Default 800 — suficiente pra header+body curto, sem inflar relatório.
+        ev_cap = max(120, int(os.environ.get("OOB_EVIDENCE_BYTES", "800")))
         for idx, token, oob_url in oob_pending:
             hits = oob.matches(token)
             if not hits:
@@ -821,7 +833,7 @@ def confirm_nuclei(outdir):
             entry["poc_note"]      = f"OOB confirmado: callback {proto} de {src}"
             entry["response_snippet"] += (
                 f"\n\n--- OOB CALLBACK ({proto}) via {oob_url} ---\n"
-                + str(hits[0].get("raw-request", "(sem raw-request)"))[:800])
+                + str(hits[0].get("raw-request", "(sem raw-request)"))[:ev_cap])
             print(f"  [CONFIRMADO-OOB] {entry['template_id']} ← {proto} de {src}")
     if oob:
         oob.stop()

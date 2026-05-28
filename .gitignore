@@ -37,6 +37,7 @@
 !/test_pipeline.py
 !/test_e2e.py
 !/test_fixtures
+!/verify_audit.py
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/

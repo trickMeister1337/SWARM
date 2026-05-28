@@ -728,6 +728,202 @@ class TestPocValidator(unittest.TestCase):
             pv.SCOPE_DOMAINS = old
 
 
+class TestReportModules(unittest.TestCase):
+    """Módulos lib/report/ extraídos de stiglitz_report.py."""
+
+    def setUp(self):
+        # Adiciona lib/ ao sys.path para importar lib/report/*
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+
+    def test_cwe_enrich_known_cwe(self):
+        from report.cwe_data import cwe_enrich
+        r = cwe_enrich("CWE-89")
+        self.assertEqual(r["sev"], "CRITICAL")
+        self.assertGreaterEqual(r["cvss"], 9.0)
+        # Aceita também só o número
+        self.assertEqual(cwe_enrich("89"), r)
+
+    def test_cwe_enrich_unknown_returns_none(self):
+        from report.cwe_data import cwe_enrich
+        self.assertIsNone(cwe_enrich(""))
+        self.assertIsNone(cwe_enrich(None))
+        self.assertIsNone(cwe_enrich("CWE-99999"))
+
+    def test_cvss_to_sev_bands(self):
+        from report.cwe_data import cvss_to_sev
+        self.assertEqual(cvss_to_sev(9.8), "critical")
+        self.assertEqual(cvss_to_sev(8.0), "high")
+        self.assertEqual(cvss_to_sev(5.0), "medium")
+        self.assertEqual(cvss_to_sev(1.0), "low")
+        self.assertEqual(cvss_to_sev(0.0), "info")
+        self.assertIsNone(cvss_to_sev(None))
+
+    def test_sarif_structure_valid(self):
+        from report.sarif import build_sarif
+        findings = [
+            {"name": "SQL Injection", "severity": "critical",
+             "cve": "CVE-2024-1234", "url": "https://t.com/api",
+             "source": "Nuclei", "description": "SQLi found"},
+            {"name": "XSS",           "severity": "medium",
+             "cve": "CWE-79", "url": "https://t.com/search",
+             "source": "ZAP"},
+        ]
+        s = build_sarif(findings, "https://t.com")
+        self.assertEqual(s["version"], "2.1.0")
+        self.assertEqual(len(s["runs"]), 1)
+        self.assertEqual(s["runs"][0]["tool"]["driver"]["name"], "Stiglitz")
+        self.assertEqual(len(s["runs"][0]["results"]), 2)
+        # Regras únicas por CVE/CWE
+        rule_ids = [r["id"] for r in s["runs"][0]["tool"]["driver"]["rules"]]
+        self.assertIn("CVE-2024-1234", rule_ids)
+        self.assertIn("CWE-79", rule_ids)
+
+    def test_sarif_levels_match_severity(self):
+        from report.sarif import build_sarif
+        findings = [
+            {"name": "A", "severity": "critical", "url": "x"},
+            {"name": "B", "severity": "high",     "url": "x"},
+            {"name": "C", "severity": "medium",   "url": "x"},
+            {"name": "D", "severity": "low",      "url": "x"},
+            {"name": "E", "severity": "info",     "url": "x"},
+        ]
+        s = build_sarif(findings, "x")
+        levels = [r["level"] for r in s["runs"][0]["results"]]
+        self.assertEqual(levels, ["error", "error", "warning", "note", "none"])
+
+    def test_sarif_falls_back_to_target_when_url_missing(self):
+        from report.sarif import build_sarif
+        findings = [{"name": "X", "severity": "high"}]  # sem url
+        s = build_sarif(findings, "https://target.com")
+        loc = s["runs"][0]["results"][0]["locations"][0]
+        self.assertEqual(loc["physicalLocation"]["artifactLocation"]["uri"],
+                         "https://target.com")
+
+    def test_exec_summary_renders(self):
+        from report.exec_summary import build_exec_summary
+        html_out = build_exec_summary(
+            target="https://target.com", domain="target.com",
+            risk=85, risk_label="CRITICAL — Immediate Action",
+            timestamp="28/05/2026 09:00",
+            stats={"critical": 2, "high": 5, "medium": 3, "low": 1},
+            findings=[
+                {"name": "SQLi", "severity": "critical",
+                 "impact": "DB takeover", "remediation": "Prepared stmts"},
+                {"name": "XSS", "severity": "high",
+                 "impact": "Session hijack", "remediation": "Escape output"},
+            ],
+            kev_matches={"CVE-2021-44228": {}},
+        )
+        # Estrutura básica
+        self.assertIn("<!DOCTYPE html>", html_out)
+        self.assertIn("target.com", html_out)
+        self.assertIn("85/100", html_out)
+        self.assertIn("CRITICAL", html_out)
+        # KEV alert deve aparecer
+        self.assertIn("Active Exploitation", html_out)
+        self.assertIn("CVE-2021-44228", html_out)
+        # Top vulns aparecem com seus nomes (escapados)
+        self.assertIn("SQLi", html_out)
+        self.assertIn("XSS", html_out)
+
+    def test_exec_summary_escapes_target(self):
+        # XSS via target name não pode injetar markup no exec summary
+        from report.exec_summary import build_exec_summary
+        html_out = build_exec_summary(
+            target="<script>alert(1)</script>", domain="x",
+            risk=10, risk_label="LOW", timestamp="t",
+            stats={"critical": 0, "high": 0, "medium": 0, "low": 0},
+            findings=[],
+        )
+        self.assertNotIn("<script>alert(1)</script>", html_out)
+        self.assertIn("&lt;script&gt;", html_out)
+
+    def test_sarif_helpuri_only_for_cves(self):
+        from report.sarif import build_sarif
+        findings = [
+            {"name": "X", "severity": "high", "cve": "CVE-2024-1234", "url": "x"},
+            {"name": "Y", "severity": "high",                          "url": "x"},
+        ]
+        s = build_sarif(findings, "x")
+        rules = {r["id"]: r for r in s["runs"][0]["tool"]["driver"]["rules"]}
+        self.assertIn("helpUri", rules["CVE-2024-1234"])
+        self.assertIn("nvd.nist.gov", rules["CVE-2024-1234"]["helpUri"])
+        # Findings sem CVE não devem ter helpUri
+        non_cve = [rid for rid in rules if not rid.startswith("CVE-")]
+        self.assertGreater(len(non_cve), 0)
+        for rid in non_cve:
+            self.assertNotIn("helpUri", rules[rid])
+
+
+class TestAuditChain(unittest.TestCase):
+    """Hash chain do audit trail — verify_audit.py detecta adulteração."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "verify_audit.py")
+        # Importa o verificador como módulo
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import verify_audit
+        self.va = verify_audit
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _build_chain(self, events, seed="seed1234"):
+        """Constrói um audit.log válido a partir de uma lista de eventos."""
+        path = os.path.join(self.tmpdir, "audit.log")
+        prev = seed
+        ts = "2026-05-28T12:00:00Z"
+        with open(path, "w") as f:
+            init_event = f"AUDIT_INIT seed={seed}"
+            h = self.va._h(seed, ts, init_event)
+            f.write(f"0000 | {ts} | {init_event} | {seed}:{h}\n")
+            prev = h
+            for i, ev in enumerate(events, start=1):
+                h = self.va._h(prev, ts, ev)
+                f.write(f"{i:04d} | {ts} | {ev} | {prev}:{h}\n")
+                prev = h
+        return path
+
+    def test_valid_chain_verifies(self):
+        path = self._build_chain(["PROFILE=lab", "AUTHORIZED via=interactive"])
+        ok, msg = self.va.verify(path)
+        self.assertTrue(ok, f"chain válida deveria passar: {msg}")
+        self.assertIn("3 entradas", msg)
+
+    def test_tampered_event_detected(self):
+        path = self._build_chain(["PROFILE=lab", "AUTHORIZED via=interactive"])
+        # Altera o evento da segunda linha sem recalcular hashes
+        with open(path) as f:
+            lines = f.readlines()
+        lines[1] = lines[1].replace("PROFILE=lab", "PROFILE=production")
+        with open(path, "w") as f:
+            f.writelines(lines)
+        ok, msg = self.va.verify(path)
+        self.assertFalse(ok)
+        self.assertIn("curr_hash diverge", msg)
+
+    def test_reordered_lines_detected(self):
+        path = self._build_chain(["EV_A", "EV_B", "EV_C"])
+        with open(path) as f:
+            lines = f.readlines()
+        # Swap linha 1 e 2
+        lines[1], lines[2] = lines[2], lines[1]
+        with open(path, "w") as f:
+            f.writelines(lines)
+        ok, msg = self.va.verify(path)
+        self.assertFalse(ok)
+
+    def test_empty_log_fails(self):
+        path = os.path.join(self.tmpdir, "empty.log")
+        open(path, "w").close()
+        ok, msg = self.va.verify(path)
+        self.assertFalse(ok)
+        self.assertIn("vazio", msg)
+
+
 class TestRiskScore(unittest.TestCase):
     """Risk score — valores absolutos (antes só havia checagens relacionais)."""
 
@@ -851,6 +1047,24 @@ class TestProductionProfile(unittest.TestCase):
         with open(os.path.join(self.root, "stiglitz_red.sh")) as f:
             content = f.read()
         self.assertIn("Bypass do orquestrador requer --roe", content)
+
+    def test_pci_active_controls_phase_present(self):
+        # pci_scan.sh: fase 7.5 emite EVIDÊNCIA ATIVA para Reqs 2/8/10
+        # em vez de inferir conformidade da ausência de findings.
+        # NOTA: pci_scan.sh é gitignored (versionado separadamente) — pula
+        # quando ausente para permitir checkout limpo do repo público.
+        pci = os.path.join(self.root, "pci_scan.sh")
+        if not os.path.exists(pci):
+            self.skipTest("pci_scan.sh ausente (gitignored neste repo)")
+        with open(pci) as f:
+            content = f.read()
+        self.assertIn("CONTROLES PCI ATIVOS", content)
+        self.assertIn("default-creds-probe", content,
+                      "Req 2: probe ativo de credenciais default")
+        self.assertIn("mfa-presence-probe", content,
+                      "Req 8: heurística de MFA")
+        self.assertIn("logging-headers-probe", content,
+                      "Req 10: presença de headers de correlação")
 
 
 class TestOOB(unittest.TestCase):

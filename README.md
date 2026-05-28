@@ -233,7 +233,9 @@ Stiglitz can confirm blind vulnerabilities (SSRF, RCE, SSTI) via correlated DNS/
 # Required: a self-hosted interactsh server (e.g. oast.yourcorp.tld)
 export INTERACTSH_SERVER=oast.yourcorp.tld
 export INTERACTSH_TOKEN=<optional-auth-token>
-export OOB_WAIT=20       # seconds to wait for callbacks (default 20)
+export OOB_WAIT=20             # seconds to wait for callbacks (default 20)
+export OOB_MAX_PAYLOADS=25     # max findings that fire OOB per scan (default 25)
+export OOB_EVIDENCE_BYTES=800  # raw-request bytes attached to confirmed cards
 
 bash stiglitz.sh https://target.com
 ```

@@ -2,6 +2,17 @@
 
 All notable changes to Stiglitz are documented here. Dates are approximate.
 
+## v7.8 — Caps OOB, audit hash chain, PCI ativo, refactor de relatório
+
+- **Cap por scan no OOB** — `OOB_MAX_PAYLOADS` (default 25) limita quantos findings disparam payloads OOB num scan, evitando stress em alvos sensíveis. `OOB_EVIDENCE_BYTES` (default 800) controla o tamanho da evidência (raw-request do callback) anexada ao card.
+- **Audit trail tamper-evident (hash chain)** — `stiglitz_red.sh` agora mantém um `audit.log` Merkle-like: cada entrada inclui `prev_hash:curr_hash` onde `curr_hash = sha256(prev || ts || event)[:16]`. Seed da chain é o SHA-256 do RoE — amarra criptograficamente o trail ao documento de autorização. `verify_audit.py` valida offline e detecta adulteração entre as duas entradas envolvidas.
+- **Checagens PCI não-derivadas (Reqs 2/8/10)** — `pci_scan.sh` ganha a Fase 7.5 com checks ATIVOS que emitem evidência positiva ou negativa por requisito (em vez de inferir conformidade da ausência de findings):
+  - Req 2.2.4 / 8.3 — probe de 25 combinações default × paths comuns (`/admin`, `/login`, etc.); registra `default-creds-probe` com hit ou ausência de hits.
+  - Req 8.4 — heurística de MFA: procura no HTML por `mfa|otp|2fa|totp|authenticator`. Sem indicadores → MEDIUM com nota; com indicadores → INFO.
+  - Req 10.2 — headers de correlação (`X-Request-ID`, `Correlation-Id`, etc.) presentes na resposta indicam logging robusto.
+- **Refactor de `stiglitz_report.py`** — extração de 376 linhas em 3 módulos puros sob `lib/report/`: `cwe_data.py` (CWE→CVSS/impacto/remediação + helpers `cwe_enrich`/`cvss_to_sev`), `sarif.py` (`build_sarif` — SARIF 2.1.0 puro, testável), `exec_summary.py` (`build_exec_summary` — HTML do resumo executivo puro). `stiglitz_report.py` reduzido de 2432 a 2179 linhas; output dos relatórios permanece byte-equivalente (test_e2e verde).
+- **Testes** — +14 (4 audit chain, 9 report modules, 1 PCI active controls). Total: 93 unit + 26 pytest + 57 RED = **176 testes**.
+
 ## v7.7 — OOB confirmation, argv-list exec, risk_score testable
 
 - **Out-of-Band confirmation (`lib/oob.py`)** — Confirma vulnerabilidades cegas (SSRF/RCE/SSTI) via callbacks DNS/HTTP coletados por um `interactsh-client` self-hosted. Findings sem evidência por conteúdo recebem um payload OOB único; um callback correlacionado eleva o finding a CONFIRMADO com 98% de confiança. Por padrão usa apenas servidor self-hosted (`INTERACTSH_SERVER`) — não vaza callbacks para a infra pública da ProjectDiscovery.
