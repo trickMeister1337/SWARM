@@ -42,5 +42,19 @@ def registered_types():
 
 # Auto-import dos validadores para popular o registry. Cada módulo
 # faz @register("X") no nível de módulo, então basta importá-lo.
-from . import sqli   # noqa: F401, E402
-from . import xss    # noqa: F401, E402
+from . import sqli              # noqa: F401, E402
+from . import xss               # noqa: F401, E402
+from . import lfi               # noqa: F401, E402
+from . import ssrf              # noqa: F401, E402
+from . import cors              # noqa: F401, E402
+from . import default_login     # noqa: F401, E402
+from . import exposure          # noqa: F401, E402
+from . import security_header   # noqa: F401, E402
+from . import tls               # noqa: F401, E402
+from . import email             # noqa: F401, E402
+from . import auth_bypass       # noqa: F401, E402
+from . import redirect          # noqa: F401, E402
+from . import takeover          # noqa: F401, E402
+from . import jwt               # noqa: F401, E402
+from . import secret_aws        # noqa: F401, E402
+from . import generic           # noqa: F401, E402

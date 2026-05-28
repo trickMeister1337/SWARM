@@ -979,6 +979,20 @@ class TestValidatorPlugins(unittest.TestCase):
         self.assertTrue(confirmed)
         self.assertGreaterEqual(conf, 60)
 
+    def test_all_classify_types_have_plugin(self):
+        """Cada vuln_type retornado por classify_vuln deve ter um plug-in
+        registrado. Garante que o dispatch nunca cai no if/elif legado."""
+        import validators
+        # Estes são os tipos que classify_vuln() pode retornar (poc_validator.py).
+        expected = {
+            "sqli", "xss", "lfi", "ssrf", "cors", "jwt", "secret_aws",
+            "default_login", "redirect", "takeover", "exposure",
+            "auth_bypass", "security_header", "tls", "email", "generic",
+        }
+        regs = set(validators.registered_types())
+        missing = expected - regs
+        self.assertFalse(missing, f"Tipos sem plug-in: {missing}")
+
     def test_xss_plugin_pattern_reflection(self):
         from validators.xss import validate as xss_validate
         ctx = {
@@ -1371,7 +1385,7 @@ class TestProductionProfile(unittest.TestCase):
         self.assertIn("Bypass do orquestrador requer --roe", content)
 
     def test_pci_active_controls_phase_present(self):
-        # pci_scan.sh: fase 7.5 emite EVIDÊNCIA ATIVA para Reqs 2/8/10
+        # pci_scan.sh: fase 7.5 emite EVIDÊNCIA ATIVA para Reqs 2/4/8/10/12
         # em vez de inferir conformidade da ausência de findings.
         # NOTA: pci_scan.sh é gitignored (versionado separadamente) — pula
         # quando ausente para permitir checkout limpo do repo público.
@@ -1387,6 +1401,12 @@ class TestProductionProfile(unittest.TestCase):
                       "Req 8: heurística de MFA")
         self.assertIn("logging-headers-probe", content,
                       "Req 10: presença de headers de correlação")
+        self.assertIn("tls-legacy-probe", content,
+                      "Req 4: TLS 1.0/1.1 deve ser recusado")
+        self.assertIn("security-txt-probe", content,
+                      "Req 12.10: security.txt (RFC 9116)")
+        # Multi-target: itera WEB_TARGETS com cap
+        self.assertIn("PCI_ACTIVE_TARGETS_MAX", content)
 
 
 class TestOOB(unittest.TestCase):

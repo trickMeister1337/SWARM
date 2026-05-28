@@ -2,6 +2,17 @@
 
 All notable changes to Stiglitz are documented here. Dates are approximate.
 
+## v8.1 — Backlog menor: validators completos, PCI ampliado, OAuth no ZAP
+
+Patch consolidando o backlog menor pós-v8.0:
+
+- **Migração completa dos validators para plug-ins** — todos os 16 tipos (`sqli`, `xss`, `lfi`, `ssrf`, `cors`, `default_login`, `exposure`, `security_header`, `tls`, `email`, `auth_bypass`, `redirect`, `takeover`, `jwt`, `secret_aws`, `generic`) agora em `lib/validators/*.py`. Lógica anti-FP preservada por tipo (size-only-com-double-check em sqli/xss/lfi). Novo teste de cobertura garante que cada tipo retornado por `classify_vuln` tem plug-in registrado.
+- **PCI Fase 7.5 multi-alvo** — itera `WEB_TARGETS` (cap configurável `PCI_ACTIVE_TARGETS_MAX=5` por padrão). Permite evidência ativa em múltiplos alvos sem explodir o nº de requests.
+- **PCI Req 4.2.1 — TLS legado** — probe ativo via `openssl s_client -tls1`/`-tls1_1`: se o servidor aceita, registra finding HIGH; se recusa, evidência POSITIVA de conformidade.
+- **PCI Req 12.10 — security.txt (RFC 9116)** — verifica `/.well-known/security.txt`. Ausência → LOW; presença → INFO com snippet do conteúdo.
+- **OAuth refresh no ZAP path** — `confirm_zap` agora também refresca tokens (startup + retry em 401). Antes só `confirm_nuclei` tinha integração.
+- **Total: 207 testes** (era 206 na v8.0; +1 de cobertura dos validators).
+
 ## v8.0 — Audit expandido, profile DSL, plug-in validators, trend, multi-target RED, OAuth refresh
 
 Release maior — 6 entregas, conjuntamente:

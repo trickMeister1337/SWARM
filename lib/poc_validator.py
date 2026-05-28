@@ -412,6 +412,7 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
             "diff_changed": diff_changed, "diff_conf": diff_conf,
             "diff_note": diff_note, "auth_ev": auth,
             "dc_result": dc_result, "dc_bonus": dc_bonus,
+            "method_results": method_results or {},
         }
         return _clamp_confidence(*_plugin(ctx))
 
@@ -904,6 +905,9 @@ def confirm_zap(outdir):
     json_file = os.path.join(outdir, "raw", "zap_alerts.json")
     confirmations = []
 
+    # OAuth: refresh inicial (se configurado) antes do loop
+    _refresh_oauth_safe()
+
     # URLs a ignorar — artefatos de redirect de autenticação
     SKIP_PATTERNS = [
         r'/securityRealm/', r'moLogin\?from=', r'j_spring_security',
@@ -971,11 +975,18 @@ def confirm_zap(outdir):
             meta      = alert_meta.get(name, {})
 
             curl_cmd  = _zap_request_to_curl(url, req, req_body)
+            # OAuth: injeta Authorization Bearer (substituindo qualquer header já presente do XML)
+            curl_cmd  = _apply_oauth(curl_cmd)
             exec_cmd  = curl_cmd + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
             safe_curl = re.sub(r'^curl\s+', 'curl -sk -L --max-time 15 ', curl_cmd)
 
             print(f"  [ZAP]    {name[:45]} → {url[:45]}...")
             raw_out, err = run_cmd(exec_cmd, timeout=20)
+            # Retry em 401 com token refrescado (uma única vez)
+            if err is None and "===Stiglitz_STATUS:401===" in raw_out and _refresh_oauth_safe():
+                curl_cmd = _apply_oauth(curl_cmd)
+                exec_cmd = curl_cmd + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
+                raw_out, err = run_cmd(exec_cmd, timeout=20)
             if err == "TIMEOUT":
                 confirmations.append(
                     _timeout_entry(name, url, sev, vuln_type, curl_cmd, curl_cmd, "zap"))
