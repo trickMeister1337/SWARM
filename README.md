@@ -43,6 +43,7 @@ Stiglitz chains the tools a red-teamer already uses — `subfinder`, `httpx`, `n
 
 - **🎯 Adaptive scanning** — detects the target's stack (`httpx` tech-detect + path fingerprinting + version probes) and automatically tunes Nuclei tags, ffuf wordlists and CMS scanners. No manual configuration.
 - **🔬 Active confirmation, not just alerts** — every eligible finding is re-executed with a reproducible `curl` PoC. The report distinguishes a **confirmed exploit** from a merely **verified** hardening issue.
+- **📡 Out-of-Band confirmation for blind vulns** — `lib/oob.py` integrates a self-hosted `interactsh-client` to confirm SSRF, RCE and SSTI via correlated DNS/HTTP callbacks. SSTI fires payloads against eight engines (Log4j, Jinja2, Twig, ERB, Velocity, Smarty, Spring SpEL, FreeMarker). Enable with `INTERACTSH_SERVER=oast.yourcorp.tld` (and optional `INTERACTSH_TOKEN`, `OOB_WAIT=20`).
 - **📊 A risk score you can defend** — KEV > EPSS > CVSS methodology. The CRITICAL band requires a real critical finding or a CVE under active exploitation (CISA KEV) — soft signals can't inflate it.
 - **📁 Client-ready reports** — executive summary, scope & methodology, effort×impact prioritization matrix, evolution diff vs the last scan, CVSS vectors, and reproducible evidence. Plus `findings.json` for SIEM/Jira.
 - **🧩 One pipeline, full kill chain** — passive OSINT feeds active recon, recon feeds exploitation, every stage hands structured data to the next.
@@ -86,6 +87,8 @@ Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`
 | `stiglitz_full.sh` | End-to-end orchestrator (OSINT → scan → exploit) | One-command full engagement |
 | `stiglitz_batch.sh` | Multi-target wrapper | Many targets in series |
 | `stiglitz_diff.py` | Scan-to-scan comparison | Remediation tracking |
+| `stiglitz_trend.py` | Cross-engagement longitudinal analysis (N scans) | Quarterly/yearly risk trend |
+| `stiglitz_red_batch.sh` | Parallel exploit on multiple targets | Multi-target engagement |
 
 ## The scan pipeline
 
@@ -223,6 +226,82 @@ rm -rf stiglitz_red_*/ scan_*/ osint_*/
 ## Notifications
 
 Set any of these and Stiglitz pings on scan completion: `STIGLITZ_TELEGRAM_TOKEN` + `STIGLITZ_TELEGRAM_CHAT`, `STIGLITZ_NOTIFY_WEBHOOK` (Slack/generic), `STIGLITZ_TEAMS_WEBHOOK`.
+
+## Out-of-Band confirmation (OAST)
+
+Stiglitz can confirm blind vulnerabilities (SSRF, RCE, SSTI) via correlated DNS/HTTP callbacks captured by an `interactsh-client` you host yourself. Public ProjectDiscovery servers are intentionally **not** used by default — that would leak callbacks from your engagements to third-party infrastructure.
+
+```bash
+# Required: a self-hosted interactsh server (e.g. oast.yourcorp.tld)
+export INTERACTSH_SERVER=oast.yourcorp.tld
+export INTERACTSH_TOKEN=<optional-auth-token>
+export OOB_WAIT=20             # seconds to wait for callbacks (default 20)
+export OOB_MAX_PAYLOADS=25     # max findings that fire OOB per scan (default 25)
+export OOB_EVIDENCE_BYTES=800  # raw-request bytes attached to confirmed cards
+
+bash stiglitz.sh https://target.com
+```
+
+When enabled, every SSRF/RCE/SSTI finding not confirmed by response content receives a unique payload. A matching callback elevates the finding to `confirmed=True, confidence=98` with the OOB evidence (protocol + source IP + raw request) attached to the report card. Scope is enforced: only in-scope hosts receive payloads.
+
+SSTI payloads cover eight template engines: Log4j (JNDI), Jinja2/Python, Twig, ERB, Velocity, Smarty, Spring SpEL, FreeMarker. RCE and SSTI payloads are **blocked in `production` profile** (only emitted in `lab` and `staging`).
+
+## OAuth-authenticated scans (refresh tokens)
+
+For long-running authenticated scans where the access token expires mid-scan, Stiglitz refreshes it natively. Configure the OAuth refresh endpoint via env:
+
+```bash
+export STIGLITZ_OAUTH_TOKEN_URL=https://idp.example.com/oauth/token
+export STIGLITZ_OAUTH_REFRESH_TOKEN=eyJhbGc...
+export STIGLITZ_OAUTH_CLIENT_ID=stiglitz       # optional
+export STIGLITZ_OAUTH_CLIENT_SECRET=...        # optional
+export STIGLITZ_OAUTH_GRANT_TYPE=refresh_token # default
+```
+
+`poc_validator` refreshes the access token at scan start and again on any HTTP 401 from a re-executed request (retries once with the new token). The `Authorization: Bearer` header is injected via `shlex.quote` so no shell interpretation occurs.
+
+## Custom execution profiles
+
+Beyond `lab|staging|production`, you can ship a JSON profile per engagement:
+
+```bash
+bash stiglitz_red.sh -d scan_target_*/ -p eng-2026-q2 \
+    --profile-file engagement-q2.json --roe roe.txt
+```
+
+The JSON is validated by `lib/profile_loader.py` (ranges, enums, types). Schema example:
+
+```json
+{
+  "name": "eng-2026-q2",
+  "sqlmap": {"level": 3, "risk": 2, "threads": 5, "techniques": "BEUT"},
+  "msf_payload": "NONE",
+  "brute_force": false,
+  "nikto_enabled": false,
+  "xss_workers": 1,
+  "recon_threads": 20,
+  "crawl_depth": 2,
+  "max_exploits": 10,
+  "timeouts": {"sqlmap_url": 120, "msf": 600, "hydra": 120}
+}
+```
+
+## Multi-target parallel exploitation
+
+```bash
+bash stiglitz_red_batch.sh --targets targets.txt --workers 3 \
+    --roe roe.txt -p staging --only sqli,xss
+```
+
+Each target gets its own outdir, audit log and exploits CSV. Aggregated `manifest.csv` summarizes outcomes.
+
+## Trend analysis across engagements
+
+```bash
+python3 stiglitz_trend.py scan_target_*/    # N scans → trend HTML
+```
+
+Generates a sparkline of risk score over time with per-scan finding breakdown and delta between first and last scan.
 
 ## Project layout
 

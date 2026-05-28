@@ -131,6 +131,7 @@ run_sqli_phase() {
             local inj_type; inj_type=$(_sqli_get_type "$log_file")
             echo "[sqli]   VULNERÁVEL — DBMS: ${dbms:-?} | Tipo: ${inj_type:-?}"
             echo "SQLI|CRITICAL|$url|DBMS=${dbms}|Type=${inj_type}|${hash}_output.log" >> "$confirmed_csv"
+            command -v audit &>/dev/null && audit "FINDING_CONFIRMED type=sqli target=${url} dbms=${dbms:-?}"
             ((vuln++))
         else
             echo "[sqli]   Não vulnerável"

@@ -17,118 +17,20 @@ Entrada via variáveis de ambiente (exportadas pelo stiglitz.sh):
 Uso direto (regenerar relatório de um scan existente):
   OUTDIR=scan_dir TARGET=https://alvo DOMAIN=alvo python3 stiglitz_report.py
 """
-import json, os, html, re
+import json, os, html, re, sys
 from datetime import datetime, timezone
 
-# ── Tabela CWE → CVSS sintético (baseado em médias históricas NVD) ──
-# Usada como fallback para alertas ZAP que não trazem CVE nas referências
-CWE_CVSS_TABLE = {
-    # Injeção / execução
-    "89":  {"cvss": 9.8, "sev": "CRITICAL", "name": "SQL Injection"},
-    "78":  {"cvss": 9.8, "sev": "CRITICAL", "name": "OS Command Injection"},
-    "77":  {"cvss": 9.8, "sev": "CRITICAL", "name": "Command Injection"},
-    "94":  {"cvss": 9.8, "sev": "CRITICAL", "name": "Code Injection"},
-    "502": {"cvss": 9.8, "sev": "CRITICAL", "name": "Deserialization of Untrusted Data"},
-    "611": {"cvss": 9.1, "sev": "CRITICAL", "name": "XXE"},
-    "918": {"cvss": 9.8, "sev": "CRITICAL", "name": "SSRF"},
-    # Autenticação / controle de acesso
-    "287": {"cvss": 9.1, "sev": "CRITICAL", "name": "Improper Authentication"},
-    "306": {"cvss": 9.1, "sev": "CRITICAL", "name": "Missing Authentication"},
-    "284": {"cvss": 8.8, "sev": "HIGH",     "name": "Improper Access Control"},
-    "285": {"cvss": 8.8, "sev": "HIGH",     "name": "Improper Authorization"},
-    "862": {"cvss": 8.1, "sev": "HIGH",     "name": "Missing Authorization"},
-    "863": {"cvss": 8.1, "sev": "HIGH",     "name": "Incorrect Authorization"},
-    "269": {"cvss": 8.8, "sev": "HIGH",     "name": "Improper Privilege Management"},
-    # Exposição de dados
-    "22":  {"cvss": 7.5, "sev": "HIGH",     "name": "Path Traversal"},
-    "23":  {"cvss": 7.5, "sev": "HIGH",     "name": "Relative Path Traversal"},
-    "200": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Information Disclosure"},
-    "312": {"cvss": 5.5, "sev": "MEDIUM",   "name": "Cleartext Storage of Sensitive Info"},
-    "319": {"cvss": 5.9, "sev": "MEDIUM",   "name": "Cleartext Transmission"},
-    "359": {"cvss": 6.5, "sev": "MEDIUM",   "name": "Privacy Violation"},
-    # XSS / client-side
-    "79":  {"cvss": 6.1, "sev": "MEDIUM",   "name": "Cross-Site Scripting (XSS)"},
-    "80":  {"cvss": 6.1, "sev": "MEDIUM",   "name": "Basic XSS"},
-    "116": {"cvss": 5.4, "sev": "MEDIUM",   "name": "Improper Encoding/Escaping"},
-    "1021":{"cvss": 4.7, "sev": "MEDIUM",   "name": "Clickjacking"},
-    # CSRF / sessão
-    "352": {"cvss": 8.8, "sev": "HIGH",     "name": "Cross-Site Request Forgery"},
-    "384": {"cvss": 7.1, "sev": "HIGH",     "name": "Session Fixation"},
-    "613": {"cvss": 5.4, "sev": "MEDIUM",   "name": "Insufficient Session Expiration"},
-    # Criptografia / TLS
-    "326": {"cvss": 7.5, "sev": "HIGH",     "name": "Inadequate Encryption Strength"},
-    "327": {"cvss": 7.5, "sev": "HIGH",     "name": "Broken Crypto Algorithm"},
-    "330": {"cvss": 7.5, "sev": "HIGH",     "name": "Insufficient Random Values"},
-    "295": {"cvss": 7.4, "sev": "HIGH",     "name": "Improper Certificate Validation"},
-    # Configuração / exposição
-    "16":  {"cvss": 5.3, "sev": "MEDIUM",   "name": "Configuration"},
-    "693": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Missing Security Header"},
-    "1004":{"cvss": 4.0, "sev": "MEDIUM",   "name": "Cookie Without HttpOnly"},
-    "1395":{"cvss": 6.1, "sev": "MEDIUM",   "name": "Vulnerable JavaScript Library"},
-    "404": {"cvss": 5.3, "sev": "MEDIUM",   "name": "Improper Resource Shutdown"},
-    "497": {"cvss": 4.3, "sev": "MEDIUM",   "name": "Exposure of System Data"},
-    "525": {"cvss": 3.7, "sev": "LOW",      "name": "Browser Caching Sensitive Info"},
-}
+# Permite importar módulos de lib/ quando rodado como script standalone
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from risk_score import compute_risk, HIGH_JS_TYPES  # noqa: E402
+from report.cwe_data import (  # noqa: E402
+    CWE_CVSS_TABLE, IMPACT_MAP, REMEDIATION_MAP, cwe_enrich, cvss_to_sev,
+)
+from report.sarif import build_sarif  # noqa: E402
+from report.exec_summary import build_exec_summary  # noqa: E402
 
-def cwe_enrich(cweid_str):
-    """Dado CWE-89 ou 89, retorna dict com cvss/sev/name ou None."""
-    if not cweid_str: return None
-    cwe_num = re.sub(r"[^0-9]", "", str(cweid_str))
-    return CWE_CVSS_TABLE.get(cwe_num)
-
-# ── Mapa de impacto prático por CWE (linguagem para tech lead) ──
-IMPACT_MAP = {
-    "89":  "An attacker can read, modify or delete database data, including user and transaction data.",
-    "78":  "An attacker can execute arbitrary commands on the server, compromising the entire infrastructure.",
-    "79":  "Malicious scripts can run in users' browsers, stealing sessions and credentials.",
-    "352": "An attacker can force authenticated users to perform unauthorized actions (e.g. transfers, data changes).",
-    "22":  "An attacker can access arbitrary server files, including configurations and private keys.",
-    "287": "Unauthorized access to the application, allowing impersonation of any user including administrators.",
-    "306": "Critical endpoints accessible without authentication, exposing data and functionality to anyone.",
-    "284": "Users can access other users' resources or data (IDOR, privilege escalation).",
-    "918": "The server can be used as a proxy to reach protected internal services (AWS metadata, databases).",
-    "611": "Processing external XML can leak server files or cause denial of service.",
-    "502": "Deserialization of untrusted data can result in remote code execution.",
-    "326": "Encrypted communications can be intercepted and decrypted by attackers on the network.",
-    "327": "Weak cryptographic algorithms can be broken, exposing sensitive data.",
-    "295": "TLS communications can be intercepted by man-in-the-middle attacks.",
-    "1021":"Users can be tricked into clicking invisible overlaid elements (clickjacking).",
-    "319": "Data transmitted in cleartext can be intercepted by any observer on the network.",
-    "200": "Information about technologies, versions or internal structure exposed to attackers.",
-    "693": "Missing security headers leave the user's browser without basic protections against XSS and injection.",
-    "1004":"Session cookies accessible via JavaScript can be stolen by malicious scripts (XSS).",
-    "1395":"JavaScript library with a known vulnerability and publicly available exploit.",
-    "312": "Sensitive data stored without encryption can be accessed directly in the database.",
-    "384": "An attacker can fixate a user's session identifier and take over their account after login.",
-}
-
-# ── Mapa de remediação específica por CWE ────────────────────
-REMEDIATION_MAP = {
-    "89":  "Use prepared statements (parametrized queries) in all SQL queries. Never concatenate user data directly.",
-    "79":  "Escape output in HTML/JS context. Implement Content-Security-Policy. Use libraries like DOMPurify.",
-    "352": "Implement CSRF tokens (e.g. SameSite=Strict cookies, per-form token). Frameworks like Spring, Django and Rails have native support.",
-    "22":  "Validate and normalize file paths. Use an allowlist of permitted directories. Avoid concatenating user input into paths.",
-    "287": "Implement strong authentication with MFA. Use secure sessions with proper expiration.",
-    "306": "Add authentication to all endpoints. Use centralized auth middleware.",
-    "284": "Validate server-side that the user is allowed to access the requested resource. Do not rely solely on the URL ID.",
-    "918": "Validate and filter destination URLs in any proxy/redirect functionality. Use an allowlist of permitted hosts.",
-    "693": "Configure headers: Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security.",
-    "1004":"Add the HttpOnly flag to all session cookies. Also use Secure and SameSite=Strict.",
-    "1395":"Update the library to the latest version. Check release notes for breaking changes.",
-    "326": "Use TLS 1.2+ with modern cipher suites. Disable SSLv3, TLS 1.0, TLS 1.1 and RC4.",
-    "319": "Enforce HTTPS across the application. Implement HSTS. Redirect HTTP to HTTPS.",
-    "312": "Encrypt sensitive data at rest. Use bcrypt/Argon2 for passwords. Never store in cleartext.",
-}
-
-def cvss_to_sev(score):
-    """Converte score CVSS para severidade pelo padrão NVD."""
-    if score is None: return None
-    score = float(score)
-    if score >= 9.0: return "critical"
-    if score >= 7.0: return "high"
-    if score >= 4.0: return "medium"
-    if score >= 0.1: return "low"
-    return "info"
+# Tabelas CWE → CVSS sintético, impacto, remediação + helpers cwe_enrich/
+# cvss_to_sev estão em lib/report/cwe_data.py (importado acima).
 
 OUTDIR          = os.environ.get('OUTDIR','scan_output')
 
@@ -1072,50 +974,17 @@ for grp in zap_dedup.values():
     if sev in occurrences: occurrences[sev] += (grp["count"] - 1)
 
 # ── Risk score: KEV > EPSS > CVSS (metodologia 2026) ───────────
-# Base: faixa pela severidade mais alta + quantidade com retornos decrescentes.
-# Usa TIPOS ÚNICOS (stats), não ocorrências por URL — assim um mesmo alerta
-# repetido em N URLs não satura o índice (o que mascarava a discriminação:
-# quase todo scan batia 100/100). A severidade mais alta define a faixa-base
-# (alinhada às bandas 70/40/15); a quantidade adiciona um bônus limitado.
-if   stats["critical"] > 0: _risk_floor = 70   # CRÍTICO
-elif stats["high"]     > 0: _risk_floor = 40   # ALTO
-elif stats["medium"]   > 0: _risk_floor = 15   # MÉDIO
-elif stats["low"]      > 0: _risk_floor = 5
-else:                       _risk_floor = 0
-_risk_qty = min(stats["critical"]*6 + stats["high"]*3
-                + stats["medium"]*1 + stats["low"]*0.5, 25)
-base_risk = int(_risk_floor + _risk_qty)
-
-# Camada 1 — KEV: exploração ativa confirmada (peso máximo)
-# Um CVE no KEV é automaticamente urgente independente do CVSS
-kev_bonus = 0
-kev_count = sum(1 for ev in cve_enrichment.values() if ev.get("in_kev"))
-if kev_count > 0:
-    kev_bonus = min(kev_count * 25, 50)  # +25 por CVE no KEV, cap 50
-
-# Camada 2 — EPSS: probabilidade de exploração nos próximos 30 dias
-epss_bonus = 0
-for ev in cve_enrichment.values():
-    epss = ev.get("epss_score") or 0
-    if epss >= 0.5:    epss_bonus += 15   # exploit muito provável (>50%)
-    elif epss >= 0.1:  epss_bonus += 7    # exploit provável (>10%)
-    elif epss >= 0.01: epss_bonus += 2    # exploit possível (>1%)
-# Cap próprio (como kev_bonus/js_bonus) — evita que muitos CVEs EPSS-altos
-# saturem o componente sozinhos.
-epss_bonus = min(epss_bonus, 30)
-# Bônus JS: secrets e frameworks vulneráveis agravam o risco
-HIGH_JS_TYPES = {"AWS Access Key","AWS Secret","Private Key","Stripe Live Key","GitHub Token","GitLab PAT","OpenAI Key","Anthropic Key","Hardcoded Password","DB Connection String"}
-js_high   = [s for s in js_secrets if s.get("type","") in HIGH_JS_TYPES]
-js_medium = [s for s in js_secrets if s.get("type","") not in HIGH_JS_TYPES]
-js_vuln_fw = [f for f in js_frameworks if f.get("vulnerable")]
-js_bonus = min(len(js_high)*15 + len(js_medium)*5 + len(js_vuln_fw)*8, 30)
-risk = min(base_risk + kev_bonus + epss_bonus + js_bonus, 100)
-# A faixa CRÍTICO exige um achado de severidade crítica OU exploração ativa
-# (CISA KEV). Bônus brandos (EPSS/JS) elevam dentro de ALTO, mas não devem
-# fabricar um CRÍTICO sozinhos — evita que falsos-positivos de secrets JS ou
-# probabilidade EPSS inflem a leitura executiva.
-if stats["critical"] == 0 and kev_count == 0:
-    risk = min(risk, 69)
+# Lógica em lib/risk_score.py (extraída para teste em isolamento).
+_r = compute_risk(stats, cve_enrichment, js_secrets, js_frameworks)
+base_risk  = _r["base_risk"]
+kev_bonus  = _r["kev_bonus"]
+kev_count  = _r["kev_count"]
+epss_bonus = _r["epss_bonus"]
+js_high    = _r["js_high"]
+js_medium  = _r["js_medium"]
+js_vuln_fw = _r["js_vuln_fw"]
+js_bonus   = _r["js_bonus"]
+risk       = _r["risk"]
 # Classificação baseada no risk score (KEV+EPSS+CVSS) — não apenas contagem
 # Faixas: 70-100=CRÍTICO, 40-69=ALTO, 15-39=MÉDIO, 0-14=BAIXO
 if risk >= 70:
@@ -2283,178 +2152,27 @@ except Exception as _e:
     print(f"[!] findings.json: {_e}")
 
 # ── findings.sarif (SARIF 2.1.0 — GitHub Security / DefectDojo / CI) ──
+# Lógica em lib/report/sarif.py (extraída para teste em isolamento).
 try:
-    _SARIF_LEVEL = {"critical": "error", "high": "error",
-                    "medium": "warning", "low": "note", "info": "none"}
-    def _rule_id(f):
-        """ID estável: 1º CVE, senão CWE, senão slug do nome."""
-        cve = str(f.get("cve", ""))
-        m = re.search(r'CVE-\d{4}-\d{4,7}', cve, re.IGNORECASE)
-        if m: return m.group(0).upper()
-        m = re.search(r'CWE-?\d+', cve, re.IGNORECASE)
-        if m: return m.group(0).upper().replace("CWE", "CWE-").replace("CWE--", "CWE-")
-        slug = re.sub(r'[^a-z0-9]+', '-', str(f.get("name", "finding")).lower()).strip('-')
-        return ("stiglitz-" + slug)[:80] or "stiglitz-finding"
-
-    _sarif_rules, _seen_rules, _sarif_results = [], set(), []
-    for f in all_f:
-        rid = _rule_id(f)
-        if rid not in _seen_rules:
-            _seen_rules.add(rid)
-            _rule = {
-                "id": rid,
-                "name": re.sub(r'[^A-Za-z0-9]', '', f.get("name", "Finding")) or "Finding",
-                "shortDescription": {"text": f.get("name", "")[:200] or rid},
-                "properties": {"tags": [f.get("source", ""), f.get("severity", "")],
-                               "security-severity": str(f.get("cvss") or
-                                   {"critical":"9.5","high":"7.5","medium":"5.0","low":"3.0","info":"0.0"}.get(f.get("severity",""),"0.0"))},
-            }
-            if rid.startswith("CVE-"):
-                _rule["helpUri"] = f"https://nvd.nist.gov/vuln/detail/{rid}"
-            _sarif_rules.append(_rule)
-        _msg = f.get("name", "") + (": " + f.get("description", "") if f.get("description") else "")
-        _sarif_results.append({
-            "ruleId": rid,
-            "level": _SARIF_LEVEL.get(f.get("severity", ""), "warning"),
-            "message": {"text": _msg[:1000] or rid},
-            "locations": [{"physicalLocation": {
-                "artifactLocation": {"uri": f.get("url", TARGET) or TARGET}}}],
-            "properties": {"severity": f.get("severity", ""), "source": f.get("source", ""),
-                           "cve": f.get("cve", ""), "epss": f.get("epss_score"),
-                           "in_kev": f.get("in_kev", False)},
-        })
-    sarif_out = {
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {"driver": {
-                "name": "Stiglitz",
-                "informationUri": "https://github.com/trickMeister1337/Stiglitz",
-                "rules": _sarif_rules,
-            }},
-            "results": _sarif_results,
-        }],
-    }
+    sarif_out = build_sarif(all_f, TARGET)
     sf = os.path.join(OUTDIR, "findings.sarif")
-    json.dump(sarif_out, open(sf, "w", encoding="utf-8"), ensure_ascii=False, indent=2, default=str)
+    json.dump(sarif_out, open(sf, "w", encoding="utf-8"),
+              ensure_ascii=False, indent=2, default=str)
     print(f"[✓] SARIF 2.1.0: {sf}")
 except Exception as _e:
     print(f"[!] findings.sarif: {_e}")
 
 # ── executive_summary.html ────────────────────────────────────────
+# Lógica em lib/report/exec_summary.py (extraída para teste em isolamento).
 try:
-    rc = "#7a2e2e" if risk>=70 else ("#b34e4e" if risk>=40 else ("#d4833a" if risk>=15 else "#27ae60"))
-    kev_str = ", ".join(list(kev_matches.keys())[:5]) if kev_matches else "None"
-    risk_level = stxt.split(" — ")[0] if " — " in stxt else stxt
-
-    # Top findings table
-    sev_bg = {"critical":"#7a2e2e","high":"#b34e4e"}
-    sev_lb = {"critical":"CRITICAL","high":"HIGH"}
-    top_f = [f for f in all_f if f.get("severity") in ("critical","high")][:8]
-    top_rows = ""
-    for f in top_f:
-        sc = sev_bg.get(f.get("severity",""), "#888")
-        sl = sev_lb.get(f.get("severity",""), "?")
-        name = html.escape(f.get("name",""))
-        impact = html.escape(f.get("impact","") or "See technical report")
-        rem = html.escape((f.get("remediation","") or "")[:60])
-        top_rows += (f'<tr><td><span style="background:{sc};color:white;padding:2px 8px;'
-                     f'border-radius:4px;font-size:11px">{sl}</span></td>'
-                     f'<td style="font-weight:600">{name}</td>'
-                     f'<td style="color:#555;font-size:12px">{impact}</td>'
-                     f'<td style="font-size:11px">{rem}</td></tr>')
-    if not top_rows:
-        top_rows = '<tr><td colspan="4" style="text-align:center;color:#888">No critical or high findings</td></tr>'
-
-    # Phase timing table
-    phase_map = {"P1":"Discovery","P2":"Surface","P3":"TLS","P4":"Nuclei",
-                 "P5":"Confirmation","P6":"CVE/EPSS","P7":"WAF","P8":"Email",
-                 "P9":"ZAP","P10":"JS/Secrets","P10_5":"Supplementary","P11":"Report"}
-    phase_rows = ""
-    for pid, dur in phase_times.items():
-        pname = phase_map.get(pid, pid)
-        phase_rows += f'<tr><td>{pname}</td><td>{int(dur)//60}m {int(dur)%60:02d}s</td></tr>'
-    phase_section = ""
-    if phase_rows:
-        phase_section = (f'<h2>Time per Phase</h2>'
-                        f'<table><tr><th>Phase</th><th>Duration</th></tr>'
-                        f'{phase_rows}</table>')
-
-    # Recommendations
-    recs = []
-    if kev_count > 0:
-        recs.append(f"<li><strong>URGENT:</strong> Remediate {kev_count} CVE(s) under active exploitation: {html.escape(kev_str)}</li>")
-    if stats["critical"] > 0:
-        recs.append(f"<li>Fix {stats['critical']} critical finding(s) — immediate</li>")
-    if stats["high"] > 0:
-        recs.append(f"<li>Plan {stats['high']} high finding(s) — this sprint</li>")
-    if stats["medium"] > 0:
-        recs.append(f"<li>Schedule {stats['medium']} medium finding(s) — next sprint</li>")
-    recs.append("<li>See the technical report for detailed evidence</li>")
-    recs_html = "\n".join(recs)
-
-    kev_alert = ""
-    if kev_count > 0:
-        kev_alert = (f'<p style="background:#fff0f0;padding:10px;border-radius:6px;'
-                    f'border-left:4px solid #7a0000;font-size:12px">'
-                    f'<strong>⚠ Active Exploitation (CISA KEV):</strong> {html.escape(kev_str)}</p>')
-
-    kev_kpi = ""
-    if kev_count > 0:
-        kev_kpi = (f'<div class="kpi"><div class="n" style="color:#7a0000">{kev_count}</div>'
-                  f'<div class="l">🔴 KEV</div></div>')
-
-    target_esc = html.escape(TARGET)
-    domain_esc = html.escape(DOMAIN)
-    stxt_esc   = html.escape(stxt)
-    ts_str     = rdate
-
-    exec_html = f"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
-<title>Executive Summary — {domain_esc}</title>
-<style>
-body{{font-family:"Segoe UI",sans-serif;max-width:850px;margin:0 auto;padding:30px;color:#333}}
-h1{{color:#1a3a4f;font-size:22px;border-bottom:3px solid #1a3a4f;padding-bottom:8px}}
-h2{{color:#1a3a4f;font-size:15px;margin-top:24px}}
-.kpi{{display:inline-block;text-align:center;margin:0 10px;padding:10px 18px;background:#f5f5f5;border-radius:8px}}
-.kpi .n{{font-size:26px;font-weight:bold}}
-.kpi .l{{font-size:11px;color:#888}}
-table{{width:100%;border-collapse:collapse;margin:8px 0}}
-th{{background:#1a3a4f;color:white;padding:8px;text-align:left;font-size:12px}}
-td{{border:1px solid #eee;padding:8px;font-size:12px}}
-.footer{{color:#aaa;font-size:10px;text-align:center;margin-top:32px;border-top:1px solid #eee;padding-top:8px}}
-@media print{{body{{padding:0}}}}
-</style></head><body>
-<div style="background:#1a3a4f;color:white;padding:18px;border-radius:8px;margin-bottom:20px">
-<h1 style="color:white;border:none;margin:0 0 4px">Security Executive Summary</h1>
-<p style="margin:0;opacity:.8;font-size:13px">{target_esc} &nbsp;·&nbsp; {ts_str} &nbsp;·&nbsp; CONFIDENTIAL</p>
-</div>
-<h2>Risk Score</h2>
-<div style="margin:8px 0">
-<span style="background:{rc};color:white;font-size:32px;font-weight:bold;padding:10px 22px;border-radius:6px">{risk}/100</span>
-<span style="margin-left:14px;font-size:15px;font-weight:600;color:{rc}">{stxt_esc}</span>
-</div>
-<h2>Findings</h2>
-<div style="margin:8px 0">
-<div class="kpi"><div class="n" style="color:#7a2e2e">{stats["critical"]}</div><div class="l">CRITICAL</div></div>
-<div class="kpi"><div class="n" style="color:#b34e4e">{stats["high"]}</div><div class="l">HIGH</div></div>
-<div class="kpi"><div class="n" style="color:#d4833a">{stats["medium"]}</div><div class="l">MEDIUM</div></div>
-<div class="kpi"><div class="n" style="color:#4a7c8c">{stats["low"]}</div><div class="l">LOW</div></div>
-{kev_kpi}
-</div>
-{kev_alert}
-<h2>Top Vulnerabilities</h2>
-<table><tr><th>Severity</th><th>Vulnerability</th><th>Impact</th><th>Fix</th></tr>
-{top_rows}
-</table>
-<h2>Recommendations</h2>
-<ol style="font-size:13px;line-height:2">{recs_html}</ol>
-{phase_section}
-<div class="footer">Security Assessment · Restricted to authorized security teams · CONFIDENTIAL</div>
-</body></html>"""
-
-    ef = os.path.join(OUTDIR,"executive_summary.html")
-    open(ef,"w",encoding="utf-8").write(exec_html)
+    exec_html = build_exec_summary(
+        target=TARGET, domain=DOMAIN,
+        risk=risk, risk_label=stxt, timestamp=rdate,
+        stats=stats, findings=all_f,
+        kev_matches=kev_matches, phase_times=phase_times,
+    )
+    ef = os.path.join(OUTDIR, "executive_summary.html")
+    open(ef, "w", encoding="utf-8").write(exec_html)
     print(f"[✓] Executive summary: {ef}")
 except Exception as _e:
     print(f"[!] executive_summary: {_e}")

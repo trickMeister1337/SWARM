@@ -39,6 +39,9 @@
 !/test_email_spoof.py
 !/test_fixtures
 !/email_spoof_poc.py
+!/verify_audit.py
+!/stiglitz_trend.py
+!/stiglitz_red_batch.sh
 
 # ── Re-ignore generated/sensitive artifacts inside allowed dirs ───────────
 __pycache__/

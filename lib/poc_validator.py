@@ -32,6 +32,34 @@ try:
 except Exception:
     _OOB_AVAILABLE = False
 
+# OAuth refresh é opcional — só ativa quando STIGLITZ_OAUTH_TOKEN_URL estiver
+# configurada. Refresh inicial no startup + retry em 401 dentro do loop.
+try:
+    import oauth_refresh as _oauth
+    _OAUTH_AVAILABLE = True
+except Exception:
+    _OAUTH_AVAILABLE = False
+_OAUTH_TOKEN = ""   # access_token corrente (atualizado on-401)
+
+def _refresh_oauth_safe():
+    """Tenta refresh; em falha, retorna "" e loga (não aborta o scan)."""
+    global _OAUTH_TOKEN
+    if not (_OAUTH_AVAILABLE and _oauth.is_enabled()):
+        return ""
+    try:
+        _OAUTH_TOKEN = _oauth.refresh_access_token()
+        print(f"  [OAuth] refresh ok — token atualizado")
+        return _OAUTH_TOKEN
+    except Exception as e:
+        print(f"  [OAuth] refresh falhou: {e}")
+        return ""
+
+def _apply_oauth(curl_cmd):
+    """Injeta Authorization Bearer no curl quando temos token."""
+    if not _OAUTH_TOKEN:
+        return curl_cmd
+    return _oauth.apply_to_curl(curl_cmd, _OAUTH_TOKEN)
+
 # ── Threshold mínimo para considerar um achado "confirmado" ──────
 MIN_CONFIRM_CONFIDENCE = 60   # abaixo disso → force confirmed=False
 
@@ -59,14 +87,74 @@ def load_patterns(patterns_path=None):
 
 PATTERNS = load_patterns()
 
+# ── Escopo: STIGLITZ_SCOPE_DOMAINS (space-separated) ─────────────
+# Exportado pelos orquestradores. Vazio → sem filtragem (uso standalone).
+def _load_scope_domains():
+    raw = os.environ.get("STIGLITZ_SCOPE_DOMAINS", "")
+    return [d.strip().lower().lstrip("*.")
+            for d in raw.split() if d.strip()]
+
+SCOPE_DOMAINS = _load_scope_domains()
+
+def _url_in_scope(url):
+    """True se `url` é vazia/sem escopo definido OU se o host está em escopo."""
+    if not SCOPE_DOMAINS:
+        return True
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in SCOPE_DOMAINS)
+
 # ══════════════════════════════════════════════════════════════════
 # UTILITÁRIOS
 # ══════════════════════════════════════════════════════════════════
 
 def run_cmd(cmd, timeout=20, retries=2, backoff=5):
+    """Executa um comando externo SEM shell.
+
+    Aceita `list[str]` (argv direto) ou `str` (parseada por shlex.split).
+    Strings com metacaracteres de shell não-quotados (`;`, `|`, `&`, etc.)
+    falham com PARSE_ERROR — esse é o ponto: shell metacharacters nunca
+    são interpretados. Para comandos que realmente precisam de pipe
+    (openssl chain), use `run_shell_pipe` explicitamente.
+    """
+    if isinstance(cmd, str):
+        try:
+            argv = shlex.split(cmd)
+        except ValueError as e:
+            return "", f"PARSE_ERROR:{e}"
+    else:
+        argv = list(cmd)
+    if not argv:
+        return "", "EMPTY"
     for attempt in range(retries):
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+            r = subprocess.run(argv, shell=False, capture_output=True,
+                               text=True, timeout=timeout)
+            return r.stdout + r.stderr, None
+        except subprocess.TimeoutExpired:
+            if attempt < retries - 1:
+                time.sleep(backoff)
+        except (OSError, ValueError) as e:
+            return "", f"EXEC_ERROR:{e}"
+    return "", "TIMEOUT"
+
+def run_shell_pipe(cmd, timeout=20, retries=2, backoff=5):
+    """Executa um pipeline shell legítimo (openssl chain etc.).
+
+    Reservado para comandos compostos com `|` ou `>` que não fazem sentido
+    como argv único. NUNCA passar dados controlados pelo alvo sem
+    `shlex.quote` prévio — o uso de `shell=True` aqui é deliberado e
+    auditável (poucos call sites, todos internos).
+    """
+    for attempt in range(retries):
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True,
+                               text=True, timeout=timeout)
             return r.stdout + r.stderr, None
         except subprocess.TimeoutExpired:
             if attempt < retries - 1:
@@ -294,6 +382,9 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
 
     v3: thresholds mais rigorosos — especialmente para tipos que geravam FP:
         generic, exposure, redirect, auth_bypass, security_header, tls
+
+    v8: dispatch via plug-in registry (lib/validators/*). Se o tipo está
+    registrado, chama o plug-in; senão cai no if/elif legado.
     """
     p    = PATTERNS.get(vuln_type, {})
     b    = (resp_body    or "").lower()
@@ -307,6 +398,23 @@ def validate(vuln_type, url, resp_body, resp_headers, status,
     else:
         dc_bonus = 0
         dc_note  = ""
+
+    # ── Plug-in registry: dispatch para validadores externos ─────
+    try:
+        import validators as _val_pkg
+        _plugin = _val_pkg.get(vuln_type)
+    except ImportError:
+        _plugin = None
+    if _plugin:
+        ctx = {
+            "url": url, "resp_body": resp_body, "resp_headers": resp_headers,
+            "status": status, "patterns": p,
+            "diff_changed": diff_changed, "diff_conf": diff_conf,
+            "diff_note": diff_note, "auth_ev": auth,
+            "dc_result": dc_result, "dc_bonus": dc_bonus,
+            "method_results": method_results or {},
+        }
+        return _clamp_confidence(*_plugin(ctx))
 
     # ── SQLi ─────────────────────────────────────────────────────
     if vuln_type == "sqli":
@@ -622,11 +730,17 @@ def confirm_nuclei(outdir):
         return confirmations
 
     profile   = os.environ.get("PROFILE", "lab")
+    # OAuth: refresh inicial (se configurado) antes do loop
+    _refresh_oauth_safe()
     oob       = OOBSession(out_dir=os.path.join(outdir, "raw")) if _OOB_AVAILABLE else None
     oob_ready = bool(oob and oob.start())
     if oob_ready:
         print(f"  [OOB] interactsh ativo ({oob.domain}) — confirmação cega habilitada")
     oob_pending = []   # [(idx_em_confirmations, token, oob_url)]
+    # Cap por scan: limita o nº de findings que disparam OOB. Em scans com
+    # 200+ findings SSRF/RCE/SSTI, isso evita stress no alvo. Default 25.
+    OOB_MAX = max(0, int(os.environ.get("OOB_MAX_PAYLOADS", "25")))
+    oob_fired_count = 0   # incrementa por finding disparado, não por payload
 
     with open(nuclei_file, encoding="utf-8") as f:
         for line in f:
@@ -668,11 +782,19 @@ def confirm_nuclei(outdir):
                     curl_cmd += f" --data {shlex.quote(req_body[:500])}"
 
                 clean_curl, safe_curl = build_safe_baseline(curl_cmd, url)
+                # OAuth: injeta Authorization Bearer no curl reconstruído
+                clean_curl = _apply_oauth(clean_curl)
+                safe_curl  = _apply_oauth(safe_curl)
                 exec_cmd = (clean_curl
                             + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='")
 
                 print(f"  [Nuclei] {template_id} ({vuln_type}) → {url[:55]}...")
                 raw_out, err = run_cmd(exec_cmd, timeout=20)
+                # Retry em 401 com token refrescado (uma única vez)
+                if err is None and "===Stiglitz_STATUS:401===" in raw_out and _refresh_oauth_safe():
+                    clean_curl = _apply_oauth(clean_curl)
+                    exec_cmd = clean_curl + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
+                    raw_out, err = run_cmd(exec_cmd, timeout=20)
                 if err == "TIMEOUT":
                     confirmations.append(
                         _timeout_entry(template_id, url, severity, vuln_type,
@@ -724,14 +846,26 @@ def confirm_nuclei(outdir):
                     resp_headers, resp_body, curl_cmd, clean_curl, safe_curl,
                     diff_changed, diff_note, method_results, auth_ev, dc, "nuclei"))
 
-                # OOB: SSRF/RCE/SSTI não confirmados por conteúdo recebem um
-                # payload único; o callback (assíncrono) é resolvido após o loop.
-                if oob_ready and not confirmed and vuln_type in ("ssrf", "rce", "ssti"):
+                # OOB: SSRF/RCE/SSTI não confirmados por conteúdo recebem
+                # payload(s) únicos; o callback (assíncrono) é resolvido após
+                # o loop. Para SSTI, vários payloads são disparados (uma engine
+                # por payload); qualquer callback confirma o finding.
+                # Gate de escopo: só injeta em hosts em escopo (evita disparar
+                # payloads em URLs externas que vazaram para o output do scan).
+                # Cap OOB_MAX_PAYLOADS: limita findings disparados por scan.
+                if (oob_ready and not confirmed
+                        and vuln_type in ("ssrf", "rce", "ssti")
+                        and _url_in_scope(url)
+                        and oob_fired_count < OOB_MAX):
                     token, oob_url = oob.new_payload(vuln_type)
-                    inj = inject_oob_url(url, oob_url, vuln_type, profile)
-                    if inj:
-                        run_cmd(inj, timeout=12, retries=1)
+                    cmds = inject_oob_url(url, oob_url, vuln_type, profile)
+                    if cmds:
+                        for inj in cmds:
+                            run_cmd(inj, timeout=12, retries=1)
                         oob_pending.append((len(confirmations) - 1, token, oob_url))
+                        oob_fired_count += 1
+                        if oob_fired_count == OOB_MAX:
+                            print(f"  [OOB] cap atingido ({OOB_MAX} findings) — próximos não injetam")
 
             except Exception as e:
                 print(f"  [!] Nuclei parse error: {e}")
@@ -741,6 +875,9 @@ def confirm_nuclei(outdir):
         wait_s = int(os.environ.get("OOB_WAIT", "20"))
         print(f"  [OOB] Aguardando callbacks por {wait_s}s ({len(oob_pending)} payload(s))...")
         time.sleep(wait_s)
+        # Cap de bytes da evidência OOB anexada (raw-request do callback).
+        # Default 800 — suficiente pra header+body curto, sem inflar relatório.
+        ev_cap = max(120, int(os.environ.get("OOB_EVIDENCE_BYTES", "800")))
         for idx, token, oob_url in oob_pending:
             hits = oob.matches(token)
             if not hits:
@@ -754,7 +891,7 @@ def confirm_nuclei(outdir):
             entry["poc_note"]      = f"OOB confirmado: callback {proto} de {src}"
             entry["response_snippet"] += (
                 f"\n\n--- OOB CALLBACK ({proto}) via {oob_url} ---\n"
-                + str(hits[0].get("raw-request", "(sem raw-request)"))[:800])
+                + str(hits[0].get("raw-request", "(sem raw-request)"))[:ev_cap])
             print(f"  [CONFIRMADO-OOB] {entry['template_id']} ← {proto} de {src}")
     if oob:
         oob.stop()
@@ -767,6 +904,9 @@ def confirm_zap(outdir):
     xml_file  = os.path.join(outdir, "raw", "zap_evidencias.xml")
     json_file = os.path.join(outdir, "raw", "zap_alerts.json")
     confirmations = []
+
+    # OAuth: refresh inicial (se configurado) antes do loop
+    _refresh_oauth_safe()
 
     # URLs a ignorar — artefatos de redirect de autenticação
     SKIP_PATTERNS = [
@@ -835,11 +975,18 @@ def confirm_zap(outdir):
             meta      = alert_meta.get(name, {})
 
             curl_cmd  = _zap_request_to_curl(url, req, req_body)
+            # OAuth: injeta Authorization Bearer (substituindo qualquer header já presente do XML)
+            curl_cmd  = _apply_oauth(curl_cmd)
             exec_cmd  = curl_cmd + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
             safe_curl = re.sub(r'^curl\s+', 'curl -sk -L --max-time 15 ', curl_cmd)
 
             print(f"  [ZAP]    {name[:45]} → {url[:45]}...")
             raw_out, err = run_cmd(exec_cmd, timeout=20)
+            # Retry em 401 com token refrescado (uma única vez)
+            if err is None and "===Stiglitz_STATUS:401===" in raw_out and _refresh_oauth_safe():
+                curl_cmd = _apply_oauth(curl_cmd)
+                exec_cmd = curl_cmd + " -D - -w '\\n===Stiglitz_STATUS:%{http_code}==='"
+                raw_out, err = run_cmd(exec_cmd, timeout=20)
             if err == "TIMEOUT":
                 confirmations.append(
                     _timeout_entry(name, url, sev, vuln_type, curl_cmd, curl_cmd, "zap"))
@@ -984,7 +1131,7 @@ def confirm_tls(outdir, domain):
                           if confirmed else "HSTS presente — issue corrigida ou FP")
 
         elif any(x in finding_id.lower() for x in ["certificate", "cert", "expired", "selfsigned"]):
-            cert_out, _ = run_cmd(
+            cert_out, _ = run_shell_pipe(
                 f"echo | openssl s_client -connect {shlex.quote(domain)}:443 -servername {shlex.quote(domain)} 2>/dev/null"
                 f" | openssl x509 -noout -dates 2>/dev/null",
                 timeout=12, retries=1)
@@ -1008,7 +1155,7 @@ def confirm_tls(outdir, domain):
             proto_flag = next((v for k, v in proto_map.items()
                                if k in finding_id.lower()), "")
             if proto_flag:
-                check_out, _ = run_cmd(
+                check_out, _ = run_shell_pipe(
                     f"echo | openssl s_client -connect {shlex.quote(domain)}:443 {proto_flag} 2>&1",
                     timeout=10, retries=1)
                 if "handshake failure" in check_out.lower():
@@ -1059,13 +1206,12 @@ def confirm_email(outdir, domain):
     print(f"  [Email]  Re-verificando {len(issues)} issue(s) de email via DNS...")
     recheck = {}
 
-    # SPF
-    dq = shlex.quote(domain)
-    spf_out, _ = run_cmd(f"dig TXT {dq} +short 2>/dev/null", timeout=10, retries=1)
+    # SPF — argv-list direto; stderr é capturado pelo run_cmd, sem 2>/dev/null
+    spf_out, _ = run_cmd(["dig", "TXT", domain, "+short"], timeout=10, retries=1)
     recheck["spf"] = "v=spf1" in spf_out.lower()
 
     # DMARC
-    dmarc_out, _ = run_cmd(f"dig TXT _dmarc.{dq} +short 2>/dev/null", timeout=10, retries=1)
+    dmarc_out, _ = run_cmd(["dig", "TXT", f"_dmarc.{domain}", "+short"], timeout=10, retries=1)
     recheck["dmarc"] = "v=dmarc1" in dmarc_out.lower()
 
     # DKIM — seletores mais comuns
@@ -1073,7 +1219,7 @@ def confirm_email(outdir, domain):
     for sel in ["default", "google", "mail", "selector1", "selector2",
                  "k1", "smtp", "dkim", "email", "s1", "s2"]:
         dkim_out, _ = run_cmd(
-            f"dig TXT {sel}._domainkey.{dq} +short 2>/dev/null",
+            ["dig", "TXT", f"{sel}._domainkey.{domain}", "+short"],
             timeout=5, retries=1)
         if "v=dkim1" in dkim_out.lower():
             dkim_found = True

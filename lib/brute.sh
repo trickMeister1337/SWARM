@@ -148,6 +148,7 @@ run_brute_phase() {
                 pass=$(echo "$match_line" | grep -oP "password: \K\S+" 2>/dev/null || echo "?")
                 echo "BRUTE|HIGH|${service}://${target_domain}:${port}|user=${user}|pass=${pass}" \
                     >> "$confirmed_csv"
+                command -v audit &>/dev/null && audit "FINDING_CONFIRMED type=brute target=${service}://${target_domain}:${port} user=${user}"
                 ((total_found++))
             done <<< "$found"
         fi

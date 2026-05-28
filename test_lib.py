@@ -705,6 +705,744 @@ class TestPocValidator(unittest.TestCase):
         self.assertTrue(confirmed)
         self.assertGreaterEqual(conf, 60)
 
+    def test_url_in_scope_no_scope_means_open(self):
+        # Sem STIGLITZ_SCOPE_DOMAINS no env, _url_in_scope permite tudo (uso standalone).
+        import poc_validator as pv
+        old = pv.SCOPE_DOMAINS[:]
+        pv.SCOPE_DOMAINS = []
+        try:
+            self.assertTrue(pv._url_in_scope("http://any.external/x"))
+        finally:
+            pv.SCOPE_DOMAINS = old
+
+    def test_url_in_scope_filters_external(self):
+        import poc_validator as pv
+        old = pv.SCOPE_DOMAINS[:]
+        pv.SCOPE_DOMAINS = ["target.com"]
+        try:
+            self.assertTrue(pv._url_in_scope("http://target.com/?x=1"))
+            self.assertTrue(pv._url_in_scope("http://api.target.com/?x=1"))  # subdomínio
+            self.assertFalse(pv._url_in_scope("http://evil.com/?x=1"))
+            self.assertFalse(pv._url_in_scope("not-a-url"))
+        finally:
+            pv.SCOPE_DOMAINS = old
+
+
+class TestOAuthRefresh(unittest.TestCase):
+    """oauth_refresh.py — refresh nativo de access tokens."""
+
+    def setUp(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+        # Limpa env relacionado
+        for k in ("STIGLITZ_OAUTH_TOKEN_URL", "STIGLITZ_OAUTH_REFRESH_TOKEN",
+                  "STIGLITZ_OAUTH_CLIENT_ID", "STIGLITZ_OAUTH_CLIENT_SECRET"):
+            os.environ.pop(k, None)
+
+    def test_disabled_without_env(self):
+        import oauth_refresh as oa
+        self.assertFalse(oa.is_enabled())
+
+    def test_enabled_when_env_set(self):
+        import oauth_refresh as oa
+        os.environ["STIGLITZ_OAUTH_TOKEN_URL"]     = "https://idp/token"
+        os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"] = "rt-123"
+        try:
+            self.assertTrue(oa.is_enabled())
+        finally:
+            del os.environ["STIGLITZ_OAUTH_TOKEN_URL"]
+            del os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"]
+
+    def test_refresh_raises_without_config(self):
+        import oauth_refresh as oa
+        with self.assertRaises(oa.OAuthError):
+            oa.refresh_access_token()
+
+    def test_apply_to_curl_injects_header(self):
+        import oauth_refresh as oa
+        original = "curl -sk https://api/foo"
+        out = oa.apply_to_curl(original, "tok-XYZ")
+        self.assertIn("-H", out)
+        self.assertIn("Authorization: Bearer tok-XYZ", out)
+
+    def test_apply_to_curl_replaces_existing_authorization(self):
+        # Authorization existente deve ser substituído, não duplicado
+        import oauth_refresh as oa
+        original = "curl -sk -H 'Authorization: Bearer old-token' https://api/foo"
+        out = oa.apply_to_curl(original, "new-token")
+        self.assertIn("Bearer new-token", out)
+        self.assertNotIn("old-token", out)
+
+    def test_apply_to_curl_noop_without_token(self):
+        import oauth_refresh as oa
+        original = "curl -sk https://api/foo"
+        self.assertEqual(oa.apply_to_curl(original, ""), original)
+
+    def test_refresh_uses_mock_endpoint(self):
+        """Smoke test usando um mini-servidor HTTP local."""
+        import oauth_refresh as oa
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length).decode()
+                if "refresh_token=rt-OK" in body:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"access_token":"new-AT","token_type":"Bearer"}')
+                else:
+                    self.send_response(401)
+                    self.end_headers()
+            def log_message(self, *_): pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            os.environ["STIGLITZ_OAUTH_TOKEN_URL"] = f"http://127.0.0.1:{port}/token"
+            os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"] = "rt-OK"
+            tok = oa.refresh_access_token(timeout=5)
+            self.assertEqual(tok, "new-AT")
+            # refresh inválido → OAuthError
+            os.environ["STIGLITZ_OAUTH_REFRESH_TOKEN"] = "rt-BAD"
+            with self.assertRaises(oa.OAuthError):
+                oa.refresh_access_token(timeout=5)
+        finally:
+            server.shutdown()
+            for k in ("STIGLITZ_OAUTH_TOKEN_URL", "STIGLITZ_OAUTH_REFRESH_TOKEN"):
+                os.environ.pop(k, None)
+
+
+class TestRedBatch(unittest.TestCase):
+    """stiglitz_red_batch.sh — multi-target paralelo."""
+
+    def setUp(self):
+        self.root = os.path.dirname(os.path.abspath(__file__))
+        self.script = os.path.join(self.root, "stiglitz_red_batch.sh")
+
+    def test_script_exists_and_executable(self):
+        self.assertTrue(os.path.isfile(self.script))
+        self.assertTrue(os.access(self.script, os.X_OK))
+
+    def test_help_shows_required_args(self):
+        import subprocess
+        r = subprocess.run(["bash", self.script, "--help"],
+                           capture_output=True, text=True, timeout=10)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("--targets", r.stdout)
+        self.assertIn("--roe", r.stdout)
+        self.assertIn("--workers", r.stdout)
+        self.assertIn("--profile-file", r.stdout)
+
+    def test_missing_targets_aborts(self):
+        import subprocess
+        r = subprocess.run(["bash", self.script, "--roe", "/tmp/x"],
+                           capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("targets", r.stdout + r.stderr)
+
+    def test_missing_roe_aborts(self):
+        import subprocess, tempfile
+        tf = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        tf.write("https://a.com\n"); tf.close()
+        try:
+            r = subprocess.run(["bash", self.script, "--targets", tf.name],
+                               capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("roe", (r.stdout + r.stderr).lower())
+        finally:
+            os.unlink(tf.name)
+
+
+class TestTrend(unittest.TestCase):
+    """stiglitz_trend.py — análise longitudinal cross-engagement."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import stiglitz_trend as st
+        self.st = st
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _mkscan(self, domain, ts, risk, findings):
+        d = os.path.join(self.tmpdir, f"scan_{domain}_{ts}")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "stiglitz_report.html"), "w") as f:
+            f.write(f"<html><body>Risk Score: {risk}</body></html>")
+        with open(os.path.join(d, "findings.json"), "w") as f:
+            json.dump({"findings": findings}, f)
+        return d
+
+    def test_extract_timestamp_from_dir_name(self):
+        d = os.path.join(self.tmpdir, "scan_alvo.com_20260301_120000")
+        os.makedirs(d)
+        ts = self.st._extract_timestamp(d)
+        self.assertEqual(ts.year, 2026)
+        self.assertEqual(ts.month, 3)
+        self.assertEqual(ts.day, 1)
+
+    def test_extract_domain_from_dir_name(self):
+        self.assertEqual(
+            self.st._extract_domain("scan_target.com_20260520_120000"),
+            "target.com")
+
+    def test_extract_risk_from_report(self):
+        d = self._mkscan("t.com", "20260301_120000", 67, [])
+        self.assertEqual(self.st._extract_risk(d), 67)
+
+    def test_extract_stats_counts_severity(self):
+        d = self._mkscan("t.com", "20260301_120000", 50,
+                         [{"severity": "critical"}, {"severity": "high"},
+                          {"severity": "high"}, {"severity": "low"}])
+        s = self.st._extract_stats(d)
+        self.assertEqual(s["critical"], 1)
+        self.assertEqual(s["high"], 2)
+        self.assertEqual(s["low"], 1)
+
+    def test_collect_sorts_by_timestamp(self):
+        # Cria 3 scans em ordem invertida — collect deve ordenar
+        d3 = self._mkscan("t.com", "20260520_120000", 52, [])
+        d1 = self._mkscan("t.com", "20260301_120000", 65, [])
+        d2 = self._mkscan("t.com", "20260415_120000", 78, [])
+        rows = self.st.collect([d3, d1, d2])
+        self.assertEqual([r["risk"] for r in rows], [65, 78, 52])
+
+    def test_render_html_includes_trend_deltas(self):
+        d1 = self._mkscan("t.com", "20260301_120000", 65, [{"severity": "high"}])
+        d2 = self._mkscan("t.com", "20260520_120000", 52, [])
+        rows = self.st.collect([d1, d2])
+        out = os.path.join(self.tmpdir, "trend.html")
+        self.st.render_html(rows, out)
+        content = open(out).read()
+        self.assertIn("Stiglitz Trend", content)
+        self.assertIn("t.com", content)
+        # Delta -13 com sinal e cor verde (melhorou)
+        self.assertIn("-13", content)
+        self.assertIn("#27ae60", content)
+
+
+class TestValidatorPlugins(unittest.TestCase):
+    """Plug-in de validadores (lib/validators/)."""
+
+    def setUp(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+
+    def test_registry_populated(self):
+        import validators
+        regs = validators.registered_types()
+        self.assertIn("sqli", regs)
+        self.assertIn("xss", regs)
+
+    def test_registry_returns_callable(self):
+        import validators
+        fn = validators.get("sqli")
+        self.assertIsNotNone(fn)
+        self.assertTrue(callable(fn))
+
+    def test_registry_unknown_returns_none(self):
+        import validators
+        self.assertIsNone(validators.get("not_a_type"))
+
+    def test_sqli_plugin_error_pattern_confirms(self):
+        from validators.sqli import validate as sqli_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "You have an error in your SQL syntax",
+            "resp_headers": "", "status": "500", "patterns": {"patterns": ["error in your sql"]},
+            "diff_changed": False, "diff_conf": 0, "diff_note": "",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+        }
+        confirmed, conf, note = sqli_validate(ctx)
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(conf, 90)
+
+    def test_sqli_plugin_size_only_diff_requires_doublecheck(self):
+        # Sem double-check consistente, diff só por tamanho NÃO confirma
+        from validators.sqli import validate as sqli_validate
+        ctx_base = {
+            "url": "http://x/", "resp_body": "", "resp_headers": "",
+            "status": "200", "patterns": {"patterns": []},
+            "diff_changed": True, "diff_conf": 15, "diff_note": "mudou 40%",
+            "auth_ev": [], "dc_bonus": 0,
+        }
+        # Sem dc
+        confirmed, _, _ = sqli_validate({**ctx_base, "dc_result": None})
+        self.assertFalse(confirmed)
+        # Com dc consistente
+        confirmed, conf, _ = sqli_validate({**ctx_base, "dc_result": (True, "ok")})
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(conf, 60)
+
+    def test_all_classify_types_have_plugin(self):
+        """Cada vuln_type retornado por classify_vuln deve ter um plug-in
+        registrado. Garante que o dispatch nunca cai no if/elif legado."""
+        import validators
+        # Estes são os tipos que classify_vuln() pode retornar (poc_validator.py).
+        expected = {
+            "sqli", "xss", "lfi", "ssrf", "cors", "jwt", "secret_aws",
+            "default_login", "redirect", "takeover", "exposure",
+            "auth_bypass", "security_header", "tls", "email", "generic",
+        }
+        regs = set(validators.registered_types())
+        missing = expected - regs
+        self.assertFalse(missing, f"Tipos sem plug-in: {missing}")
+
+    def test_xss_plugin_pattern_reflection(self):
+        from validators.xss import validate as xss_validate
+        ctx = {
+            "url": "http://x/", "resp_body": "<script>alert(1)</script>",
+            "resp_headers": "", "status": "200",
+            "patterns": {"patterns": [r"<script>alert\(1\)</script>"]},
+            "diff_changed": False, "diff_conf": 0, "diff_note": "",
+            "auth_ev": [], "dc_result": None, "dc_bonus": 0,
+        }
+        confirmed, conf, _ = xss_validate(ctx)
+        self.assertTrue(confirmed)
+        self.assertGreaterEqual(conf, 90)
+
+
+class TestProfileLoader(unittest.TestCase):
+    """Profile DSL JSON-Schema — lib/profile_loader.py."""
+
+    def setUp(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+
+    def test_validates_minimum_profile(self):
+        import profile_loader as pl
+        out = pl.validate({"sqlmap": {"level": 3, "risk": 2}})
+        self.assertEqual(out["sqlmap_level"], 3)
+        self.assertEqual(out["sqlmap_risk"], 2)
+
+    def test_rejects_out_of_range(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"sqlmap": {"level": 99}})
+        with self.assertRaises(ValueError):
+            pl.validate({"sqlmap": {"risk": 0}})
+        with self.assertRaises(ValueError):
+            pl.validate({"crawl_depth": -1})
+
+    def test_rejects_bad_techniques(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"sqlmap": {"techniques": "INVALID"}})
+
+    def test_rejects_invalid_name(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"name": "has spaces"})
+        with self.assertRaises(ValueError):
+            pl.validate({"name": "../path"})
+
+    def test_rejects_unknown_timeout_keys(self):
+        import profile_loader as pl
+        with self.assertRaises(ValueError):
+            pl.validate({"timeouts": {"unknown_tool": 60}})
+
+    def test_emit_includes_declare_for_associative(self):
+        """Em perfis com '-' no nome, falta de `declare -gA` causaria
+        bash a tratar a chave como aritmética (eng-custom → eng - custom)."""
+        import profile_loader as pl
+        out = pl.validate({"sqlmap": {"level": 3}, "brute_force": False})
+        bash = pl.emit_bash(out, "eng-custom")
+        self.assertIn("declare -gA PROFILE_SQLMAP_LEVEL", bash)
+        self.assertIn('PROFILE_SQLMAP_LEVEL["eng-custom"]="3"', bash)
+        self.assertIn('PROFILE_BRUTE_FORCE["eng-custom"]="false"', bash)
+
+    def test_emit_bool_to_bash_literal(self):
+        import profile_loader as pl
+        out = pl.validate({"brute_force": True, "nikto_enabled": False})
+        bash = pl.emit_bash(out, "staging")
+        self.assertIn('PROFILE_BRUTE_FORCE["staging"]="true"', bash)
+        self.assertIn('PROFILE_NIKTO_ENABLED["staging"]="false"', bash)
+
+
+class TestReportModules(unittest.TestCase):
+    """Módulos lib/report/ extraídos de stiglitz_report.py."""
+
+    def setUp(self):
+        # Adiciona lib/ ao sys.path para importar lib/report/*
+        root = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, os.path.join(root, "lib"))
+
+    def test_cwe_enrich_known_cwe(self):
+        from report.cwe_data import cwe_enrich
+        r = cwe_enrich("CWE-89")
+        self.assertEqual(r["sev"], "CRITICAL")
+        self.assertGreaterEqual(r["cvss"], 9.0)
+        # Aceita também só o número
+        self.assertEqual(cwe_enrich("89"), r)
+
+    def test_cwe_enrich_unknown_returns_none(self):
+        from report.cwe_data import cwe_enrich
+        self.assertIsNone(cwe_enrich(""))
+        self.assertIsNone(cwe_enrich(None))
+        self.assertIsNone(cwe_enrich("CWE-99999"))
+
+    def test_cvss_to_sev_bands(self):
+        from report.cwe_data import cvss_to_sev
+        self.assertEqual(cvss_to_sev(9.8), "critical")
+        self.assertEqual(cvss_to_sev(8.0), "high")
+        self.assertEqual(cvss_to_sev(5.0), "medium")
+        self.assertEqual(cvss_to_sev(1.0), "low")
+        self.assertEqual(cvss_to_sev(0.0), "info")
+        self.assertIsNone(cvss_to_sev(None))
+
+    def test_sarif_structure_valid(self):
+        from report.sarif import build_sarif
+        findings = [
+            {"name": "SQL Injection", "severity": "critical",
+             "cve": "CVE-2024-1234", "url": "https://t.com/api",
+             "source": "Nuclei", "description": "SQLi found"},
+            {"name": "XSS",           "severity": "medium",
+             "cve": "CWE-79", "url": "https://t.com/search",
+             "source": "ZAP"},
+        ]
+        s = build_sarif(findings, "https://t.com")
+        self.assertEqual(s["version"], "2.1.0")
+        self.assertEqual(len(s["runs"]), 1)
+        self.assertEqual(s["runs"][0]["tool"]["driver"]["name"], "Stiglitz")
+        self.assertEqual(len(s["runs"][0]["results"]), 2)
+        # Regras únicas por CVE/CWE
+        rule_ids = [r["id"] for r in s["runs"][0]["tool"]["driver"]["rules"]]
+        self.assertIn("CVE-2024-1234", rule_ids)
+        self.assertIn("CWE-79", rule_ids)
+
+    def test_sarif_levels_match_severity(self):
+        from report.sarif import build_sarif
+        findings = [
+            {"name": "A", "severity": "critical", "url": "x"},
+            {"name": "B", "severity": "high",     "url": "x"},
+            {"name": "C", "severity": "medium",   "url": "x"},
+            {"name": "D", "severity": "low",      "url": "x"},
+            {"name": "E", "severity": "info",     "url": "x"},
+        ]
+        s = build_sarif(findings, "x")
+        levels = [r["level"] for r in s["runs"][0]["results"]]
+        self.assertEqual(levels, ["error", "error", "warning", "note", "none"])
+
+    def test_sarif_falls_back_to_target_when_url_missing(self):
+        from report.sarif import build_sarif
+        findings = [{"name": "X", "severity": "high"}]  # sem url
+        s = build_sarif(findings, "https://target.com")
+        loc = s["runs"][0]["results"][0]["locations"][0]
+        self.assertEqual(loc["physicalLocation"]["artifactLocation"]["uri"],
+                         "https://target.com")
+
+    def test_exec_summary_renders(self):
+        from report.exec_summary import build_exec_summary
+        html_out = build_exec_summary(
+            target="https://target.com", domain="target.com",
+            risk=85, risk_label="CRITICAL — Immediate Action",
+            timestamp="28/05/2026 09:00",
+            stats={"critical": 2, "high": 5, "medium": 3, "low": 1},
+            findings=[
+                {"name": "SQLi", "severity": "critical",
+                 "impact": "DB takeover", "remediation": "Prepared stmts"},
+                {"name": "XSS", "severity": "high",
+                 "impact": "Session hijack", "remediation": "Escape output"},
+            ],
+            kev_matches={"CVE-2021-44228": {}},
+        )
+        # Estrutura básica
+        self.assertIn("<!DOCTYPE html>", html_out)
+        self.assertIn("target.com", html_out)
+        self.assertIn("85/100", html_out)
+        self.assertIn("CRITICAL", html_out)
+        # KEV alert deve aparecer
+        self.assertIn("Active Exploitation", html_out)
+        self.assertIn("CVE-2021-44228", html_out)
+        # Top vulns aparecem com seus nomes (escapados)
+        self.assertIn("SQLi", html_out)
+        self.assertIn("XSS", html_out)
+
+    def test_exec_summary_escapes_target(self):
+        # XSS via target name não pode injetar markup no exec summary
+        from report.exec_summary import build_exec_summary
+        html_out = build_exec_summary(
+            target="<script>alert(1)</script>", domain="x",
+            risk=10, risk_label="LOW", timestamp="t",
+            stats={"critical": 0, "high": 0, "medium": 0, "low": 0},
+            findings=[],
+        )
+        self.assertNotIn("<script>alert(1)</script>", html_out)
+        self.assertIn("&lt;script&gt;", html_out)
+
+    def test_sarif_helpuri_only_for_cves(self):
+        from report.sarif import build_sarif
+        findings = [
+            {"name": "X", "severity": "high", "cve": "CVE-2024-1234", "url": "x"},
+            {"name": "Y", "severity": "high",                          "url": "x"},
+        ]
+        s = build_sarif(findings, "x")
+        rules = {r["id"]: r for r in s["runs"][0]["tool"]["driver"]["rules"]}
+        self.assertIn("helpUri", rules["CVE-2024-1234"])
+        self.assertIn("nvd.nist.gov", rules["CVE-2024-1234"]["helpUri"])
+        # Findings sem CVE não devem ter helpUri
+        non_cve = [rid for rid in rules if not rid.startswith("CVE-")]
+        self.assertGreater(len(non_cve), 0)
+        for rid in non_cve:
+            self.assertNotIn("helpUri", rules[rid])
+
+
+class TestAuditChain(unittest.TestCase):
+    """Hash chain do audit trail — verify_audit.py detecta adulteração."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "verify_audit.py")
+        # Importa o verificador como módulo
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import verify_audit
+        self.va = verify_audit
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _build_chain(self, events, seed="seed1234"):
+        """Constrói um audit.log válido a partir de uma lista de eventos."""
+        path = os.path.join(self.tmpdir, "audit.log")
+        prev = seed
+        ts = "2026-05-28T12:00:00Z"
+        with open(path, "w") as f:
+            init_event = f"AUDIT_INIT seed={seed}"
+            h = self.va._h(seed, ts, init_event)
+            f.write(f"0000 | {ts} | {init_event} | {seed}:{h}\n")
+            prev = h
+            for i, ev in enumerate(events, start=1):
+                h = self.va._h(prev, ts, ev)
+                f.write(f"{i:04d} | {ts} | {ev} | {prev}:{h}\n")
+                prev = h
+        return path
+
+    def test_valid_chain_verifies(self):
+        path = self._build_chain(["PROFILE=lab", "AUTHORIZED via=interactive"])
+        ok, msg = self.va.verify(path)
+        self.assertTrue(ok, f"chain válida deveria passar: {msg}")
+        self.assertIn("3 entradas", msg)
+
+    def test_tampered_event_detected(self):
+        path = self._build_chain(["PROFILE=lab", "AUTHORIZED via=interactive"])
+        # Altera o evento da segunda linha sem recalcular hashes
+        with open(path) as f:
+            lines = f.readlines()
+        lines[1] = lines[1].replace("PROFILE=lab", "PROFILE=production")
+        with open(path, "w") as f:
+            f.writelines(lines)
+        ok, msg = self.va.verify(path)
+        self.assertFalse(ok)
+        self.assertIn("curr_hash diverge", msg)
+
+    def test_reordered_lines_detected(self):
+        path = self._build_chain(["EV_A", "EV_B", "EV_C"])
+        with open(path) as f:
+            lines = f.readlines()
+        # Swap linha 1 e 2
+        lines[1], lines[2] = lines[2], lines[1]
+        with open(path, "w") as f:
+            f.writelines(lines)
+        ok, msg = self.va.verify(path)
+        self.assertFalse(ok)
+
+    def test_empty_log_fails(self):
+        path = os.path.join(self.tmpdir, "empty.log")
+        open(path, "w").close()
+        ok, msg = self.va.verify(path)
+        self.assertFalse(ok)
+        self.assertIn("vazio", msg)
+
+
+class TestRiskScore(unittest.TestCase):
+    """Risk score — valores absolutos (antes só havia checagens relacionais)."""
+
+    def _stats(self, c=0, h=0, m=0, l=0):
+        return {"critical": c, "high": h, "medium": m, "low": l, "info": 0}
+
+    def test_empty_is_zero(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(), {}, [], [])
+        self.assertEqual(r["risk"], 0)
+        self.assertEqual(r["base_risk"], 0)
+        self.assertEqual(r["kev_bonus"], 0)
+
+    def test_only_low_is_low_band(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(l=2), {}, [], [])
+        # floor=5 + qty=1 → base=6; sem bônus → 6 (< 15 = BAIXO)
+        self.assertEqual(r["risk"], 6)
+
+    def test_one_medium_is_medium_band(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(m=1), {}, [], [])
+        # floor=15 + qty=1 → base=16
+        self.assertEqual(r["base_risk"], 16)
+        self.assertEqual(r["risk"], 16)
+
+    def test_high_finding_stays_below_70_without_critical_or_kev(self):
+        # Cap da banda CRÍTICA — sem severidade crítica nem KEV, risk <= 69
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(h=10), {}, [], [])
+        self.assertLessEqual(r["risk"], 69, "Não pode virar CRÍTICO sem crítico/KEV")
+
+    def test_critical_finding_reaches_critical_band(self):
+        from risk_score import compute_risk
+        r = compute_risk(self._stats(c=1, h=1), {}, [], [])
+        # floor=70 + qty=(6+3)=9 → base=79
+        self.assertEqual(r["base_risk"], 79)
+        self.assertEqual(r["risk"], 79)
+        self.assertGreaterEqual(r["risk"], 70)
+
+    def test_kev_bonus_capped_at_50(self):
+        from risk_score import compute_risk
+        cves = {f"CVE-2024-{i}": {"in_kev": True} for i in range(10)}
+        r = compute_risk(self._stats(h=1), cves, [], [])
+        self.assertEqual(r["kev_count"], 10)
+        self.assertEqual(r["kev_bonus"], 50, "KEV capado em +50 mesmo com 10 CVEs")
+
+    def test_kev_alone_promotes_to_critical_band(self):
+        # 1 CVE no KEV (sem severidade crítica): floor=high(40)+qty=3=43, +kev=25 → 68
+        # Mas o teto de 69 NÃO se aplica quando kev_count > 0 → pode passar
+        from risk_score import compute_risk
+        cves = {"CVE-2024-1": {"in_kev": True}}
+        r = compute_risk(self._stats(h=1), cves, [], [])
+        self.assertEqual(r["kev_count"], 1)
+        # base=43 + kev=25 = 68 → ainda na banda ALTO; mas SEM o cap em 69.
+        # Adicionando mais um KEV chegaria ao crítico:
+        cves2 = {f"CVE-2024-{i}": {"in_kev": True} for i in range(2)}
+        r2 = compute_risk(self._stats(h=5), cves2, [], [])
+        # base=40+qty=15=55, +kev=50 → 105 → cap 100 → CRÍTICO
+        self.assertGreaterEqual(r2["risk"], 70)
+
+    def test_epss_bonus_capped_at_30(self):
+        from risk_score import compute_risk
+        cves = {f"CVE-2024-{i}": {"epss_score": 0.9} for i in range(10)}
+        # Cada CVE com EPSS>=0.5 dá +15; 10 daria 150 → cap em 30
+        r = compute_risk(self._stats(m=1), cves, [], [])
+        self.assertEqual(r["epss_bonus"], 30)
+
+    def test_js_secrets_only_cannot_fabricate_critical(self):
+        # Muitos secrets JS sem severidade crítica e sem KEV → cap em 69
+        from risk_score import compute_risk
+        secrets = [{"type": "AWS Access Key"}] * 5 + [{"type": "Hardcoded Password"}] * 5
+        r = compute_risk(self._stats(m=2), {}, secrets, [])
+        self.assertLessEqual(r["risk"], 69)
+
+    def test_js_bonus_capped_at_30(self):
+        from risk_score import compute_risk
+        secrets = [{"type": "AWS Access Key"}] * 20  # 20*15=300 → cap 30
+        r = compute_risk(self._stats(m=1), {}, secrets, [])
+        self.assertEqual(r["js_bonus"], 30)
+
+
+class TestFindingShape(unittest.TestCase):
+    """Garante que findings emitidos pelos lib/*.py usam o schema canônico
+    (name/description) — observado em scan real onde secscan.py emitia
+    title/detail e o agregador entregava finding vazio no relatório."""
+
+    def setUp(self):
+        self.root = os.path.dirname(os.path.abspath(__file__))
+
+    def test_secscan_emits_name_description_not_title_detail(self):
+        path = os.path.join(self.root, "lib", "secscan.py")
+        with open(path) as f:
+            content = f.read()
+        self.assertNotIn('"title":', content,
+                         "secscan.py deve usar 'name', não 'title'")
+        self.assertNotIn('"detail":', content,
+                         "secscan.py deve usar 'description', não 'detail'")
+        self.assertIn('"name":', content)
+        self.assertIn('"description":', content)
+
+    def test_all_lib_findings_use_canonical_schema(self):
+        """Verifica que todos os módulos *_findings usam name/description."""
+        files = ["secscan.py", "version_fingerprint.py",
+                 "monitoring_check.py", "ratelimit_check.py"]
+        for fname in files:
+            path = os.path.join(self.root, "lib", fname)
+            if not os.path.exists(path):
+                continue
+            with open(path) as f:
+                content = f.read()
+            # Se o arquivo emite findings (tem .append( com dict), checa schema
+            if 'findings.append' in content or 'findings.append(' in content:
+                self.assertIn('"name":', content,
+                              f"{fname} deve usar 'name' nos findings")
+
+
+class TestProductionProfile(unittest.TestCase):
+    """Asserts que o perfil production aplica restrições reais nos scripts."""
+
+    def setUp(self):
+        self.root = os.path.dirname(os.path.abspath(__file__))
+
+    def test_sqli_production_uses_readonly_techniques(self):
+        # lib/sqli.sh em production NUNCA pode emitir stacked queries (S)
+        with open(os.path.join(self.root, "lib", "sqli.sh")) as f:
+            content = f.read()
+        # Deve existir um case por perfil com a flag --technique adequada
+        self.assertIn('production) technique="BEU"', content,
+                      "Production deve usar técnicas read-only (BEU, sem S/T)")
+        self.assertIn('staging)    technique="BEUT"', content,
+                      "Staging não deve incluir stacked (S)")
+        # E o template do sqlmap deve usar a variável $technique
+        self.assertIn('--technique="$technique"', content)
+
+    def test_msf_production_uses_check_only(self):
+        # lib/msf.sh com payload NONE deve emitir `check` (não `run -j`)
+        with open(os.path.join(self.root, "lib", "msf.sh")) as f:
+            content = f.read()
+        self.assertIn('check_only=true', content)
+        self.assertIn('echo "check"', content,
+                      "Modo check-only deve emitir `check` no RC do msf")
+        # E auxiliares devem ser pulados em check-only
+        self.assertIn("[[ \"$mod\" == exploit/* ]] || continue", content,
+                      "Auxiliares devem ser pulados em check-only")
+
+    def test_red_orchestrator_validates_scope_domains(self):
+        # stiglitz_red.sh valida cada SCOPE_DOMAIN com regex (anti-injeção)
+        with open(os.path.join(self.root, "stiglitz_red.sh")) as f:
+            content = f.read()
+        self.assertIn("Domínio de escopo inválido", content)
+        self.assertIn("--roe", content)
+
+    def test_red_gate_requires_roe_for_bypass(self):
+        # stiglitz_red.sh: bypass via STIGLITZ_AUTHORIZED exige --roe
+        with open(os.path.join(self.root, "stiglitz_red.sh")) as f:
+            content = f.read()
+        self.assertIn("Bypass do orquestrador requer --roe", content)
+
+    def test_pci_active_controls_phase_present(self):
+        # pci_scan.sh: fase 7.5 emite EVIDÊNCIA ATIVA para Reqs 2/4/8/10/12
+        # em vez de inferir conformidade da ausência de findings.
+        # NOTA: pci_scan.sh é gitignored (versionado separadamente) — pula
+        # quando ausente para permitir checkout limpo do repo público.
+        pci = os.path.join(self.root, "pci_scan.sh")
+        if not os.path.exists(pci):
+            self.skipTest("pci_scan.sh ausente (gitignored neste repo)")
+        with open(pci) as f:
+            content = f.read()
+        self.assertIn("CONTROLES PCI ATIVOS", content)
+        self.assertIn("default-creds-probe", content,
+                      "Req 2: probe ativo de credenciais default")
+        self.assertIn("mfa-presence-probe", content,
+                      "Req 8: heurística de MFA")
+        self.assertIn("logging-headers-probe", content,
+                      "Req 10: presença de headers de correlação")
+        self.assertIn("tls-legacy-probe", content,
+                      "Req 4: TLS 1.0/1.1 deve ser recusado")
+        self.assertIn("security-txt-probe", content,
+                      "Req 12.10: security.txt (RFC 9116)")
+        # Multi-target: itera WEB_TARGETS com cap
+        self.assertIn("PCI_ACTIVE_TARGETS_MAX", content)
+
 
 class TestOOB(unittest.TestCase):
     """Confirmação Out-of-Band (lib/oob.py)."""
@@ -755,19 +1493,40 @@ class TestOOB(unittest.TestCase):
 
     def test_inject_ssrf_uses_candidate_param(self):
         import oob
-        cmd = oob.inject_oob_url("http://alvo/api?url=orig&x=1",
-                                 "http://tok.oast.test/", "ssrf")
-        self.assertIsNotNone(cmd)
-        self.assertIn("tok.oast.test", cmd)
-        self.assertTrue(cmd.startswith("curl "))
+        cmds = oob.inject_oob_url("http://alvo/api?url=orig&x=1",
+                                  "http://tok.oast.test/", "ssrf")
+        self.assertEqual(len(cmds), 1, "SSRF gera um único payload")
+        self.assertIn("tok.oast.test", cmds[0])
+        self.assertTrue(cmds[0].startswith("curl "))
 
     def test_inject_rce_blocked_in_production(self):
         import oob
-        self.assertIsNone(
-            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "production"))
-        # lab permite
-        self.assertIsNotNone(
-            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "lab"))
+        self.assertEqual(
+            oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "production"),
+            [])
+        cmds = oob.inject_oob_url("http://alvo/", "http://h.oast.test/", "rce", "lab")
+        self.assertEqual(len(cmds), 1)
+
+    def test_inject_ssti_emits_multiple_engines(self):
+        # SSTI dispara payloads para várias engines (Log4j, Jinja2, Twig,
+        # ERB, Velocity, Smarty, SpEL, FreeMarker). Qualquer callback confirma.
+        import oob
+        cmds = oob.inject_oob_url("http://alvo/?p=x", "http://h.oast.test/", "ssti", "lab")
+        self.assertGreaterEqual(len(cmds), 5, "Várias engines SSTI devem ser cobertas")
+        joined = "\n".join(cmds)
+        self.assertIn("jndi:ldap", joined, "Log4j")
+        self.assertIn("__subclasses__", joined, "Jinja2 / Python")
+        self.assertIn("Runtime", joined, "SpEL / Velocity")
+        # Todos apontam para o host OOB
+        for c in cmds:
+            self.assertIn("h.oast.test", c)
+
+    def test_inject_ssti_blocked_in_production(self):
+        import oob
+        self.assertEqual(
+            oob.inject_oob_url("http://alvo/?p=x", "http://h.oast.test/",
+                               "ssti", "production"),
+            [])
 
 
 class TestDomainFilter(unittest.TestCase):
