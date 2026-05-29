@@ -1069,6 +1069,21 @@ try:
     print(sum(1 for v in d.values() if v.get('severity','') in ('high','medium')))
 except: print(0)" 2>/dev/null || echo 0)
     echo -e "  ${GREEN}[✓] Análise de email concluída — $EMAIL_ISSUES problema(s) encontrado(s)${NC}"
+
+    # Hint de PoC: se o From: exato é spoofável (DMARC ausente ou p=none), sugere
+    # o email_spoof_poc.py. Apenas sugestão — não envia nada automaticamente.
+    EMAIL_SPOOFABLE=$(python3 -c "
+import json
+try:
+    d = json.load(open('$OUTDIR/raw/email_security.json'))
+    dm = d.get('dmarc', {})
+    print('1' if dm.get('status') == 'MISSING' or dm.get('policy') == 'none' else '0')
+except: print('0')" 2>/dev/null || echo 0)
+    if [ "$EMAIL_SPOOFABLE" = "1" ]; then
+        echo -e "  ${YELLOW}[!] From: exato spoofável (DMARC ausente ou p=none).${NC}"
+        echo -e "  ${BLUE}      PoC: python3 $SCRIPT_DIR/email_spoof_poc.py $DOMAIN --dry-run --to <alvo@org>${NC}"
+        echo -e "  ${BLUE}      Envio real exige --send + gate RoE (\"EU AUTORIZO\").${NC}"
+    fi
 else
     echo -e "  ${YELLOW}[○] dig não disponível — pulando análise de email${NC}"
 fi

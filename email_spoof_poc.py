@@ -80,6 +80,24 @@ def _decode(resp):
     return resp.decode(errors="replace") if isinstance(resp, (bytes, bytearray)) else str(resp)
 
 
+def _require_ok(code, resp, label, ok=(250,)):
+    """smtplib.mail()/rcpt() não lançam em 4xx/5xx — exige código 2xx ou aborta.
+
+    Garante que 'accepted' reflita a aceitação real de cada estágio SMTP, e não
+    apenas o código final do DATA (que pode mascarar uma rejeição em MAIL/RCPT).
+    """
+    if code not in ok:
+        raise smtplib.SMTPException(f"{label} rejeitado: {code} {_decode(resp)}")
+
+
+def _quiet_close(s):
+    if s is not None:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
 def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
                    timeout=15, smtp_factory=smtplib.SMTP):
     """Entrega direta na porta 25, tentando cada MX. Captura o transcript."""
@@ -95,21 +113,25 @@ def deliver_direct(mx_hosts, helo, mail_from, rcpt_to, msg_bytes,
             transcript.append(f"EHLO {helo} -> {code} {_decode(resp)}")
             code, resp = s.mail(mail_from)
             transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
+            _require_ok(code, resp, "MAIL FROM")
             code, resp = s.rcpt(rcpt_to)
             transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
+            _require_ok(code, resp, "RCPT TO", ok=(250, 251))
             code, resp = s.data(msg_bytes)
             transcript.append(f"DATA -> {code} {_decode(resp)}")
-            s.quit()
-            return {"method": "direct", "mx_used": host, "accepted": code == 250,
+            accepted = code == 250
+            # A mensagem já foi entregue: uma falha no QUIT não deve disparar
+            # retry a outro MX (evita reenvio duplicado do email forjado).
+            try:
+                s.quit()
+            except Exception:
+                _quiet_close(s)
+            return {"method": "direct", "mx_used": host, "accepted": accepted,
                     "transcript": transcript}
         except Exception as e:
             transcript.append(f"ERROR {host}: {e}")
             last_err = e
-            if s is not None:
-                try:
-                    s.close()
-                except Exception:
-                    pass
+            _quiet_close(s)
             continue
     return {"method": "direct", "mx_used": None, "accepted": False,
             "transcript": transcript, "error": str(last_err) if last_err else None}
@@ -134,20 +156,22 @@ def deliver_relay(host, port, user, password, helo, mail_from, rcpt_to, msg_byte
             transcript.append("STARTTLS + AUTH")
         code, resp = s.mail(mail_from)
         transcript.append(f"MAIL FROM:<{mail_from}> -> {code} {_decode(resp)}")
+        _require_ok(code, resp, "MAIL FROM")
         code, resp = s.rcpt(rcpt_to)
         transcript.append(f"RCPT TO:<{rcpt_to}> -> {code} {_decode(resp)}")
+        _require_ok(code, resp, "RCPT TO", ok=(250, 251))
         code, resp = s.data(msg_bytes)
         transcript.append(f"DATA -> {code} {_decode(resp)}")
-        s.quit()
-        return {"method": "relay", "mx_used": host, "accepted": code == 250,
+        accepted = code == 250
+        try:
+            s.quit()
+        except Exception:
+            _quiet_close(s)
+        return {"method": "relay", "mx_used": host, "accepted": accepted,
                 "transcript": transcript}
     except Exception as e:
         transcript.append(f"ERROR relay {host}: {e}")
-        if s is not None:
-            try:
-                s.close()
-            except Exception:
-                pass
+        _quiet_close(s)
         return {"method": "relay", "mx_used": host, "accepted": False,
                 "transcript": transcript, "error": str(e)}
 
@@ -166,10 +190,10 @@ def roe_gate(forged_from, to_addr, method, assume_yes=False, interactive=None):
         print("  [RoE] Sem confirmação e sem terminal interativo — abortando envio.")
         return False
     try:
-        ans = input("  [RoE] Digite SIM para confirmar a autorização: ")
+        ans = input("  [RoE] Digite EU AUTORIZO para confirmar a autorização: ")
     except EOFError:
         return False
-    return ans.strip() == "SIM"
+    return ans.strip() == "EU AUTORIZO"
 
 
 def write_evidence(outdir, domain, records, verdict, send):
@@ -209,11 +233,11 @@ def parse_args(argv=None):
     p.add_argument("--body-file", help="Lê o corpo de um arquivo")
     p.add_argument("--smtp", help="Relay de fallback HOST[:PORT]")
     p.add_argument("--smtp-user")
-    p.add_argument("--smtp-pass")
+    p.add_argument("--smtp-pass",
+                   help="Senha do relay. Prefira a env STIGLITZ_SMTP_PASS (evita exposição em ps/history).")
     p.add_argument("--helo", default=None, help="Nome no EHLO/HELO (default: hostname local)")
-    p.add_argument("--roe-accept", action="store_true", help="Confirma autorização sem prompt")
-    p.add_argument("--no-roe", action="store_true",
-                   help="Aceita o gate RoE sem prompt (CI com autorização prévia — AUTORIZA o envio)")
+    p.add_argument("--roe-accept", action="store_true",
+                   help="AUTORIZA o envio sem prompt (RoE prévio; p/ CI com autorização). Equivale a digitar EU AUTORIZO.")
     p.add_argument("--outdir", default=None)
     return p.parse_args(argv)
 
@@ -247,10 +271,17 @@ def main(argv=None):
             return 2
         body = args.body
         if args.body_file:
-            with open(args.body_file) as f:
-                body = f.read()
+            try:
+                with open(args.body_file) as f:
+                    body = f.read()
+            except OSError as e:
+                print(f"  [!] Não foi possível ler --body-file: {e}")
+                return 2
         msg, msg_id = build_message(forged_from, args.to, args.subject, body)
         helo = args.helo or socket.getfqdn()
+
+        if args.send and args.dry_run:
+            print("  [!] --dry-run tem precedência: nada será enviado (--send ignorado).")
 
         if args.dry_run:
             print("\n  [DRY-RUN] Mensagem que SERIA enviada:")
@@ -260,8 +291,7 @@ def main(argv=None):
             return 0
 
         method_desc = "direct-MX" + (" (fallback relay)" if args.smtp else "")
-        if not roe_gate(forged_from, args.to, method_desc,
-                        assume_yes=args.roe_accept or args.no_roe):
+        if not roe_gate(forged_from, args.to, method_desc, assume_yes=args.roe_accept):
             return 1
 
         recipient_domain = args.to.split("@", 1)[1]
@@ -274,8 +304,9 @@ def main(argv=None):
         if not result["accepted"] and args.smtp:
             print("  [→] Entrega direta falhou — tentando relay configurado ...")
             host, _, port = args.smtp.partition(":")
+            smtp_pass = args.smtp_pass or os.environ.get("STIGLITZ_SMTP_PASS")
             result = deliver_relay(host, int(port) if port else 587,
-                                   args.smtp_user, args.smtp_pass, helo,
+                                   args.smtp_user, smtp_pass, helo,
                                    forged_from, args.to, msg_bytes)
 
         send = {

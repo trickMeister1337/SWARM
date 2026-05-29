@@ -221,6 +221,46 @@ class TestDelivery(unittest.TestCase):
         self.assertFalse(result["accepted"])
         self.assertEqual(result["mx_used"], "relay.test")
 
+    def test_deliver_direct_not_accepted_when_rcpt_refused(self):
+        # smtplib.rcpt() NÃO lança em 550 — accepted deve refletir a rejeição.
+        import email_spoof_poc as esp
+
+        class RcptRefused(FakeSMTP):
+            def rcpt(self, addr):
+                self.commands.append(("rcpt", addr))
+                return (550, b"relaying denied")
+
+        result = esp.deliver_direct(["mx1.example.com"], "h", "ceo@target.com",
+                                    "victim@corp.com", b"RAW", smtp_factory=RcptRefused)
+        self.assertFalse(result["accepted"])
+
+    def test_deliver_direct_not_accepted_when_mail_refused(self):
+        import email_spoof_poc as esp
+
+        class MailRefused(FakeSMTP):
+            def mail(self, addr):
+                self.commands.append(("mail", addr))
+                return (553, b"sender rejected")
+
+        result = esp.deliver_direct(["mx1.example.com"], "h", "ceo@target.com",
+                                    "victim@corp.com", b"RAW", smtp_factory=MailRefused)
+        self.assertFalse(result["accepted"])
+
+    def test_deliver_direct_no_duplicate_send_when_quit_fails(self):
+        # DATA aceito (250); se quit() falhar, NÃO deve reenviar a outro MX.
+        import email_spoof_poc as esp
+
+        class QuitFails(FakeSMTP):
+            def quit(self):
+                raise OSError("connection dropped after DATA")
+
+        result = esp.deliver_direct(["mx1.example.com", "mx2.example.com"], "h",
+                                    "a@b.com", "c@d.com", b"RAW", smtp_factory=QuitFails)
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["mx_used"], "mx1.example.com")
+        # Apenas uma conexão deve ter sido aberta (sem retry ao mx2).
+        self.assertEqual(len(FakeSMTP.instances), 1)
+
 
 class TestGateAndOutput(unittest.TestCase):
     def test_roe_gate_passes_with_assume_yes(self):
@@ -268,13 +308,22 @@ class TestGateAndOutput(unittest.TestCase):
             self.assertNotIn("send", data)
             self.assertFalse(os.path.exists(os.path.join(d, "smtp_transcript.txt")))
 
-    def test_roe_gate_interactive_accepts_on_sim(self):
+    def test_roe_gate_interactive_accepts_on_eu_autorizo(self):
+        import builtins
+        from unittest import mock
+        import email_spoof_poc as esp
+        with mock.patch.object(builtins, "input", return_value="EU AUTORIZO"):
+            self.assertTrue(esp.roe_gate("a@b.com", "c@d.com", "direct",
+                                         assume_yes=False, interactive=True))
+
+    def test_roe_gate_interactive_rejects_sim(self):
+        # "SIM" não basta mais — o gate exige a frase canônica do toolkit.
         import builtins
         from unittest import mock
         import email_spoof_poc as esp
         with mock.patch.object(builtins, "input", return_value="SIM"):
-            self.assertTrue(esp.roe_gate("a@b.com", "c@d.com", "direct",
-                                         assume_yes=False, interactive=True))
+            self.assertFalse(esp.roe_gate("a@b.com", "c@d.com", "direct",
+                                          assume_yes=False, interactive=True))
 
     def test_roe_gate_interactive_rejects_other_input(self):
         import builtins
