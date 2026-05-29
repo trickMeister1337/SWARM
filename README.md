@@ -89,6 +89,7 @@ Output lands in `scan_<domain>_<timestamp>/` — open `stiglitz_report.html`
 | `stiglitz_diff.py` | Scan-to-scan comparison | Remediation tracking |
 | `stiglitz_trend.py` | Cross-engagement longitudinal analysis (N scans) | Quarterly/yearly risk trend |
 | `stiglitz_red_batch.sh` | Parallel exploit on multiple targets | Multi-target engagement |
+| `email_spoof_poc.py` | SPF/DMARC/DKIM spoofing PoC — analytical verdict + forged-email delivery (RoE-gated) | Demonstrate email spoofing (Phase 8 follow-up) |
 
 ## The scan pipeline
 
@@ -161,6 +162,11 @@ bash stiglitz_full.sh target.com
 
 # Multiple targets
 bash stiglitz_batch.sh -f targets.txt -p staging
+
+# Email spoofing PoC — analytical verdict only (sends nothing)
+python3 email_spoof_poc.py target.com
+# Deliver a forged email as proof (opt-in, RoE-gated — prompts for "EU AUTORIZO")
+python3 email_spoof_poc.py target.com --send --to victim@org.com
 ```
 
 ### Orchestrated scan with checkpoint & resume
@@ -313,8 +319,10 @@ osint.sh            Pre-engagement OSINT (10 phases)
 stiglitz_full.sh       End-to-end orchestrator
 stiglitz_report.py     HTML/JSON report generator
 stiglitz_diff.py       Scan comparison
+email_spoof_poc.py     SPF/DMARC/DKIM spoofing PoC (RoE-gated)
 lib/                Python modules (parsers, evidence, poc_validator, cve_enrich, …)
                     + bash modules (recon, crawl, sqli, xss, brute, msf, web)
+tests/              Unit + e2e + integration suite, fixtures and verify_audit.py
 Dockerfile          Containerized core scan pipeline
 docker-compose.yml  Build/run + optional Juice Shop demo target
 .github/workflows/  CI: bash syntax + Python compile + unit + integration tests
